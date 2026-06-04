@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="theme0">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>来聊天吧</title>
+    <link rel="icon" href="./ico/favicon.ico" type="image/x-icon">
+    
+
+    <link rel="stylesheet" href="styles/theme_color.css">
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/message.css">
+    <link rel="stylesheet" href="styles/components.css">
+</head>
+<body>
+    <div id="loading">
+        <div class="typing-indicator">
+            <div class="typing-circle"></div>
+            <div class="typing-circle"></div>
+            <div class="typing-circle"></div>
+            <div class="typing-shadow"></div>
+            <div class="typing-shadow"></div>
+            <div class="typing-shadow"></div>
+        </div>
+    </div>
+    <!-- 侧边栏 -->
+    <div id="sidebar-zone">
+        <button class="sidebar-btn" type="button" title="侧边栏">
+            <svg class="arrow" viewBox="0 0 512 512">
+                <path d="M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L256 173.3 86.6 342.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l192-192z"></path>
+            </svg>
+        </button>
+        <div class="sidebar"></div>
+    </div>
+
+    <!-- 主聊天区 -->
+    <main class="chat-layout">
+        <!-- 欢迎语 -->
+        <div id="title">
+            <h1>你好</h1>
+        </div>
+
+        <!-- 聊天框 -->
+        <div id="chat-container">
+            <div id="chatBox"></div>
+            <div id="comeToBottom" title="回到底部">
+                <img src="./ico/arrow.png" alt="↓">
+            </div>
+        </div>
+
+        <!-- 输入区 -->
+        <div id="inputArea">
+            <input type="text" autocomplete="off" id="userInput" placeholder="说点什么吧~">
+            <button class="sendbtn" type="button" onclick="sendMessage()">发送</button>
+        </div>
+    </main>
+
+    <!-- 菜单 -->
+    <div id="menu-zone">
+        <div id="menuBtn" title="菜单">
+            <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="6" r="2"/>
+                <circle cx="12" cy="12" r="2"/>
+                <circle cx="12" cy="18" r="2"/>
+            </svg>
+        </div>
+        <div id="menu">
+            <button class="value value1">
+                <svg viewBox="0 0 16 16"><path d="m1.5 13v1a.5.5 0 0 0 .3379.4731 18.9718 18.9718 0 0 0 6.1621 1.0269 18.9629 18.9629 0 0 0 6.1621-1.0269.5.5 0 0 0 .3379-.4731v-1a6.5083 6.5083 0 0 0 -4.461-6.1676 3.5 3.5 0 1 0 -4.078 0 6.5083 6.5083 0 0 0 -4.461 6.1676zm4-9a2.5 2.5 0 1 1 2.5 2.5 2.5026 2.5026 0 0 1 -2.5-2.5zm2.5 3.5a5.5066 5.5066 0 0 1 5.5 5.5v.6392a18.08 18.08 0 0 1 -11 0v-.6392a5.5066 5.5066 0 0 1 5.5-5.5z" fill="currentColor"></path></svg>
+                <span>个人资料</span>
+            </button>
+            <button class="value value2">
+                <svg viewBox="0 0 32 32"><path d="m17.074 30h-2.148c-1.038 0-1.914-.811-1.994-1.846l-.125-1.635c-.687-.208-1.351-.484-1.985-.824l-1.246 1.067c-.788.677-1.98.631-2.715-.104l-1.52-1.52c-.734-.734-.78-1.927-.104-2.715l1.067-1.246c-.34-.635-.616-1.299-.824-1.985l-1.634-.125c-1.035-.079-1.846-.955-1.846-1.993v-2.148c0-1.038.811-1.914 1.846-1.994l1.635-.125c.208-.687.484-1.351.824-1.985l-1.068-1.247c-.676-.788-.631-1.98.104-2.715l1.52-1.52c.734-.734 1.927-.779 2.715-.104l1.246 1.067c.635-.34 1.299-.616 1.985-.824l.125-1.634c.08-1.034.956-1.845 1.994-1.845h2.148c1.038 0 1.914.811 1.994 1.846l.125 1.635c.687.208 1.351.484 1.985.824l1.246-1.067c.787-.676 1.98-.631 2.715.104l1.52 1.52c.734.734.78 1.927.104 2.715l-1.067 1.246c.34.635.616 1.299.824 1.985l1.634.125c1.035.079 1.846.955 1.846 1.993v2.148c0 1.038-.811 1.914-1.846 1.994l-1.635.125c-.208.687-.484 1.351-.824 1.985l1.067 1.246c.677.788.631 1.98-.104 2.715l-1.52 1.52c-.734.734-1.928.78-2.715.104l-1.246-1.067c-.635.34-1.299.616-1.985.824l-.125 1.634c-.079 1.035-.955 1.846-1.993 1.846zm-5.835-6.373c.848.53 1.768.912 2.734 1.135.426.099.739.462.772.898l.18 2.341 2.149-.001.18-2.34c.033-.437.347-.8.772-.898.967-.223 1.887-.604 2.734-1.135.371-.232.849-.197 1.181.089l1.784 1.529 1.52-1.52-1.529-1.784c-.285-.332-.321-.811-.089-1.181.53-.848.912-1.768 1.135-2.734.099-.426.462-.739.898-.772l2.341-.18h-.001v-2.148l-2.34-.18c-.437-.033-.8-.347-.898-.772-.223-.967-.604-1.887-1.135-2.734-.232-.37-.196-.849.089-1.181l1.529-1.784-1.52-1.52-1.784 1.529c-.332.286-.81.321-1.181.089-.848-.53-1.768-.912-2.734-1.135-.426-.099-.739-.462-.772-.898l-.18-2.341-2.148.001-.18 2.34c-.033.437-.347.8-.772.898-.967.223-1.887.604-2.734 1.135-.37.232-.849.197-1.181-.089l-1.785-1.529-1.52 1.52 1.529 1.784c.285.332.321.811.089 1.181-.53.848-.912 1.768-1.135 2.734-.099.426-.462.739-.898.772l-2.341.18.002 2.148 2.34.18c.437.033.8.347.898.772.223.967.604 1.887 1.135 2.734.232.37.196.849-.089 1.181l-1.529 1.784 1.52 1.52 1.784-1.529c.332-.287.813-.32 1.18-.089z" id="XMLID_1646_" fill="currentColor"></path><path d="m16 23c-3.859 0-7-3.141-7-7s3.141-7 7-7 7 3.141 7 7-3.141 7-7 7zm0-12c-2.757 0-5 2.243-5 5s2.243 5 5 5 5-2.243 5-5-2.243-5-5-5z" fill="currentColor" id="XMLID_1645_"></path></svg>
+                <span>设置</span>
+            </button>
+
+            <button class="value value3">
+                <svg viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+                <span>主题</span>
+            </button>
+            <!-- 主题选择 -->
+            <div class="theme-select">
+                <label>
+                    <input type="radio" class="theme" checked name="themeRadio" value="theme0">
+                    <span>海阔天空</span>
+                </label>
+                <label>
+                    <input type="radio" class="theme" name="themeRadio" value="theme1">
+                    <span>夏日海岸</span>
+                </label>
+                <label>
+                    <input type="radio" class="theme" name="themeRadio" value="theme2">
+                    <span>樱雨绵绵</span>
+                </label>
+            </div>
+        </div>
+    </div>
+    <!-- 设置界面 -->
+    <div id="setting-container">
+        <div class="setting">
+            <div class="setting-head">
+                <span>设置</span>
+                <button type="button" class="close-setting" title="关闭设置界面">
+                    <svg viewBox="0 0 17 17" height="17" width="17">
+                        <line x1="0" y1="0" x2="17" y2="17" stroke="currentColor" stroke-width="2"/>
+                        <line x1="17" y1="0" x2="0" y2="17" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="setting-content">
+                <!-- 模型信息展示区 -->
+                <div id="model-info-view">
+                    <div class="info-item">
+                        <label>模型厂商：</label>
+                        <span id="display-merchant">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>模型名称：</label>
+                        <span id="display-model">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>API-key：</label>
+                          <span id="display-key">********</span>
+                    </div>
+                    <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
+                </div>
+
+                <!-- 修改模型配置的弹窗 -->
+                <div id="model-edit-modal" class="modal">
+                    <div class="modal-content">
+                        <form id="model-config-form">
+                            <div class="form-group">
+                                <label for="modelSelect">选择模型厂商:</label>
+                                <select id="modelSelect">
+                                    <option value="deepseek" checked>deepseek</option>
+                                    <option value="tongyi">通义千问</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>API-key:</label>
+                                <input type="password" id="apiKeyInput" placeholder="在这里输入api-key" autocomplete="off"/>
+                            </div>
+                            <div class="form-group">
+                                <label for="modelName">模型名:</label>
+                                <select id="modelName">
+                                    <option checked>deepseek-chat</option>
+                                    <option>deepseek-reasoner</option>
+                                </select>
+                            </div>
+                            <div class="modal-btns">
+                                <button type="button" id="cancel-modify-btn">取消</button>
+                                <button type="button" id="submit-model-btn" class="model-submit">确认修改</button>
+                            </div>
+                        </form>
+                        <!-- 验证过程中的加载动画 -->
+                        <div class="valid-loader"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示弹窗，就不使用浏览器的alert了 -->
+     <div id="alert-window-container">
+        <div class="alert-window">
+            <!-- 提示弹窗头 -->
+            <div class="alert-window-header">
+                <span>提示</span>
+            </div>
+            <div class="alert-window-content">
+                <p></p>
+            </div>
+            <div class="alert-window-button">
+                <button type="button">确定</button>
+            </div>
+        </div>
+     </div>
+
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
