@@ -11,6 +11,20 @@ class Config():
     # tokenizer配置
     tokenizer_path = join(root_dir_path, 'utils/deepseek_tokenizer')
 
+    # 回复配置
+    ANALYSIS_DEFAULT_RESULT = {  # 未分析出结果时的默认分析结果
+        "intent": "一般对话",
+        "emotion": "无情感波动",
+        "answer": "日常互动",
+    }
+
+    GENERATE_DEFAULT_RESULT = {  # json解析失败时的默认回复
+        "reply": ["嗯...我刚刚有点没组织好语言，你再说一遍嘛"],
+        "inner monologue": [],
+        "emotion": "困惑",
+        "action": "",
+    }
+
     # 数据库配置
     host = "localhost"
     user = 'root'

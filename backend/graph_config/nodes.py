@@ -4,22 +4,10 @@ from memory_config import memorier
 from utils import count_tokens, safe_parse_json
 import agent_config  # 改为导入模块，这样可以动态获取最新的代理
 from persona_config import persona
+from config import configer
 
 from time import time
 
-
-ANALYSIS_DEFAULT_RESULT = {
-    "intent": "一般对话",
-    "emotion": "无情感波动",
-    "answer": "日常互动",
-}
-
-GENERATE_DEFAULT_RESULT = {
-    "reply": ["嗯...我刚刚有点没组织好语言，你再说一遍嘛"],
-    "inner monologue": [],
-    "emotion": "困惑",
-    "action": "",
-}
 
 
 def get_last_message(response: dict):
@@ -132,7 +120,7 @@ def analysis(state: AIChatState) -> AIChatState:
         last_message = get_last_message(response)
 
         # 提取出回复并转成字典格式（使用容错解析）
-        ai_response = safe_parse_json(last_message.content, ANALYSIS_DEFAULT_RESULT)
+        ai_response = safe_parse_json(last_message.content, configer.ANALYSIS_DEFAULT_RESULT)
 
         state['analysis_result'] = ai_response
         state['total_tokens'] += get_total_tokens(last_message)
@@ -165,7 +153,7 @@ def generate(state: AIChatState) -> AIChatState:
 - 用户情绪：{state['analysis_result'].get('emotion', '无情绪波动')}
 - 建议回复：{state['analysis_result'].get('answer', '日常互动')}
 
-请根据以上信息，以你的人设自然地回复用户，回答可以分成多句回复给用户，像真人聊天。
+请根据以上信息，以你的人设自然地回复用户，回答可以分成1至5句回复给用户，像真人聊天。
 请直接回复JSON，不要有任何多余的内容。
 回答维度:
 1、"reply":你要回复给用户的话（列表形式）。
@@ -179,14 +167,14 @@ def generate(state: AIChatState) -> AIChatState:
             {"messages": [{"role": "user", "content": user_prompt}]}
         )
         last_message = get_last_message(response)
-        ai_response = safe_parse_json(last_message.content, GENERATE_DEFAULT_RESULT)
+        ai_response = safe_parse_json(last_message.content, configer.GENERATE_DEFAULT_RESULT)
 
         # 记录回复，情绪、动作
         reply = ai_response.get('reply', [])
         if isinstance(reply, str):
             reply = [reply]
         elif not isinstance(reply, list):
-            reply = GENERATE_DEFAULT_RESULT["reply"].copy()
+            reply = configer.GENERATE_DEFAULT_RESULT["reply"].copy()
         state['ai_response'] = reply
         state['ai_monologue'] = ai_response.get('inner monologue', '')
         state['ai_emotion'] = ai_response.get('emotion', '')
