@@ -164,7 +164,7 @@ export function  addEventToUi(){
         const modelNameSelect = document.getElementById('modelName');
         const merchant = modelSelect.value;
         
-        let options = ['deepseek-chat', 'deepseek-reasoner'];
+        let options = ['deepseek-v4-flash', 'deepseek-v4-pro'];
         if(merchant === 'tongyi'){
             options = ['qwen3-max', 'qwen-plus', 'qwen-turbo', 'qwen-flash'];
         }

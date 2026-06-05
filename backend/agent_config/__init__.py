@@ -10,7 +10,7 @@ load_dotenv()
 
 # 默认配置（从环境变量读取）
 DEFAULT_MERCHANT = os.getenv("DEFAULT_MODEL_MERCHANT", "deepseek")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL_NAME", "deepseek-chat")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL_NAME", "deepseek-v4-flash")
 
 # 根据默认厂商获取 API Key
 if DEFAULT_MERCHANT == "deepseek":
