@@ -2,11 +2,8 @@
 代理配置模块 - 提供全局代理实例和动态切换功能
 """
 import os
-from dotenv import load_dotenv
 from .agent_factory import create_agents
 from log_config import logger
-
-load_dotenv()
 
 # 默认配置（从环境变量读取）
 DEFAULT_MERCHANT = os.getenv("DEFAULT_MODEL_MERCHANT", "deepseek")

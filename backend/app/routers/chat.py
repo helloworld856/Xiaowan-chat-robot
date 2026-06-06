@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from schemas.chat import ChatRequest, ChatResponse
-from core.session import session, graph, get_new_state
+from core.session import session, graph
 import agent_config
 
 
@@ -14,8 +14,8 @@ async def chat(req: ChatRequest):
         raise HTTPException(400, "请先配置有效的模型")
 
     try:
-        state = get_new_state(req.user_input)
-        result = graph.invoke(state)
+        session["state"]['user_input'] = req.user_input
+        result = graph.invoke(session["state"])
         session["state"] = result
         return ChatResponse(
             response=result["ai_response"],

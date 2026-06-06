@@ -1,6 +1,7 @@
 from schemas.model import ModelConfigRequest, ModelConfigResponse
 from log_config import logger
 from fastapi import APIRouter
+import os
 
 router = APIRouter()
 
@@ -8,18 +9,19 @@ router = APIRouter()
 async def validate_and_switch_model(request: ModelConfigRequest):
     """验证模型配置并切换代理"""
     merchant = request.model_merchant.lower().strip()
-    api_key = request.api_key.strip()
+    # api_key = request.api_key.strip()
     model_name = request.model_name.lower().strip()
 
     # 参数检查
-    if not api_key:
-        return ModelConfigResponse(status=False, info=f"API Key为{api_key}")
+    # if not api_key:
+    #     return ModelConfigResponse(status=False, info=f"API Key为{api_key}")
     if not model_name:
         return ModelConfigResponse(status=False, info="模型名称不能为空")
 
     try:
         # 根据厂商创建 LLM 实例进行测试
         if merchant == "deepseek":
+            api_key = os.getenv("DEEPSEEK_API_KEY")
             from langchain_openai import ChatOpenAI
             llm = ChatOpenAI(
                 model=model_name,
@@ -29,6 +31,7 @@ async def validate_and_switch_model(request: ModelConfigRequest):
                 max_tokens=10,  # 测试用，省token
             )
         elif merchant == "tongyi":
+            api_key = os.getenv("TONGYI_API_KEY")
             from langchain_community.chat_models import ChatTongyi
             llm = ChatTongyi(
                 model=model_name,

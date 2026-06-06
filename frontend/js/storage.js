@@ -1,30 +1,20 @@
 //export把一个变量 / 函数“借给别的 JS 文件用”，这样别的文件可以import
 
-export function getVersion(){
-    console.log('获取后端版本...')
-    return localStorage.getItem('version');
-}
-
-export function setVersion(version) {
-    console.log('设置后端版本');
-    localStorage.setItem('version', version);
-}
-
 //清空人格
-export function clearPersona(){
-    console.log('清空人格');
-    localStorage.removeItem('persona');
-}
+// export function clearPersona(){
+//     console.log('清空人格');
+//     localStorage.removeItem('persona');
+// }
 
 //保存人格
-export function savePersona(persona){
-    localStorage.setItem('persona', JSON.stringify(persona));
-}
+// export function savePersona(persona){
+//     localStorage.setItem('persona', JSON.stringify(persona));
+// }
 
 //加载人格
-export function loadPersona(){
-    return JSON.parse(localStorage.getItem("persona") || "null");
-}
+// export function loadPersona(){
+//     return JSON.parse(localStorage.getItem("persona") || "null");
+// }
 
 
 //保存模型配置

@@ -22,6 +22,7 @@ app = create_app(VERSION)
 app.include_router(persona.router)
 app.include_router(misc.router)
 app.include_router(version.router)
+
 # post
 app.include_router(chat.router)
 app.include_router(model.router)

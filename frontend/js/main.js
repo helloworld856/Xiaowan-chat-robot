@@ -1,13 +1,5 @@
 //主入口
 import {
-    versionAPI,
- } from './api.js';
-import {
-    getVersion,
-    setVersion,
-    loadPersona,
-    savePersona,
-    clearPersona,
     loadModel,
 } from './storage.js';
 import {
@@ -21,45 +13,32 @@ import {
 import {personaAPI, modelAPI, historyAPI} from './api.js'
 import {showChatHistory, switchTheme} from './utils.js'
 import {addEventToUi}from './addevent.js'
-import { modelConfig } from './model_config.js';
+import { modelConfig, personaConfig } from './global_config.js';
 
 
 lockSendBtn();
 const loading = document.getElementById('loading');
 loading.classList.remove('close');
 
-//人格信息
-let persona = loadPersona();//首次加载时先使用localStorage里的persona
-
-updateUi(persona);
-
 async function init(){
     try{
-        console.log('检查版本...');
-        const {version} = await versionAPI();//{}就相当于序列解包
-        //版本不一样就清空历史对话并重新请求人格
-        if(version!==getVersion()){
-            console.log('版本不一致！');
+        console.log('拉取人格...');
 
-            //保存新版本号
-            setVersion(version);
+        //拉取人格
+        const res = await personaAPI();//{}就相当于序列解包
+        console.log('拉取到人格:',res);
+        personaConfig.persona_valid = true;
+        personaConfig.persona = {...res};
+        console.log('最终人格:', personaConfig.persona);
 
-            //清空人格
-            clearPersona();
-
-            //拉取新人格
-            persona = await personaAPI();
-            savePersona(persona);
-
-            //更新ui
-            updateUi(persona);
-        }
+        //更新ui
+        updateUi(personaConfig.persona);
 
         console.log('检查模型配置信息...');
         //获取浏览器缓存模型配置信息
         const savedConfig = loadModel(); // 使用 storage.js 的 loadModel，它会自动 JSON.parse
         
-        if (savedConfig && savedConfig.model && savedConfig.model.api_key) {
+        if (savedConfig && savedConfig.model) {
             try {
                 // 判断模型配置信息是否有效
                 const res = await modelAPI(savedConfig.model);
@@ -107,7 +86,6 @@ themeInput.forEach(radio=>{
 //版本检查及人格初始化
 await init();
 
-console.log('最终人格:', persona);
 unlockSendBtn();
 
 // 关闭加载画面

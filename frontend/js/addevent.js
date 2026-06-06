@@ -16,7 +16,7 @@ import { sendMessage } from './chat.js';
 import {switchTheme} from './utils.js'
 import {modelAPI} from './api.js'
 import {saveModel} from './storage.js'
-import {modelConfig} from './model_config.js'
+import {modelConfig} from './global_config.js'
 
 export function  addEventToUi(){
     //发送按钮

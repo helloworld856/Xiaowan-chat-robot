@@ -35,7 +35,7 @@ export function scrollToBottom(smooth = true) {// 启用平滑滚动
     });
 }
 
-//根据人格更新UI,同时也是设置默认人格
+//根据人格更新UI,同时也是设置人格
 export function updateUi(persona){
     if (!persona) return;
 
