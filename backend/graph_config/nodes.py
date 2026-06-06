@@ -43,7 +43,7 @@ def start_node(state: AIChatState) -> AIChatState:
         t = count_tokens(memorier.abstract_cache + ','.join(res))
         t += 4 * o  # 把每条对话的user,assistant,conversation_round都算上
 
-        if t > 100000:
+        if t > configer.compress_history_threshold:
             # 生成历史对话摘要
             memorier.compress_history()
 

@@ -1,11 +1,9 @@
 import pymysql
 from config import configer
 from log_config import logger
-import dotenv
 import os
 
 def init_db():
-    dotenv.load_dotenv()
     password = os.getenv('PASSWORD')
     # 连接数据库
     try:
@@ -59,8 +57,8 @@ def init_db():
         # 建立历史对话表，若不存在，则新建
         sql1 = """CREATE TABLE IF NOT EXISTS history_messages(  
             conversation_round INT PRIMARY KEY,
-            user TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-            assistant TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+            user MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+            assistant MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         );"""
 
         cursor.execute(sql1)

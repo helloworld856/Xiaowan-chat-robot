@@ -11,8 +11,8 @@ def create_app(version: str) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=False,  # ✅ 只有指定具体源时才有意义
+        allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["*"],
+        allow_headers=["Content-Type"],
     )
     return app

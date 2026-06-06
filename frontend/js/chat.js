@@ -3,7 +3,7 @@
 import {chatAPI} from './api.js'
 import { lockSendBtn, unlockSendBtn, scrollToBottom } from './ui.js';
 import { addUserMessage, addAssistantMessage} from './utils.js';
-import {modelConfig} from './model_config.js'
+import {modelConfig} from './global_config.js'
 
 
 export async function sendMessage() {

@@ -1,6 +1,6 @@
 //聊天气泡创建
 import { chatBox, scrollToBottom} from './ui.js';
-import {modelConfig} from './model_config.js'
+import {modelConfig} from './global_config.js'
 
 
 export async function addUserMessage(text){
