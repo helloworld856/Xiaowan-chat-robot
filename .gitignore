@@ -20,7 +20,9 @@ Thumbs.db
 
 .claude
 
-api接口文档.md
-
 app.log
+
+node_modules/
+
+dist/
 

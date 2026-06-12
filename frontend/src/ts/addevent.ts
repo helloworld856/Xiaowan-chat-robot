@@ -10,13 +10,14 @@ import {
     themeInput,
     menuSelect,
     windowAlertContainer,
-    windowAlertP
-}from './ui.js'
-import { sendMessage } from './chat.js';
-import {switchTheme} from './utils.js'
-import {modelAPI} from './api.js'
-import {saveModel} from './storage.js'
-import {modelConfig} from './global_config.js'
+    windowAlertP,
+    chatBox
+}from './ui.ts'
+import { sendMessage } from './chat.ts';
+import {switchTheme} from './utils.ts'
+import {modelAPI} from './api.ts'
+import {saveModel} from './storage.ts'
+import {modelConfig} from './global_config.ts'
 
 export function  addEventToUi(){
     //发送按钮
@@ -31,7 +32,6 @@ export function  addEventToUi(){
 
     //判断是否显示回到底部按钮
     chatBox.addEventListener('scroll', function(){
-        var comeToBottom = document.getElementById('comeToBottom');
         const isAtBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 120;
         if (isAtBottom){
             comeToBottom.style.display = 'none';
@@ -80,7 +80,7 @@ export function  addEventToUi(){
 
     //打开主题选择菜单的按钮
     menuSelect[2].addEventListener('click', function (){
-        const theme_select = document.querySelector('#menu .theme-select');//主题选择菜单
+        const theme_select = document.querySelector('#menu .theme-select') as HTMLDivElement;//主题选择菜单
         const theme_selectStyle = window.getComputedStyle(theme_select);
         if (theme_selectStyle.display === 'none'){
             menuSelect[2].classList.add('active');
@@ -115,14 +115,14 @@ export function  addEventToUi(){
     })
 
     // --- 设置界面交互逻辑 ---
-    const settingContainer = document.querySelector('#setting-container');
-    const modelEditModal = document.getElementById('model-edit-modal');
+    const settingContainer = document.querySelector('#setting-container') as HTMLDivElement;
+    const modelEditModal = document.getElementById('model-edit-modal') as HTMLDivElement;
     
     // 更新展示信息的函数
     const updateDisplayInfo = () => {
-        document.getElementById('display-merchant').innerText = modelConfig.model.model_merchant || '未配置';
-        document.getElementById('display-model').innerText = modelConfig.model.model_name || '未配置';
-        document.getElementById('display-key').innerText = modelConfig.model.api_key ? '********' : '未设置';
+        document.getElementById('display-merchant')!.innerText = modelConfig.model.model_merchant || '未配置';
+        document.getElementById('display-model')!.innerText = modelConfig.model.model_name || '未配置';
+        document.getElementById('display-key')!.innerText = '********';
     };
 
     // 1. 打开设置主界面
@@ -133,35 +133,33 @@ export function  addEventToUi(){
     });
 
     // 2. 关闭设置主界面
-    document.querySelector('.close-setting').addEventListener('click', () => {
+    document.querySelector('.close-setting')!.addEventListener('click', () => {
         settingContainer.classList.remove('open');
         modelEditModal.classList.remove('open'); // 同时关闭可能打开的弹窗
     });
 
     // 3. 打开修改配置弹窗
-    document.getElementById('open-modify-btn').addEventListener('click', () => {
+    document.getElementById('open-modify-btn')!.addEventListener('click', () => {
         modelEditModal.classList.add('open');
         
         // 初始化表单值为当前配置
-        const modelSelect = document.getElementById('modelSelect');
-        const apiKeyInput = document.getElementById('apiKeyInput');
-        const modelNameSelect = document.getElementById('modelName');
+        const modelSelect = document.getElementById('modelSelect') as HTMLSelectElement;
+        const modelNameSelect = document.getElementById('modelName') as HTMLSelectElement;
 
         modelSelect.value = modelConfig.model.model_merchant || 'deepseek';
         modelSelect.dispatchEvent(new Event('change')); // 触发联动更新模型名列表
-        apiKeyInput.value = modelConfig.model.api_key || '';
         modelNameSelect.value = modelConfig.model.model_name || '';
     });
 
     // 4. 取消修改
-    document.getElementById('cancel-modify-btn').addEventListener('click', () => {
+    document.getElementById('cancel-modify-btn')!.addEventListener('click', () => {
         modelEditModal.classList.remove('open');
     });
 
     // 5. 模型厂商与模型名联动逻辑
-    const modelSelect = document.getElementById('modelSelect');
+    const modelSelect = document.getElementById('modelSelect') as HTMLSelectElement;
     modelSelect.addEventListener('change', () => {
-        const modelNameSelect = document.getElementById('modelName');
+        const modelNameSelect = document.getElementById('modelName') as HTMLSelectElement;
         const merchant = modelSelect.value;
         
         let options = ['deepseek-v4-flash', 'deepseek-v4-pro'];
@@ -173,20 +171,15 @@ export function  addEventToUi(){
     });
 
     // 6. 提交修改并验证
-    const modelSubmitBtn = document.getElementById('submit-model-btn');
-    const validLoader = document.querySelector('.valid-loader');
-    const modalBtns = document.querySelector('.modal-btns');
+    const modelSubmitBtn = document.getElementById('submit-model-btn') as HTMLButtonElement;
+    const validLoader = document.querySelector('.valid-loader') as HTMLDivElement;
+    const modalBtns = document.querySelector('.modal-btns') as HTMLDivElement;
 
     modelSubmitBtn.addEventListener('click', async () => {
-        const merchant = document.getElementById('modelSelect').value;
-        const apiKey = document.getElementById('apiKeyInput').value.trim();
-        const modelName = document.getElementById('modelName').value;
+        const modelNameSelect = document.getElementById('modelName') as HTMLSelectElement;
+        const merchant = modelSelect.value;
+        const modelName = modelNameSelect.value;
 
-        if(!apiKey){
-            windowAlertP.innerText = '请输入API-KEY!';
-            windowAlertContainer.classList.add('open');
-            return;
-        }
 
         // 按钮进入加载状态
         modelSubmitBtn.disabled = true;
@@ -198,7 +191,6 @@ export function  addEventToUi(){
         try {
             const modelData = {
                 model_merchant: merchant,
-                api_key: apiKey,
                 model_name: modelName
             };
 
@@ -217,7 +209,7 @@ export function  addEventToUi(){
                 windowAlertContainer.classList.add('open');
 
                 modelEditModal.classList.remove('open'); // 关闭修改弹窗
-                const span = document.querySelector('#setting-container .setting-head span');
+                const span = document.querySelector<HTMLSpanElement>('#setting-container .setting-head span')!;
                 span.classList.remove('show-after');
             }
             else{
@@ -237,9 +229,9 @@ export function  addEventToUi(){
     });
 
     //提示弹窗
-    const windowAlertBtn = document.querySelector('.alert-window .alert-window-button button');
+    const windowAlertBtn = document.querySelector('.alert-window .alert-window-button button') as HTMLButtonElement;
     windowAlertBtn.addEventListener('click', (e)=>{
-        const windowAlert = document.querySelector('#alert-window-container');
+        const windowAlert = document.querySelector('#alert-window-container') as HTMLDivElement;
         windowAlert.classList.remove('open');
     })
 }
