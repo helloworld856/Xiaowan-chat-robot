@@ -1,23 +1,23 @@
 //主入口
 import {
     loadModel,
-} from './storage.js';
+} from './storage.ts';
 import {
     chatBox,
     updateUi,
     lockSendBtn,
     unlockSendBtn,
     themeInput
-} from './ui.js';
+} from './ui.ts';
 
-import {personaAPI, modelAPI, historyAPI} from './api.js'
-import {showChatHistory, switchTheme} from './utils.js'
-import {addEventToUi}from './addevent.js'
-import { modelConfig, personaConfig } from './global_config.js';
+import {personaAPI, modelAPI, historyAPI} from './api.ts'
+import {showChatHistory, switchTheme} from './utils.ts'
+import {addEventToUi}from './addevent.ts'
+import { modelConfig, personaConfig } from './global_config.ts';
 
 
 lockSendBtn();
-const loading = document.getElementById('loading');
+const loading = document.getElementById('loading') as HTMLDivElement;
 loading.classList.remove('close');
 
 async function init(){
@@ -36,7 +36,7 @@ async function init(){
 
         console.log('检查模型配置信息...');
         //获取浏览器缓存模型配置信息
-        const savedConfig = loadModel(); // 使用 storage.js 的 loadModel，它会自动 JSON.parse
+        const savedConfig = loadModel(); // 使用 storage.ts 的 loadModel，它会自动 JSON.parse
         
         if (savedConfig && savedConfig.model) {
             try {

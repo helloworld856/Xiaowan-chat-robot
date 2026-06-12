@@ -14,7 +14,7 @@ console.log('base_url:',base_url);
 //     return await res.json();
 // }
 
-export async function chatAPI(userInput){
+export async function chatAPI(userInput: string){
     const res = await fetch(
         `${base_url}/chat`,//请求的url
          {
@@ -30,7 +30,7 @@ export async function chatAPI(userInput){
 }
 
 //获取历史对话记录
-export async function historyAPI(num, front=true){
+export async function historyAPI(num: number, front=true){
         const res = await fetch(
             `${base_url}/history`,
             {
@@ -54,7 +54,7 @@ export async function personaAPI() {
 }
 
 //模型配置
-export async function modelAPI(model){
+export async function modelAPI(model:{model_name: string, model_merchant: string}){
     console.log('模型厂商:', model.model_merchant);
     console.log('API密钥: ********************');
     console.log('模型名:', model.model_name);

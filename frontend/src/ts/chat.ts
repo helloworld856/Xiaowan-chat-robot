@@ -1,9 +1,9 @@
 //发送消息并获得回复
 
-import {chatAPI} from './api.js'
-import { lockSendBtn, unlockSendBtn, scrollToBottom } from './ui.js';
-import { addUserMessage, addAssistantMessage} from './utils.js';
-import {modelConfig} from './global_config.js'
+import {chatAPI} from './api.ts'
+import { lockSendBtn, unlockSendBtn, scrollToBottom } from './ui.ts';
+import { addUserMessage, addAssistantMessage} from './utils.ts';
+import {modelConfig} from './global_config.ts'
 
 
 export async function sendMessage() {
@@ -12,14 +12,14 @@ export async function sendMessage() {
         return ;
     }
     
-    const message = {
-            conversation_round: null,
-            user: null,
-            assistant: null,
+    const message:{conversation_round:number, user:string, assistant:string[]} = {
+            conversation_round: 0,
+            user: '',
+            assistant: [],
         }
 
     //获取用户输入的内容
-    const input = document.getElementById("userInput");
+    const input = document.getElementById("userInput") as HTMLInputElement; //断言
     const text = input.value.trim();
 
     //如果用户没有输入内容就什么也不做
@@ -50,8 +50,12 @@ export async function sendMessage() {
         await addAssistantMessage(data.response);
 
     } catch (err) {
-        //如果网络或服务器出现错误，显示错误
-        window.alert("❌ 错误: " + err.message);
+        if (err instanceof Error) {
+            window.alert("❌ 错误: " + err.message);
+        } else {
+            // 如果抛出的不是 Error 对象（例如字符串、数字），这里统一处理
+            window.alert("❌ 发生未知错误");
+        }
     } finally {
         //无论结果如何，都把发送按钮解开
         unlockSendBtn();

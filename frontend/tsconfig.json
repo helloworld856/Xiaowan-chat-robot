@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    // === 编译目标与环境 ===
+    "target": "ES2020",                  // 编译后的 JS 语法级别，ES2020 兼容现代浏览器
+    "module": "ESNext",                  // 使用最新的 ES 模块语法，Vite 原生支持
+    "lib": ["ES2020", "DOM", "DOM.Iterable"], // 包含 DOM 类型，让 document/window 等浏览器 API 有类型提示
+
+    // === Vite 构建必需选项 ===
+    "isolatedModules": true,             // 确保每个文件可被独立转译，Vite/esbuild 单文件编译模式要求
+    "verbatimModuleSyntax": true,        // 强制 import type / export type 显式标注，避免运行时副作用
+    "moduleDetection": "force",          // 强制所有文件被视为模块，避免全局作用域污染
+    "skipLibCheck": true,                // 跳过 node_modules 中 .d.ts 文件的检查，提升 IDE 性能
+
+    // === 模块解析策略 ===
+    "moduleResolution": "bundler",       // 使用打包器解析策略，完美匹配 Vite 的模块解析行为
+    "allowImportingTsExtensions": true,  // 允许导入时写 .ts 后缀（如 import './foo.ts'），Vite 支持此写法
+    "noEmit": true,                      // TypeScript 仅做类型检查，不输出任何文件（构建由 Vite 负责）
+
+    // === 类型检查严格度 ===
+    "strict": true,                      // 开启所有严格类型检查选项，提供最大程度的类型安全
+    "allowJs": true                      // 允许 TS 文件中导入 .ts 文件，适配你项目中已有的 JS 代码
+  },
+
+  // === 文件包含范围 ===
+  "include": ["src", "global.d.ts"],                    // 仅对 src 目录下的文件进行类型检查，避免扫描无关文件导致卡顿
+
+  // === 项目引用（顶层字段，不可放在 compilerOptions 内）===
+  "references": [
+    { "path": "./tsconfig.node.json" }   // 引用 Node 端配置，解决 vite.config.ts 不在 tsconfig 范围内的报错
+  ]
+}

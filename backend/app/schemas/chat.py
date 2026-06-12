@@ -5,5 +5,5 @@ class ChatRequest(BaseModel):
     user_input: str
 
 class ChatResponse(BaseModel):
-    response: Optional[List]
+    response: List
     conversation_round: Optional[int]

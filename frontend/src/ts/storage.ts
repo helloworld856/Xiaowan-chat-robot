@@ -18,7 +18,7 @@
 
 
 //保存模型配置
-export function saveModel(modelConfig){
+export function saveModel(modelConfig: {model_valid: boolean, model: {model_name: string, model_merchant: string}}){
     localStorage.setItem('modelConfig', JSON.stringify(modelConfig));
 }
 

@@ -31,6 +31,7 @@ app.include_router(history.router)
 # 挂载静态资源
 front_dir = os.path.join(
     os.path.dirname(os.path.abspath(configer.root_dir_path)),
-    "frontend"
+    "frontend",
+    "dist"
 )
 app.mount("/", NoCacheStaticFiles(directory=front_dir, html=True), name="static")

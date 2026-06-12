@@ -10,9 +10,9 @@ def get_persona(request: Request):
     base_url = str(request.base_url)
 
     # AI头像
-    bot_avatar_url = urllib.parse.urljoin(base_url, '/'.join(["src", "avatars", persona.BOT_AVATAR]))
+    bot_avatar_url = urllib.parse.urljoin(base_url, '/'.join(["avatars", persona.BOT_AVATAR]))
     # 用户头像
-    user_avatar_url = urllib.parse.urljoin(base_url, '/'.join(['src', 'user_avatar.png']))
+    user_avatar_url = urllib.parse.urljoin(base_url, '/'.join(["avatars", 'user_avatar.png']))
 
     return {
         "BOT_AVATAR": bot_avatar_url,

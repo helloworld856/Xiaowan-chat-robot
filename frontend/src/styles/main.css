@@ -88,12 +88,13 @@
 /* 当页面未加载完成时，覆盖整个界面的加载动画----------*/
 #loading{    
     display: flex; 
-    position: absolute;
+    position: fixed;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(10px); 
     background-color: rgba(255, 255, 255, 0.403); 
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    inset:0;
     justify-content: center;
     align-items: center;
     z-index: 2000;
