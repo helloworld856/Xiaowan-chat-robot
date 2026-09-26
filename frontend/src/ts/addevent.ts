@@ -11,7 +11,9 @@ import {
     menuSelect,
     windowAlertContainer,
     windowAlertP,
-    chatBox
+    chatBox,
+    openPopup,
+    closePopup
 }from './ui.ts'
 import { sendMessage } from './chat.ts';
 import {switchTheme} from './utils.ts'
@@ -128,19 +130,21 @@ export function  addEventToUi(){
     // 1. 打开设置主界面
     menuSelect[1].addEventListener('click', (e) => {
         e.stopPropagation();
-        settingContainer.classList.add('open');
+        openPopup(settingContainer);
         updateDisplayInfo();
     });
 
     // 2. 关闭设置主界面
-    document.querySelector('.close-setting')!.addEventListener('click', () => {
-        settingContainer.classList.remove('open');
-        modelEditModal.classList.remove('open'); // 同时关闭可能打开的弹窗
+    document.querySelector('.close-setting')!.addEventListener('click', async () => {
+        if (await closePopup(settingContainer)) {
+            modelEditModal.classList.remove('open', 'closing');
+            modelEditModal.inert = false;
+        }
     });
 
     // 3. 打开修改配置弹窗
     document.getElementById('open-modify-btn')!.addEventListener('click', () => {
-        modelEditModal.classList.add('open');
+        openPopup(modelEditModal);
         
         // 初始化表单值为当前配置
         const modelSelect = document.getElementById('modelSelect') as HTMLSelectElement;
@@ -153,7 +157,7 @@ export function  addEventToUi(){
 
     // 4. 取消修改
     document.getElementById('cancel-modify-btn')!.addEventListener('click', () => {
-        modelEditModal.classList.remove('open');
+        void closePopup(modelEditModal);
     });
 
     // 5. 模型厂商与模型名联动逻辑
@@ -206,20 +210,20 @@ export function  addEventToUi(){
                 updateDisplayInfo();
                 
                 windowAlertP.innerText = '模型配置验证通过并已保存！';
-                windowAlertContainer.classList.add('open');
+                openPopup(windowAlertContainer);
 
-                modelEditModal.classList.remove('open'); // 关闭修改弹窗
+                void closePopup(modelEditModal); // 关闭修改弹窗
                 const span = document.querySelector<HTMLSpanElement>('#setting-container .setting-head span')!;
                 span.classList.remove('show-after');
             }
             else{
                 windowAlertP.innerText = '验证失败: ' + (res.info || '原因未知');
-                windowAlertContainer.classList.add('open');
+                openPopup(windowAlertContainer);
             }
         } catch (error) {
             console.error('验证过程出错:', error);
             windowAlertP.innerText = '请求失败，请检查网络或后端服务';
-            windowAlertContainer.classList.add('open');
+            openPopup(windowAlertContainer);
         } finally {
             modelSubmitBtn.disabled = false;
             modelSubmitBtn.innerText = '确认修改';
@@ -232,6 +236,6 @@ export function  addEventToUi(){
     const windowAlertBtn = document.querySelector('.alert-window .alert-window-button button') as HTMLButtonElement;
     windowAlertBtn.addEventListener('click', (e)=>{
         const windowAlert = document.querySelector('#alert-window-container') as HTMLDivElement;
-        windowAlert.classList.remove('open');
+        void closePopup(windowAlert);
     })
 }

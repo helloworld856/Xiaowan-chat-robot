@@ -6,18 +6,24 @@
     display: flex;
     align-items: flex-start;
     margin-bottom: 1rem;
-    animation: fadeIn 0.3s ease;
+    animation: messageFromRight 0.22s ease-out;
 }
 
-@keyframes fadeIn {
+/* 用户从右侧进入，小晚从左侧进入，位移保持轻微 */
+@keyframes messageFromRight {
     from {
         opacity: 0;
-        transform: translateY(10px);
+        transform: translateX(10px);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateX(0);
     }
+}
+
+@keyframes messageFromLeft {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
 }
 
 /* --- 头像通用 --- */
@@ -87,6 +93,7 @@
    ============================ */
 .assistant_message {
     flex-direction: column;
+    animation-name: messageFromLeft;
 }
 
 .assistant_bag {
@@ -116,7 +123,43 @@
     border-radius: 6px 12px 12px 12px;
 }
 
+/* 等待回复时的三个圆点，独立于页面最初的加载动画 */
+.chat-typing-dots {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+}
+
+.chat-typing-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: chatTyping 1.2s ease-in-out infinite;
+}
+
+.chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.chat-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes chatTyping {
+    0%, 60%, 100% { opacity: 0.4; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-4px); }
+}
+
 /* --- 响应式调整 --- */
+@media (prefers-reduced-motion: reduce) {
+    .chat-typing-dots span {
+        animation: none;
+        opacity: 0.6;
+    }
+
+    .user_message,
+    .assistant_message {
+        animation: none;
+    }
+}
+
 @media (max-width: 600px) {
     .user_bubble,
     .assistant_bubble {

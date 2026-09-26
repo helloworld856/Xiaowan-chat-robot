@@ -1,12 +1,13 @@
 //发送消息并获得回复
 
 import {chatAPI} from './api.ts'
-import { lockSendBtn, unlockSendBtn, scrollToBottom } from './ui.ts';
+import { lockSendBtn, unlockSendBtn, scrollToBottom, sendBtn, showTypingIndicator, hideTypingIndicator } from './ui.ts';
 import { addUserMessage, addAssistantMessage} from './utils.ts';
 import {modelConfig} from './global_config.ts'
 
 
 export async function sendMessage() {
+    if (sendBtn.disabled) return;
     if(!modelConfig.model_valid){
         window.alert('请先配置有效的模型!');
         return ;
@@ -24,21 +25,19 @@ export async function sendMessage() {
 
     //如果用户没有输入内容就什么也不做
     if (!text) return;
+    lockSendBtn(); // 在第一个 await 前锁住，防止重复发送。
 
     //记录用户输入
     message.user = text;
 
-    //把用户消息加入聊天框
-    await addUserMessage(text);
-
-    // 等DOM渲染完再滚动（用 requestAnimationFrame 确保渲染完成）
-    requestAnimationFrame(() => scrollToBottom());
-
-    //清空输入框，并在得到回复前禁止发送，但可以输入
+    //清空输入框，等待期间仍可以输入下一条消息
     input.value = '';
-    lockSendBtn();
 
     try {
+        await addUserMessage(text);
+        showTypingIndicator();
+        requestAnimationFrame(() => scrollToBottom());
+
         //请求回复
         const data = await chatAPI(text);
 
@@ -47,9 +46,11 @@ export async function sendMessage() {
         message.conversation_round = data.conversation_round;
 
         //把回复加入聊天框
+        hideTypingIndicator();
         await addAssistantMessage(data.response);
 
     } catch (err) {
+        hideTypingIndicator();
         if (err instanceof Error) {
             window.alert("❌ 错误: " + err.message);
         } else {
@@ -57,6 +58,7 @@ export async function sendMessage() {
             window.alert("❌ 发生未知错误");
         }
     } finally {
+        hideTypingIndicator();
         //无论结果如何，都把发送按钮解开
         unlockSendBtn();
         //inputBox.focus();//光标回到输入框

@@ -24,7 +24,7 @@
     border-radius: 12px;
     cursor: pointer;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    transition: all 0.4s ease;
+    transition: left 0.24s ease-out, transform 0.15s ease, box-shadow 0.2s ease;
     z-index: 101;
 }
 
@@ -48,7 +48,7 @@
     width: 1rem;
     height: 1rem;
     transform: rotate(90deg);
-    transition: transform 0.3s ease;
+    transition: transform 0.24s ease-out;
 }
 
 .sidebar-btn .arrow path {
@@ -79,6 +79,13 @@
 
 .sidebar-btn.active + .sidebar {
     display: block;
+    animation: sidebarSlideIn 0.24s ease-out;
+}
+
+/* 打开时从左侧滑入，时长与按钮移动一致 */
+@keyframes sidebarSlideIn {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
 }
 
 /* --- 菜单区域 --- */
@@ -136,10 +143,31 @@
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(10px);
     min-width: 160px;
+    transform-origin: top right;
 }
 
 #menuBtn.active + #menu {
     display: flex;
+    animation: menuOpen 0.2s ease-out;
+}
+
+/* 菜单从按钮所在的右上角轻轻展开 */
+@keyframes menuOpen {
+    from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 三个选项间隔 120 毫秒出现，整组动画在 480 毫秒内完成 */
+#menuBtn.active + #menu > .value {
+    animation: menuItemIn 0.24s ease-out backwards;
+}
+
+#menuBtn.active + #menu > .value2 { animation-delay: 0.12s; }
+#menuBtn.active + #menu > .value3 { animation-delay: 0.24s; }
+
+@keyframes menuItemIn {
+    from { opacity: 0; transform: translateX(6px); }
+    to { opacity: 1; transform: translateX(0); }
 }
 
 /* 菜单项 */
@@ -326,12 +354,72 @@
 
 .modal.open {
     display: flex;
-    animation: modalFadeIn 0.3s ease;
+    animation: modalFadeIn 0.24s ease-out;
+}
+
+.modal.open.closing {
+    animation: modalFadeOut 0.2s ease-in forwards;
 }
 
 @keyframes modalFadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modalFadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(10px); }
+}
+
+/* 遮罩淡入淡出，面板轻移；TS 等退出动画结束再隐藏。 */
+#setting-container.open,
+#alert-window-container.open {
+    animation: popupFadeIn 0.24s ease-out;
+}
+
+#setting-container.open.closing,
+#alert-window-container.open.closing {
+    animation: popupFadeOut 0.2s ease-in forwards;
+}
+
+#setting-container.open .setting,
+#alert-window-container.open .alert-window {
+    animation: popupPanelIn 0.24s ease-out;
+}
+
+#setting-container.open.closing .setting,
+#alert-window-container.open.closing .alert-window {
+    animation: popupPanelOut 0.2s ease-in forwards;
+}
+
+@keyframes popupFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes popupFadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes popupPanelIn {
+    from { transform: translateY(12px); }
+    to { transform: translateY(0); }
+}
+
+@keyframes popupPanelOut {
+    from { transform: translateY(0); }
+    to { transform: translateY(12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #setting-container.open,
+    #alert-window-container.open,
+    #setting-container.open .setting,
+    #alert-window-container.open .alert-window,
+    .modal.open {
+        animation: none !important;
+    }
 }
 
 .modal-content {
@@ -453,6 +541,20 @@
 }
 
 /* --- 响应式 --- */
+/* 尊重系统的“减少动态效果”设置 */
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-btn,
+    .sidebar-btn .arrow {
+        transition: none;
+    }
+
+    .sidebar-btn.active + .sidebar,
+    #menuBtn.active + #menu,
+    #menuBtn.active + #menu > .value {
+        animation: none;
+    }
+}
+
 @media (max-width: 600px) {
     .sidebar-btn {
         top: 0.8rem;

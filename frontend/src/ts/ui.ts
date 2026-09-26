@@ -37,6 +37,62 @@ export function scrollToBottom(smooth = true) {// 启用平滑滚动
     });
 }
 
+// 打开时取消退出状态，便于快速关闭后再次打开。
+export function openPopup(element: HTMLElement) {
+    element.classList.remove('closing');
+    element.inert = false;
+    element.classList.add('open');
+}
+
+// 等 CSS 退出动画结束再隐藏；减少动态效果时会立即完成。
+export async function closePopup(element: HTMLElement): Promise<boolean> {
+    if (!element.classList.contains('open') || element.classList.contains('closing')) return false;
+    element.classList.add('closing');
+    element.inert = true;
+    try {
+        // 只等待容器自身，避免等待子元素里无限循环的加载动画。
+        await Promise.all(element.getAnimations().map(animation => animation.finished));
+    } catch {
+        return false; // 重新打开时，原来的退出动画会被取消。
+    }
+    if (!element.classList.contains('closing')) return false;
+    element.classList.remove('open', 'closing');
+    element.inert = false;
+    return true;
+}
+
+// 临时提示只放在页面里，不写入聊天记录。
+export function showTypingIndicator() {
+    hideTypingIndicator();
+    const row = document.createElement('div');
+    row.id = 'chat-typing';
+    row.className = 'assistant_message';
+    row.setAttribute('role', 'status');
+    row.setAttribute('aria-label', '对方正在输入');
+
+    const bag = document.createElement('div');
+    bag.className = 'assistant_bag';
+    const avatar = document.createElement('div');
+    avatar.className = 'assistant_avatar';
+    const img = document.createElement('img');
+    img.src = window.BOT_AVATAR;
+    img.alt = '';
+    avatar.appendChild(img);
+    const triangle = document.createElement('div');
+    triangle.className = 'assistant_triangle';
+    const bubble = document.createElement('div');
+    bubble.className = 'assistant_bubble chat-typing-dots';
+    bubble.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 3; i++) bubble.appendChild(document.createElement('span'));
+    bag.append(avatar, triangle, bubble);
+    row.appendChild(bag);
+    chatBox.appendChild(row);
+}
+
+export function hideTypingIndicator() {
+    document.getElementById('chat-typing')?.remove();
+}
+
 //根据人格更新UI,同时也是设置人格
 export function updateUi(persona:{BOT_AVATAR: string, BOT_NAME: string, BOT_BIRTHDAY: string, BOT_BIRTHPLACE: string, USER_AVATAR: string}){
     if (!persona) return;
