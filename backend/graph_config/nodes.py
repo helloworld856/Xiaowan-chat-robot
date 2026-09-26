@@ -148,20 +148,23 @@ def generate(state: AIChatState) -> AIChatState:
 """
         # 构建提示词
         user_prompt += f"""【用户说】{user_input}
-【分析结果】
+【分析结果，仅供参考】
 - 用户意图：{state['analysis_result'].get('intent', '一般对话')}
 - 用户情绪：{state['analysis_result'].get('emotion', '无情绪波动')}
 - 建议回复：{state['analysis_result'].get('answer', '日常互动')}
 
-请根据以上信息，以你的人设自然地回复用户，回答可以分成1至5句回复给用户，像真人聊天。
-请直接回复JSON，不要有任何多余的内容。
+情绪分析和建议回复可能不准确，以用户原话和最近的对话为准，不必把情绪标签说出来。
+以你的人设回应用户当前说的事，不必为了符合分析结果而强行安慰、提问或转移话题。
+通常回复一条消息；有自然停顿时可以分成两条，不为凑条数拆句。用户认真提问时，按内容需要展开。
+请直接返回标准 JSON，所有键名和字符串都使用双引号，不要用代码块包裹，也不要输出额外文字。
 回答维度:
-1、"reply":你要回复给用户的话（列表形式）。
-2、"inner monologue":你的内心独白（列表形式）。
-3、"emotion":你的情绪（字符串形式）。
-4、"action":你的动作（字符串形式）。
+1、"reply":你要回复给用户的话（非空字符串列表，每个元素是一条完整消息）。
+2、"inner monologue":保留列表字段，默认返回空列表，不需要编写内心独白。
+3、"emotion":简短的情绪描述（字符串），没有明显变化时可写“平静”，不必刻意制造情绪。
+4、"action":保留字符串字段，默认返回空字符串，不需要编写动作。
+优先保证 reply 自然、连贯，不要为了补充其他字段而表演情绪或编造情节。
 回复格式:
-{{"reply":[...],"inner monologue":[...],"emotion":'...',"action":'...'}}"""
+{{"reply":["这里填写对用户的实际回复"],"inner monologue":[],"emotion":"平静","action":""}}"""
 
         response = agent_config.friend_agent.invoke(
             {"messages": [{"role": "user", "content": user_prompt}]}
