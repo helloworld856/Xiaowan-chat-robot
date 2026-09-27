@@ -5,24 +5,21 @@ from state_config import AIChatState
 
 
 def create_graph():
-    try:
-        logger.info('初始化工作流...')
-        builder = StateGraph(AIChatState)
+    logger.info('初始化工作流...')
+    builder = StateGraph(AIChatState)
 
-        builder.add_node('start', lambda state: start_node(state))
-        builder.add_node('end', lambda state: end_node(state))
-        builder.add_node('analysis', lambda state: analysis(state))
-        builder.add_node('generate', lambda state: generate(state))
+    builder.add_node('start', start_node)
+    builder.add_node('end', end_node)
+    builder.add_node('analysis', analysis)
+    builder.add_node('generate', generate)
 
-        builder.set_entry_point('start')
-        builder.add_edge('start', 'analysis')
-        builder.add_edge('analysis', 'generate')
-        builder.add_edge('generate', 'end')
-        builder.add_edge('end', END)
+    builder.set_entry_point('start')
+    builder.add_edge('start', 'analysis')
+    builder.add_edge('analysis', 'generate')
+    builder.add_edge('generate', 'end')
+    builder.add_edge('end', END)
 
-        logger.info('工作流初始化完成!\n' + "="*60)
-        return builder.compile()
-    except Exception as e:
-        logger.error(f'工作流初始化时出现错误:{e}')
+    logger.info('工作流初始化完成!\n' + "="*60)
+    return builder.compile()
 
 

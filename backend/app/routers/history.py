@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from memory_config import memorier
 from schemas.history import HistoryRequest, HistoryResponse
 

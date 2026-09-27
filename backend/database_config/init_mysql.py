@@ -5,30 +5,24 @@ import os
 
 def init_db():
     password = os.getenv('PASSWORD')
+    connection_config = {
+        'host': configer.host,
+        'user': configer.user,
+        'password': password,
+        'port': configer.port,
+        'charset': configer.charset,
+    }
     # 连接数据库
     try:
         logger.info('连接数据库中...')
-        db = pymysql.connect(
-            host=configer.host,
-            user=configer.user,
-            password=password,
-            port=configer.port,
-            charset=configer.charset,
-            database='XiaoWan'
-        )
+        db = pymysql.connect(database='XiaoWan', **connection_config)
 
         logger.info('数据库连接成功!')
     except pymysql.MySQLError as e:
         if e.args[0] == 1049:   # unknown database
             # 创建数据库
             logger.info('数据库不存在，创建数据库...')
-            db = pymysql.connect(
-                host=configer.host,
-                user=configer.user,
-                password=password,
-                port=configer.port,
-                charset=configer.charset,
-            )
+            db = pymysql.connect(**connection_config)
 
             with db.cursor() as cursor:
                 sql = "create database if not exists XiaoWan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
@@ -36,14 +30,7 @@ def init_db():
                 db.close()
 
             # 再次连接新创建的数据库
-            db = pymysql.connect(
-                host=configer.host,
-                user=configer.user,
-                password=password,
-                port=configer.port,
-                charset=configer.charset,
-                database='XiaoWan'
-            )
+            db = pymysql.connect(database='XiaoWan', **connection_config)
             logger.info('数据库连接成功!')
         else:
             raise

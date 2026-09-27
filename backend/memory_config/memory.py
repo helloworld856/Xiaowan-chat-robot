@@ -24,7 +24,7 @@ class MemoryManager:
 
     # 记录对话
     def record_message(self, message):
-        logger.info(f'记录本轮对话...')
+        logger.info('记录本轮对话...')
         # 先加入缓存
         self.history_cache.append(message)
         try:
@@ -43,47 +43,27 @@ class MemoryManager:
 
     # 加载历史对话
     def load_history(self, k, front=True):  # k=-1加载最后一条记录，k=0加载所有记录， k>0加载k条记录， front表示应从头开始加载，还是从尾开始加载
-        history_messages = []
         try:
             logger.info('加载历史对话...')
             cursor = self.db.cursor()
+            ascending = front if k >= 0 else not front
+            direction = 'asc' if ascending else 'desc'
+            limit = None if k == 0 else max(k, 1)
+            sql = f'select * from history_messages order by conversation_round {direction}'
+            params = None
+            if limit is not None:
+                sql += ' limit %s'
+                params = [limit]
+            cursor.execute(sql, params)
 
-            if k == 0:
-                logger.info('加载所有历史对话...')
-                if front:
-                    sql = 'select * from history_messages order by conversation_round;'
-                else:
-                    sql = 'select * from history_messages order by conversation_round desc;'
-                cursor.execute(sql)
-            elif k >= 0:
-                if front:
-                    logger.info(f'加载前{k}条历史对话...')
-                    sql = 'select * from history_messages order by conversation_round limit %s;'
-                else:
-                    logger.info(f'加载后{k}条历史对话...')
-                    sql = 'select * from history_messages order by conversation_round desc limit %s;'
-                cursor.execute(sql, [k])
-            else:
-                if front:
-                    logger.info('加载最后一条对话...')
-                    sql = 'select * from history_messages order by conversation_round desc limit 1;'
-                else:
-                    logger.info('加载第一条历史对话...')
-                    sql = 'select * from history_messages order by conversation_round limit 1;'
-                cursor.execute(sql)
-
-            all_data = cursor.fetchall()
-            for data in all_data:
-                history_messages.append({'conversation_round': data[0], 'user': data[1], 'assistant': data[2].split('|||')})
+            return [
+                {'conversation_round': data[0], 'user': data[1], 'assistant': data[2].split('|||')}
+                for data in cursor.fetchall()
+            ]
 
         except Exception as e:
             logger.info(f'加载历史对话失败:{e}，返回空列表')
-
-        # 返回历史对话（列表形式）
-        """
-        [{'conversation_round':...,'user':'...', 'assistant':'...'}, ...]
-        """
-        return history_messages
+            return []
 
     # 加载历史对话摘要
     def load_abstract(self):
@@ -93,7 +73,7 @@ class MemoryManager:
             sql = "select * from abstract_messages;"
             cursor.execute(sql)
             data = cursor.fetchone()
-            if data == None:
+            if data is None:
                 text = ''
             else:
                 text = data[0]
