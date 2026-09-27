@@ -1,4 +1,27 @@
-export const modelConfig: {model_valid: boolean, model: {model_name: string, model_merchant: string}} = {
+export interface ModelInfo {
+    model_name: string;
+    model_merchant: string;
+}
+
+export interface ModelConfig {
+    model_valid: boolean;
+    model: ModelInfo;
+}
+
+export interface PersonaInfo {
+    BOT_AVATAR: string;
+    BOT_NAME: string;
+    BOT_BIRTHDAY: string;
+    BOT_BIRTHPLACE: string;
+    USER_AVATAR: string;
+}
+
+export interface PersonaConfig {
+    persona_valid: boolean;
+    persona: PersonaInfo;
+}
+
+export const modelConfig: ModelConfig = {
     model_valid: false,//模型是否有效
     model:{//模型配置
         model_merchant: '',
@@ -7,7 +30,7 @@ export const modelConfig: {model_valid: boolean, model: {model_name: string, mod
 }
 
 
-export const personaConfig: {persona_valid: boolean, persona: {BOT_AVATAR: string, BOT_NAME: string, BOT_BIRTHDAY: string, BOT_BIRTHPLACE: string, USER_AVATAR: string}} = {
+export const personaConfig: PersonaConfig = {
     persona_valid: false,//人格是否有效
     persona: {
         BOT_AVATAR: '',

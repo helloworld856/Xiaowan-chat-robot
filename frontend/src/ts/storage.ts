@@ -1,3 +1,5 @@
+import type { ModelConfig } from './global_config.ts';
+
 //export把一个变量 / 函数“借给别的 JS 文件用”，这样别的文件可以import
 
 //清空人格
@@ -18,7 +20,7 @@
 
 
 //保存模型配置
-export function saveModel(modelConfig: {model_valid: boolean, model: {model_name: string, model_merchant: string}}){
+export function saveModel(modelConfig: ModelConfig){
     localStorage.setItem('modelConfig', JSON.stringify(modelConfig));
 }
 
@@ -35,5 +37,4 @@ export function loadModel(){
         return {};
     }
 }
-
 

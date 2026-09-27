@@ -1,3 +1,4 @@
+import type { PersonaInfo } from './global_config.ts';
 
 //使用as就是非空1断言，使用querySelector<HTMLButtonElement>(".sendbtn")依然有可能返回null，后面加上！就变成非空断言
 
@@ -50,8 +51,11 @@ export async function closePopup(element: HTMLElement): Promise<boolean> {
     element.classList.add('closing');
     element.inert = true;
     try {
-        // 只等待容器自身，避免等待子元素里无限循环的加载动画。
-        await Promise.all(element.getAnimations().map(animation => animation.finished));
+        const animations = element.getAnimations();
+        for (const child of element.children) {
+            animations.push(...child.getAnimations());
+        }
+        await Promise.all(animations.map(animation => animation.finished));
     } catch {
         return false; // 重新打开时，原来的退出动画会被取消。
     }
@@ -94,7 +98,7 @@ export function hideTypingIndicator() {
 }
 
 //根据人格更新UI,同时也是设置人格
-export function updateUi(persona:{BOT_AVATAR: string, BOT_NAME: string, BOT_BIRTHDAY: string, BOT_BIRTHPLACE: string, USER_AVATAR: string}){
+export function updateUi(persona: PersonaInfo){
     if (!persona) return;
 
     //标签页标题

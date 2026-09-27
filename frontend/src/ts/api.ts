@@ -1,4 +1,6 @@
 
+import type { ModelInfo } from './global_config.ts';
+
 // 自动使用当前页面的 host
 const base_url = window.location.origin;
 console.log('base_url:',base_url);
@@ -54,7 +56,7 @@ export async function personaAPI() {
 }
 
 //模型配置
-export async function modelAPI(model:{model_name: string, model_merchant: string}){
+export async function modelAPI(model: ModelInfo){
     console.log('模型厂商:', model.model_merchant);
     console.log('API密钥: ********************');
     console.log('模型名:', model.model_name);
