@@ -64,10 +64,7 @@ python run_serve.py
 
 > 当前设计会在每次启动后端时清空历史对话和历史摘要。
 
-## 文档与检查
-
-- [用户使用说明书](docs/用户使用说明书.md)：操作步骤、界面截图和常见问题。
-- [第三方来源记录](THIRD_PARTY_NOTICES.md)：依赖许可证、素材来源和待核实的权属信息。
+## 检查
 
 ```bash
 npm --prefix frontend test
@@ -75,4 +72,4 @@ npm --prefix frontend run typecheck
 python -m unittest discover -s tests -v
 ```
 
-测试隔离数据库与模型服务，不会执行后端启动时的清空操作。项目自有代码使用 MIT 许可，第三方组件按各自许可使用；当前 `LICENSE` 署名保留为 `helloworld`，登记申请前需核实其与实际权利人的对应关系。
+测试隔离数据库与模型服务，不会执行后端启动时的清空操作。项目自有代码使用 MIT 许可，第三方组件按各自许可使用。
