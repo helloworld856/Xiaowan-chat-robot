@@ -1,6 +1,7 @@
 from .tool_personas import TEXT_COMPRESS_PERSONA, ANALYSIS_PERSONA
-from .xiaowan import XiaoWan
+from .init_persona import Persona
 
-persona = XiaoWan
+P = Persona()
+persona = P
 
 __all__ = ["persona"]
