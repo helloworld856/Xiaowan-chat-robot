@@ -1,1 +1,1 @@
-from .init_mysql import init_db
+from .init_mysql import init_db, rollback_db

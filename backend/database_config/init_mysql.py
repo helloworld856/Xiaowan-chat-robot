@@ -1,7 +1,18 @@
+import os
+
 import pymysql
+
 from config import configer
 from log_config import logger
-import os
+
+
+def rollback_db(db):
+    """尝试回滚，连接失效时记录错误，避免覆盖原来的异常。"""
+    try:
+        db.rollback()
+    except Exception as error:
+        logger.warning(f'回滚数据库操作失败:{error}')
+
 
 def init_db():
     password = os.getenv('PASSWORD')
@@ -24,9 +35,11 @@ def init_db():
             logger.info('数据库不存在，创建数据库...')
             db = pymysql.connect(**connection_config)
 
-            with db.cursor() as cursor:
-                sql = "create database if not exists XiaoWan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-                cursor.execute(sql)
+            try:
+                with db.cursor() as cursor:
+                    sql = "create database if not exists XiaoWan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+                    cursor.execute(sql)
+            finally:
                 db.close()
 
             # 再次连接新创建的数据库
@@ -37,49 +50,41 @@ def init_db():
 
     try:
         logger.info('初始化历史对话表...')
-        # 建立数据表
-        # 创建数据库的游标
-        cursor = db.cursor()
-
-        # 建立历史对话表，若不存在，则新建
-        sql1 = """CREATE TABLE IF NOT EXISTS history_messages(  
-            conversation_round INT PRIMARY KEY,
-            user MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-            assistant MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-        );"""
-
-        cursor.execute(sql1)
-        # 清空历史对话表
-        sql2 = "delete from history_messages;"
-        cursor.execute(sql2)
+        with db.cursor() as cursor:
+            # 建立历史对话表，若不存在，则新建
+            sql = """CREATE TABLE IF NOT EXISTS history_messages(
+                conversation_round INT PRIMARY KEY,
+                user MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+                assistant MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+            );"""
+            cursor.execute(sql)
+            # 保留每次启动时清空历史对话的设置
+            cursor.execute("delete from history_messages;")
 
         db.commit()
         logger.info('历史对话表初始化成功!')
     except Exception as e:
+        rollback_db(db)
         logger.error(f'初始化历史对话表时，出现错误:{e}')
 
     try:
         logger.info('初始化历史对话摘要表...')
-        cursor = db.cursor()
-
-        # 建立历史对话摘要表
-        sql1 = """create table if not exists abstract_messages(
-            abstract MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-        );"""
-        cursor.execute(sql1)
-
-        # 清空历史对话摘要表
-        sql2 = 'delete from abstract_messages;'
-        cursor.execute(sql2)
-
-        # 插入点数据，否则后面无法更新
-        cursor.execute("INSERT INTO abstract_messages (abstract) VALUES ('');")
+        with db.cursor() as cursor:
+            # 建立历史对话摘要表
+            sql = """create table if not exists abstract_messages(
+                abstract MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+            );"""
+            cursor.execute(sql)
+            # 保留每次启动时清空摘要的设置
+            cursor.execute('delete from abstract_messages;')
+            # 插入一条空摘要，否则后面无法更新
+            cursor.execute("INSERT INTO abstract_messages (abstract) VALUES ('');")
 
         db.commit()
         logger.info('摘要表初始化成功!')
     except Exception as e:
+        rollback_db(db)
         logger.error(f'初始化摘要表时，出现错误{e}')
-
 
     return db
 

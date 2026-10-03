@@ -1,9 +1,9 @@
-from os.path import join, abspath, dirname
+from os.path import abspath, dirname, join
 
 
-class Config():
+class Config:
     # 配置根目录的绝对路径
-    root_dir_path = dirname(abspath('..config'))
+    root_dir_path = dirname(dirname(abspath(__file__)))
 
     # 日志配置
     log_save_path = join(root_dir_path, 'log_config/app.log')

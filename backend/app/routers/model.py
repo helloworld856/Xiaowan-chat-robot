@@ -38,13 +38,17 @@ async def validate_and_switch_model(request: ModelConfigRequest):
 
     except Exception as e:
         error_msg = str(e)
+        normalized_error = error_msg.lower()
         logger.warning(f"模型配置失败: {error_msg}")
 
-        if "401" in error_msg or "Unauthorized" in error_msg or "Invalid" in error_msg.lower():
+        if any(
+            marker in normalized_error
+            for marker in ("401", "unauthorized", "invalid_api_key", "invalid api key")
+        ):
             return ModelConfigResponse(status=False, info="API Key 无效或已过期")
-        elif "404" in error_msg or "not found" in error_msg.lower():
+        elif "404" in normalized_error or "not found" in normalized_error:
             return ModelConfigResponse(status=False, info=f"模型 {model_name} 不存在")
-        elif "timeout" in error_msg.lower():
+        elif "timeout" in normalized_error or "timed out" in normalized_error:
             return ModelConfigResponse(status=False, info="请求超时，请检查网络")
         else:
             return ModelConfigResponse(status=False, info=f"验证失败: {error_msg}")

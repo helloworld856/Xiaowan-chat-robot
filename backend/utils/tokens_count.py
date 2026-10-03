@@ -1,21 +1,19 @@
-from transformers import AutoTokenizer
 from typing import Optional
+
+from transformers import AutoTokenizer
+
 from config import configer
 
 _TOKENIZER_CACHE: Optional[AutoTokenizer] = None
-_LOCAL_TOKENIZER_PATH: Optional[str] = None
 
 
 def _get_tokenizer() -> AutoTokenizer:
     """模块级缓存 tokenizer，避免每次 count_tokens 都重复加载。"""
-    global _TOKENIZER_CACHE, _LOCAL_TOKENIZER_PATH
-
-    if _LOCAL_TOKENIZER_PATH is None:
-        _LOCAL_TOKENIZER_PATH = configer.tokenizer_path
+    global _TOKENIZER_CACHE
 
     if _TOKENIZER_CACHE is None:
         _TOKENIZER_CACHE = AutoTokenizer.from_pretrained(
-            _LOCAL_TOKENIZER_PATH,
+            configer.tokenizer_path,
             trust_remote_code=True,
             use_fast=True,
         )

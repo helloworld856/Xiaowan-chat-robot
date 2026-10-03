@@ -1,13 +1,12 @@
-from state_config import AIChatState
-from log_config import logger
-from memory_config import memorier
-from utils import count_tokens, safe_parse_json
-import agent_config  # 改为导入模块，这样可以动态获取最新的代理
-from persona_config import persona
-from config import configer
-
 from time import time
 
+import agent_config  # 动态获取最新的代理
+from config import configer
+from log_config import logger
+from memory_config import memorier
+from persona_config import persona
+from state_config import AIChatState
+from utils import count_tokens, safe_parse_json
 
 
 def get_last_message(response: dict):
@@ -133,6 +132,7 @@ def analysis(state: AIChatState) -> AIChatState:
         logger.error(f'执行结点"analysis"时出现错误:{e}')
         raise
 
+
 # 生成回复结点
 def generate(state: AIChatState) -> AIChatState:
     try:
@@ -177,7 +177,9 @@ def generate(state: AIChatState) -> AIChatState:
         reply = ai_response.get('reply', [])
         if isinstance(reply, str):
             reply = [reply]
-        elif not isinstance(reply, list):
+        if not isinstance(reply, list) or not reply or any(
+            not isinstance(part, str) or not part.strip() for part in reply
+        ):
             reply = configer.GENERATE_DEFAULT_RESULT["reply"].copy()
         state['ai_response'] = reply
         state['ai_monologue'] = ai_response.get('inner monologue', '')
