@@ -23,10 +23,10 @@ class MemoryManager:
         logger.info('记忆管理器初始化完成！')
 
     # 记录对话
-    def record_message(self, message):
+    def record_message(self, message) -> bool:
         logger.info('记录本轮对话...')
-        # 先加入缓存
-        self.history_cache.append(message)
+        # 保存独立副本，后续修改轮次或回复不会改写历史。
+        self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
         try:
             sql = 'insert into history_messages values(%s,%s,%s)'
             cursor = self.db.cursor()
@@ -36,10 +36,15 @@ class MemoryManager:
 
             # 提交修改
             self.db.commit()
+            return True
         except Exception as e:
             # 回滚操作
-            self.db.rollback()
+            try:
+                self.db.rollback()
+            except Exception as rollback_error:
+                logger.warning(f'回滚对话记录失败:{rollback_error}')
             logger.error(f'记录对话时出现错误:{e}')
+            return False
 
     # 加载历史对话
     def load_history(self, k, front=True):  # k=-1加载最后一条记录，k=0加载所有记录， k>0加载k条记录， front表示应从头开始加载，还是从尾开始加载

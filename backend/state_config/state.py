@@ -9,6 +9,8 @@ class AIChatState(TypedDict):
     analysis_result: Dict
     # 回复
     ai_response: List
+    # 本轮对话是否已保存到数据库
+    saved: bool
     # 内心独白
     ai_monologue: Optional[str]
     # 情绪

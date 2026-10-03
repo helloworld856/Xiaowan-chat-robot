@@ -26,3 +26,7 @@ node_modules/
 
 dist/
 
+.vite/
+.vite-temp/
+*.tsbuildinfo
+

@@ -1,5 +1,5 @@
 
-import type { ModelInfo } from './global_config.ts';
+import type { ModelInfo, ChatResponse } from './global_config.ts';
 
 // 自动使用当前页面的 host
 const base_url = window.location.origin;
@@ -7,16 +7,7 @@ console.log('base_url:',base_url);
 
 //只负责取数据，不碰DOM、localstorage
 
-//向接口发送请求,await是等待网络请求完成，否则代码会继续执行而不等服务器响应
-// export async  function versionAPI(){
-//     const res = await fetch(`${base_url}/version`);//fetch是异步操作
-//
-//     //如果服务器出错则报错
-//     if (!res.ok) throw new Error("version接口失败");
-//     return await res.json();
-// }
-
-export async function chatAPI(userInput: string){
+export async function chatAPI(userInput: string): Promise<ChatResponse>{
     const res = await fetch(
         `${base_url}/chat`,//请求的url
          {
@@ -37,6 +28,7 @@ export async function historyAPI(num: number, front=true){
             `${base_url}/history`,
             {
                 method:'post',
+                signal: AbortSignal.timeout(15000),
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ num: num, front: front })
             }
@@ -50,7 +42,7 @@ export async function historyAPI(num: number, front=true){
 
 //请求人格
 export async function personaAPI() {
-    const res = await fetch(`${base_url}/persona`);
+    const res = await fetch(`${base_url}/persona`, {signal: AbortSignal.timeout(15000)});
     if (!res.ok) throw new Error("persona 接口失败");
     return await res.json();
 }
@@ -58,12 +50,12 @@ export async function personaAPI() {
 //模型配置
 export async function modelAPI(model: ModelInfo){
     console.log('模型厂商:', model.model_merchant);
-    console.log('API密钥: ********************');
     console.log('模型名:', model.model_name);
     const res = await fetch(
         `${base_url}/model`,//请求的url
          {
             method:"post",//请求的方法
+            signal: AbortSignal.timeout(30000),
             headers: { "Content-Type": "application/json" },//请求头，告诉服务器发送的是什么格式的数据
             body: JSON.stringify({
                     model_merchant: model.model_merchant||'',

@@ -1,7 +1,7 @@
 //发送消息并获得回复
 
 import {chatAPI} from './api.ts'
-import { lockSendBtn, unlockSendBtn, scrollToBottom, sendBtn, showTypingIndicator, hideTypingIndicator } from './ui.ts';
+import { lockSendBtn, unlockSendBtn, scrollToBottom, sendBtn, showTypingIndicator, hideTypingIndicator, showAlert } from './ui.ts';
 import { addUserMessage, addAssistantMessage} from './utils.ts';
 import {modelConfig} from './global_config.ts'
 
@@ -35,6 +35,9 @@ export async function sendMessage() {
         //把回复加入聊天框
         hideTypingIndicator();
         await addAssistantMessage(data.response);
+        if (data.saved === false) {
+            showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
+        }
 
     } catch (err) {
         hideTypingIndicator();
@@ -48,7 +51,6 @@ export async function sendMessage() {
         hideTypingIndicator();
         //无论结果如何，都把发送按钮解开
         unlockSendBtn();
-        //inputBox.focus();//光标回到输入框
     }
 }
 

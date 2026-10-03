@@ -4,9 +4,10 @@ FastAPI 实例 + 中间件
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .config import SOFTWARE_NAME
 
 def create_app(version: str) -> FastAPI:
-    app = FastAPI(version=version)
+    app = FastAPI(title=SOFTWARE_NAME, version=version)
 
     app.add_middleware(
         CORSMiddleware,

@@ -1,24 +1,5 @@
 import type { ModelConfig } from './global_config.ts';
 
-//export把一个变量 / 函数“借给别的 JS 文件用”，这样别的文件可以import
-
-//清空人格
-// export function clearPersona(){
-//     console.log('清空人格');
-//     localStorage.removeItem('persona');
-// }
-
-//保存人格
-// export function savePersona(persona){
-//     localStorage.setItem('persona', JSON.stringify(persona));
-// }
-
-//加载人格
-// export function loadPersona(){
-//     return JSON.parse(localStorage.getItem("persona") || "null");
-// }
-
-
 //保存模型配置
 export function saveModel(modelConfig: ModelConfig){
     localStorage.setItem('modelConfig', JSON.stringify(modelConfig));

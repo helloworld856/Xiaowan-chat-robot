@@ -21,6 +21,12 @@ export interface PersonaConfig {
     persona: PersonaInfo;
 }
 
+export interface ChatResponse {
+    response: string[];
+    conversation_round: number | null;
+    saved: boolean;
+}
+
 export const modelConfig: ModelConfig = {
     model_valid: false,//模型是否有效
     model:{//模型配置

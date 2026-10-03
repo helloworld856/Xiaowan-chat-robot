@@ -45,6 +45,11 @@ export function openPopup(element: HTMLElement) {
     element.classList.add('open');
 }
 
+export function showAlert(message: string) {
+    windowAlertP.innerText = message;
+    openPopup(windowAlertContainer);
+}
+
 // 等 CSS 退出动画结束再隐藏；减少动态效果时会立即完成。
 export async function closePopup(element: HTMLElement): Promise<boolean> {
     if (!element.classList.contains('open') || element.classList.contains('closing')) return false;

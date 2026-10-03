@@ -1,11 +1,11 @@
 """
-版本 & env
+软件名称与版本
 """
 
-import time
 from log_config import logger
 
 
 
-VERSION = f"v{int(time.time())}"
+SOFTWARE_NAME = "小晚 AI 角色对话软件"
+VERSION = "1.0.0"
 logger.info(f"version:{VERSION}")

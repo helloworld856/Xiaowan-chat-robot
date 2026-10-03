@@ -1,16 +1,18 @@
 {
   "name": "frontend",
   "version": "1.0.0",
-  "description": "",
+  "description": "小晚 AI 角色对话软件：单人本地聊天、模型切换与对话摘要",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test tests/*.test.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "typescript": "^6.0.3",

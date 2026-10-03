@@ -32,6 +32,7 @@ def start_node(state: AIChatState) -> AIChatState:
 
         # 清空上轮的回复
         state['ai_response'] = []
+        state['saved'] = False
 
         # 计算tokens
         res = []
@@ -64,8 +65,8 @@ def start_node(state: AIChatState) -> AIChatState:
 def end_node(state: AIChatState) -> AIChatState:
     logger.info('执行结点"end_node"...')
 
-    # 将本轮对话写入文件
-    memorier.record_message(state['message'])
+    # 保存失败时仍返回回复，由接口明确告知前端。
+    state['saved'] = memorier.record_message(state['message'])
 
     logger.info(f'本轮对话:{state["message"]}')
     logger.info(f'\n她的回复:{state["ai_response"]}\n她的内心独白:{state["ai_monologue"]}\n她的情绪:{state["ai_emotion"]}\n她的动作:{state["ai_action"]}')

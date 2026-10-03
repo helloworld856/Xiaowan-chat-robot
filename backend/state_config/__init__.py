@@ -4,6 +4,7 @@ State: AIChatState = {
     "user_input": '',
     "analysis_result": {},
     "ai_response": [],
+    'saved': False,
     'ai_monologue': '',
     'ai_emotion': '',
     'ai_action': '',

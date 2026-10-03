@@ -20,7 +20,6 @@ def get_logger():
         datefmt="%Y-%m-%d %H:%M:%S",    # 设置输出的时间格式
         handlers=[
             logging.FileHandler(configer.log_save_path, mode='a', encoding='utf-8'),  # mode='a' 追加模式
-            # logging.StreamHandler()  # 创建控制台处理器，将日志输出到控制台
         ]
     )
 

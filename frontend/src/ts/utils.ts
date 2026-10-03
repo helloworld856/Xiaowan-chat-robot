@@ -1,6 +1,5 @@
 //聊天气泡创建
 import {chatBox, scrollToBottom} from './ui.ts';
-import {modelConfig} from './global_config.ts';
 import type {ConversationItem} from './global_config.ts';
 
 function createAvatar(src: string, alt: string, className: string) {
@@ -83,12 +82,4 @@ export function switchTheme(theme:string){
     document.documentElement.className = theme;
     localStorage.setItem('theme', theme);
     console.log('主题已切换：', theme);
-}
-
-export function model_invalid(){
-    if (!modelConfig.model_valid){
-        window.alert('请配置有效的模型！');
-        return false;
-    }
-    return true;
 }

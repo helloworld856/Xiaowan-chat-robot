@@ -7,3 +7,4 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: List
     conversation_round: Optional[int]
+    saved: bool

@@ -20,6 +20,7 @@ async def chat(req: ChatRequest):
         return ChatResponse(
             response=result["ai_response"],
             conversation_round=result["message"]["conversation_round"] - 1,
+            saved=result["saved"],
         )
     except Exception as e:
         raise HTTPException(500, f"AI 处理失败: {e}")
