@@ -240,22 +240,12 @@
     justify-content: center;
     align-items: center;
     z-index: 999;
+    background-color: rgba(40, 40, 40, 0.3);
 }
 #setting-container.open{
     display: flex;
 }
 
-/* 模糊遮罩固定在独立层，面板移动时无需跟着重新栅格化。 */
-#setting-container::before{
-    content: "";
-    position: absolute;
-    inset: 0;
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-    background-color: rgba(0, 0, 0, 0.3);
-    pointer-events: none;
-    z-index: 0;
-}
 
 /* 设置界面 */
 #setting-container .setting{

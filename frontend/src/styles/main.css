@@ -11,7 +11,7 @@
 #alert-window-container{
     display: none;
     position: absolute;
-    background-color: rgba(144, 142, 142, 0.795); 
+    background-color: rgba(174, 172, 172, 0.795); 
     width: 100vw;
     height: 100vh;
     justify-content: center;
@@ -31,7 +31,7 @@
     background: var(--setting-bg);
     border-radius: 15px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    animation: appear 0.3s linear;
+    animation: appear 0.1s linear;
 }
 
 @keyframes appear{
