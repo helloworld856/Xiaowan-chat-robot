@@ -72,15 +72,3 @@ python run_serve.py
 > 当前设计会在每次启动后端时清空历史对话和历史摘要。
 
 使用Vite开发时，前端修改会自动刷新；访问 `8000` 时，修改前端后需重新执行 `npm --prefix frontend run build`（在项目根目录）。修改后端后需重启后端服务。
-
-## 检查
-
-在项目根目录执行：
-
-```bash
-npm --prefix frontend test
-npm --prefix frontend run typecheck
-python -m unittest discover -s tests -v
-```
-
-测试隔离数据库与模型服务，不会执行后端启动时的清空操作。项目自有代码使用MIT许可，第三方组件按各自许可使用。
