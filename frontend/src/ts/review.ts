@@ -10,7 +10,6 @@ export function initChatReview() {
     const search = document.getElementById('review-search') as HTMLInputElement;
     const list = document.getElementById('review-list')!;
     const count = document.getElementById('review-count')!;
-    const close = document.getElementById('review-close') as HTMLButtonElement;
     let selected: HTMLElement | undefined;
     let highlightTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -21,7 +20,6 @@ export function initChatReview() {
         sidebarBtn.focus();
     }
 
-    close.addEventListener('click', closeReview);
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && sidebarBtn.classList.contains('active')) closeReview();
     });

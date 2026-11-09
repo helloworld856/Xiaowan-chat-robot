@@ -30,9 +30,6 @@ function renderPreferences() {
     input('split-reply').checked = preferences.split_reply;
     select('send-shortcut').value = preferences.send_shortcut;
     updatePlaybackControl();
-    const hint = preferences.send_shortcut === 'enter' ? 'Enter 发送 · Shift+Enter 换行' : 'Ctrl/⌘+Enter 发送 · Enter 换行';
-    document.getElementById('send-shortcut-hint')!.textContent = hint;
-    document.getElementById('userInput')!.setAttribute('title', hint);
 }
 
 export async function loadSettings() {
