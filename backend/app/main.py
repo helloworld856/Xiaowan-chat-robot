@@ -6,7 +6,7 @@ sys.path.append(current_dir)
 
 from core.app import create_app
 from core.config import VERSION
-from routers import chat, persona, model, misc, history, version
+from routers import chat, persona, model, misc, history, version, settings
 from static.mount import NoCacheStaticFiles
 
 from config import configer
@@ -22,6 +22,7 @@ app = create_app(VERSION)
 app.include_router(persona.router)
 app.include_router(misc.router)
 app.include_router(version.router)
+app.include_router(settings.router)
 
 # post
 app.include_router(chat.router)

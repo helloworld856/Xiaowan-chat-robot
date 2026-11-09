@@ -1,7 +1,55 @@
 /* ========== 主题色管理 ========== */
 
+/* 默认主题 */
+:root{
+    /* 背景 */
+    --bg-gradient: linear-gradient(rgb(255, 255, 255)100%);
+
+    /* 聊天容器 */
+    --chat-bg: rgba(214, 214, 214, 0.414);
+    --chat-border: rgba(173, 172, 172, 0.3);
+    --chat-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+
+    /* 消息气泡 */
+    --user-bubble: skyblue;
+    --user-text: #fff;
+    --bot-bubble: rgba(255, 255, 255, 0.95);
+    --bot-text: #333;
+
+    /* 输入区域 */
+    --input-bg: rgba(227, 227, 227, 0.9);
+    --input-border: rgba(42, 42, 43, 0.3);
+    --input-focus: rgba(204, 204, 207, 0.5);
+
+    /* 发送按钮 */
+    --btn-bg: linear-gradient(rgba(245, 249, 249, 0.949));
+    --btn-hover: linear-gradient(rgba(153, 153, 153, 0.804));
+    --btn-text: #282727;
+
+    /* 滚动条 */
+    --scroll-track: rgba(0, 0, 0, 0.05);
+    --scroll-thumb: rgba(102, 126, 234, 0.3);
+    --scroll-thumb-hover: rgba(102, 126, 234, 0.5);
+
+    /* 菜单 */
+    --menu-bg: rgba(255, 255, 255, 0.95);
+    --menu-hover: rgba(102, 126, 234, 0.1);
+    --menu-text: #333;
+
+    /* 提示弹窗按钮 */
+    --alert-color: #9ea2a29d;
+
+    /* 标题 */
+    --title-color: #3c3c3c;
+    --title-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+
+    /* 设置界面 */
+    --setting-bg: rgb(245, 244, 244);
+    
+}
+
 /* 默认主题：海阔天空（清新蓝） */
-:root {
+html.theme1 {
     /* 背景 */
     --bg-gradient: linear-gradient(135deg, rgb(205, 228, 236) 0%, rgb(148, 209, 234) 50%, rgb(66, 186, 234) 100%);
     
@@ -49,7 +97,7 @@
 }
 
 /* 主题一：夏日海岸（温暖橙） */
-html.theme1 {
+html.theme2 {
     --bg-gradient: linear-gradient(135deg, #f5af19 0%, #f12711 50%, #ff6b6b 100%);
     
     --chat-bg: rgba(255, 252, 245, 0.9);
@@ -83,7 +131,7 @@ html.theme1 {
 }
 
 /* 主题二：樱雨绵绵（温柔粉） */
-html.theme2 {
+html.theme3 {
     --bg-gradient: linear-gradient(135deg, #ffecd2 0%, #f1a189 50%, #f55257 100%);
     
     --chat-bg: rgba(255, 255, 255, 0.88);

@@ -25,12 +25,24 @@
     </div>
     <!-- 侧边栏 -->
     <div id="sidebar-zone">
-        <button class="sidebar-btn" type="button" title="侧边栏">
+        <button class="sidebar-btn" type="button" title="聊天回顾" aria-label="打开聊天回顾" aria-expanded="false" aria-controls="chat-review">
             <svg class="arrow" viewBox="0 0 512 512">
                 <path d="M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L256 173.3 86.6 342.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l192-192z"></path>
             </svg>
         </button>
-        <div class="sidebar"></div>
+        <aside class="sidebar" id="chat-review" aria-labelledby="review-title" inert>
+            <div class="review-layout">
+                <div class="review-header">
+                    <h2 id="review-title">聊天回顾</h2>
+                    <button type="button" id="review-close" aria-label="关闭聊天回顾">×</button>
+                </div>
+                <p class="review-description">查找当前页面中的对话</p>
+                <label class="review-search-label" for="review-search">搜索聊天内容</label>
+                <input id="review-search" type="search" placeholder="搜索你或小晚说过的话" autocomplete="off">
+                <p id="review-count" role="status"></p>
+                <div id="review-list" aria-label="对话列表"></div>
+            </div>
+        </aside>
     </div>
 
     <!-- 主聊天区 -->
@@ -50,9 +62,10 @@
 
         <!-- 输入区 -->
         <div id="inputArea">
-            <input type="text" autocomplete="off" id="userInput" placeholder="说点什么吧~">
+            <textarea autocomplete="off" id="userInput" rows="2" aria-label="聊天消息" placeholder="说点什么吧~"></textarea>
             <button class="sendbtn" type="button">发送</button>
         </div>
+        <p id="send-shortcut-hint">Enter 发送 · Shift+Enter 换行</p>
     </main>
 
     <!-- 菜单 -->
@@ -78,18 +91,23 @@
                 <svg viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
                 <span>主题</span>
             </button>
+
             <!-- 主题选择 -->
             <div class="theme-select">
                 <label>
-                    <input type="radio" class="theme" checked name="themeRadio" value="theme0">
-                    <span>海阔天空</span>
+                    <input type="radio" class="theme" name="themeRadio" value="theme0" checked>
+                    <span>默认白</span>
                 </label>
                 <label>
                     <input type="radio" class="theme" name="themeRadio" value="theme1">
-                    <span>夏日海岸</span>
+                    <span>海阔天空</span>
                 </label>
                 <label>
                     <input type="radio" class="theme" name="themeRadio" value="theme2">
+                    <span>夏日海岸</span>
+                </label>
+                <label>
+                    <input type="radio" class="theme" name="themeRadio" value="theme3">
                     <span>樱雨绵绵</span>
                 </label>
             </div>
@@ -110,6 +128,11 @@
             <div class="setting-content">
                 <!-- 模型信息展示区 -->
                 <div id="model-info-view">
+                    <h2>模型连接</h2>
+                    <div class="info-item">
+                        <label>接口地址：</label>
+                        <span id="display-base-url">厂商默认地址</span>
+                    </div>
                     <div class="info-item">
                         <label>模型厂商：</label>
                         <span id="display-merchant">-</span>
@@ -124,6 +147,32 @@
                     </div>
                     <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
                 </div>
+
+                <form id="preferences-form">
+                    <fieldset id="preferences-fields" disabled>
+                        <legend>聊天节奏</legend>
+                        <label class="preference-row" for="playback-mode"><span>消息显示方式</span>
+                            <select id="playback-mode"><option value="sequential">逐条显示</option><option value="instant">立即全部显示</option></select>
+                        </label>
+                        <label class="preference-row" for="reply-interval"><span>每条消息间隔</span>
+                            <select id="reply-interval"><option value="0">无等待</option><option value="500">0.5 秒</option><option value="1000">1 秒</option><option value="1500">1.5 秒</option><option value="2000">2 秒</option><option value="3000">3 秒</option><option value="5000">5 秒</option></select>
+                        </label>
+                        <h2>回复偏好</h2>
+                        <label class="preference-row" for="reply-length"><span>回复长度</span>
+                            <select id="reply-length"><option value="short">简短</option><option value="balanced">适中</option><option value="detailed">详细</option></select>
+                        </label>
+                        <label class="preference-row" for="split-reply"><span>允许自然分成多条回复</span><input id="split-reply" type="checkbox" checked></label>
+                        <p class="settings-help">长度作为表达偏好；关闭分条后，回复会合并为一条。保存后对下一轮回复生效。</p>
+                        <h2>输入习惯</h2>
+                        <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
+                            <select id="send-shortcut"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
+                        </label>
+                        <p class="settings-help">Shift+Enter 始终换行；Ctrl+Enter 模式下也支持 ⌘+Enter。</p>
+                        <button type="submit" id="save-preferences" class="model-submit settings-save">保存聊天设置</button>
+                    </fieldset>
+                    <p id="preferences-status" role="status"></p>
+                    <button type="button" id="reload-settings">重新读取设置</button>
+                </form>
 
                 <!-- 修改模型配置的弹窗 -->
                 <div id="model-edit-modal" class="modal">
@@ -142,14 +191,19 @@
                             </div>
                             <div class="form-group">
                                 <label for="modelName">模型名:</label>
-                                <select id="modelName">
-                                    <option checked>deepseek-v4-flash</option>
-                                    <option>deepseek-v4-pro</option>
-                                </select>
+                                <input id="modelName" list="model-name-options" required placeholder="选择或输入模型名">
+                                <datalist id="model-name-options"></datalist>
                             </div>
+                            <div class="form-group">
+                                <label for="model-base-url">接口地址:</label>
+                                <input id="model-base-url" type="url" placeholder="留空使用厂商默认地址">
+                            </div>
+                            <p class="settings-help">自定义地址需兼容 OpenAI 接口，填写完整 API 基础路径。密钥仍使用所选厂商的服务端配置。</p>
+                            <p id="model-test-status" role="status"></p>
                             <div class="modal-btns">
                                 <button type="button" id="cancel-modify-btn">取消</button>
-                                <button type="button" id="submit-model-btn" class="model-submit">确认修改</button>
+                                <button type="button" id="test-model-btn">测试连接</button>
+                                <button type="submit" id="submit-model-btn" class="model-submit">保存并切换</button>
                             </div>
                         </form>
                         <!-- 验证过程中的加载动画 -->

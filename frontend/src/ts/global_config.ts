@@ -1,6 +1,7 @@
 export interface ModelInfo {
     model_name: string;
     model_merchant: string;
+    base_url?: string;
 }
 
 export interface ModelConfig {

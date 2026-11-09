@@ -12,6 +12,7 @@ import {personaAPI, modelAPI, historyAPI} from './api.ts';
 import {showChatHistory, switchTheme} from './utils.ts';
 import {addEventToUi} from './addevent.ts';
 import { modelConfig, personaConfig } from './global_config.ts';
+import {loadSettings} from './settings.ts';
 
 const loading = document.getElementById('loading') as HTMLDivElement;
 
@@ -26,7 +27,7 @@ async function loadPersona() {
 
 async function restoreModelConfig() {
     console.log('检查模型配置信息...');
-    const savedConfig = loadModel();
+    const savedConfig = modelConfig.model.model_name ? {model: modelConfig.model} : loadModel();
     if (!savedConfig?.model) {
         console.log('无缓存模型配置');
         return;
@@ -58,6 +59,7 @@ async function init(){
     const warnings: string[] = [];
     const steps = [
         {name: '角色信息', load: loadPersona},
+        {name: '应用设置', load: loadSettings},
         {name: '模型配置', load: restoreModelConfig},
         {name: '历史对话', load: loadHistory}
     ];

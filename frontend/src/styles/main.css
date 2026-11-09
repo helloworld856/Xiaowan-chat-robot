@@ -325,7 +325,6 @@ body {
     outline: none;
     padding: 0.9rem 1.3rem;
     font-size: 0.95rem;
-    color: #333;
     background: var(--chat-bg);
     border-radius: 20px;
     box-shadow: var(--chat-shadow);
@@ -334,7 +333,24 @@ body {
 }
 
 #userInput::placeholder {
-    color: #999;
+    color: #878787;
+}
+
+textarea#userInput {
+    min-width: 0;
+    min-height: 3.5rem;
+    max-height: 9rem;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.5;
+}
+#send-shortcut-hint {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    text-align: right;
+    color: var(--title-color);
+    opacity: 0.7;
+    margin-top: -0.5rem;
 }
 
 /* 发送按钮 */

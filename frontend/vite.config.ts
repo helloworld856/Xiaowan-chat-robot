@@ -15,7 +15,8 @@ export default defineConfig({
             '/model': 'http://127.0.0.1:8000',
             '/history': 'http://127.0.0.1:8000',
             '/persona': 'http://127.0.0.1:8000',
-            '/version': 'http://127.0.0.1:8000'
+            '/version': 'http://127.0.0.1:8000',
+            '/settings': 'http://127.0.0.1:8000'
         }
     }
 });

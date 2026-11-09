@@ -5,7 +5,7 @@ import type { PersonaInfo } from './global_config.ts';
 //所有DOM操作
 export const chatBox = document.getElementById("chatBox") as HTMLDivElement;//聊天记录框
 export const sendBtn = document.querySelector<HTMLButtonElement>(".sendbtn")!;//发送按钮
-export const inputBox = document.getElementById("userInput") as HTMLDivElement;//文本输入框
+export const inputBox = document.getElementById("userInput") as HTMLTextAreaElement;//文本输入框
 export const comeToBottom = document.getElementById("comeToBottom") as HTMLDivElement;//回到底部按钮
 export const sidebarBtn = document.querySelector<HTMLButtonElement>('#sidebar-zone .sidebar-btn')!;//侧边栏唤起按钮
 export const sidebar = document.querySelector<HTMLDivElement>('#sidebar-zone .sidebar')!;//侧边栏

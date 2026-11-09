@@ -1,8 +1,8 @@
 from pydantic import BaseModel
+from settings_config import ModelSettings
 
-class ModelConfigRequest(BaseModel):
-    model_merchant: str   # 模型厂商：deepseek / tongyi
-    model_name: str       # 模型名称
+class ModelConfigRequest(ModelSettings):
+    pass
 
 
 class ModelConfigResponse(BaseModel):

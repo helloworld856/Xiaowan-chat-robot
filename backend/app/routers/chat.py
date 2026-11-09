@@ -14,9 +14,11 @@ async def chat(req: ChatRequest):
         raise HTTPException(400, "请先配置有效的模型")
 
     try:
-        session["state"]['user_input'] = req.user_input
-        result = graph.invoke(session["state"])
-        session["state"] = result
+        # 一轮对话完成后再切换代理，避免分析与回复使用不同配置。
+        with agent_config.agent_lock:
+            session["state"]['user_input'] = req.user_input
+            result = graph.invoke(session["state"])
+            session["state"] = result
         return ChatResponse(
             response=result["ai_response"],
             conversation_round=result["message"]["conversation_round"] - 1,

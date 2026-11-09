@@ -1,6 +1,7 @@
 //聊天气泡创建
 import {chatBox, scrollToBottom} from './ui.ts';
 import type {ConversationItem} from './global_config.ts';
+import {preferences, replyDelay} from './preferences.ts';
 
 function createAvatar(src: string, alt: string, className: string) {
     const avatar = document.createElement('div');
@@ -49,7 +50,7 @@ export async function addUserMessage(text: string){
 }
 
 export async function addAssistantMessage(messages: string[]){
-    const baseSendInterval = 1000;
+    const delay = replyDelay(preferences);
     const shouldScrollToBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 2;
 
     for (const [index, text] of messages.entries()) {
@@ -57,9 +58,8 @@ export async function addAssistantMessage(messages: string[]){
 
         if (shouldScrollToBottom) scrollToBottom();
 
-        const delay = Math.min(baseSendInterval + 100 * text.length, 5000);
         console.log('助手消息：', text);
-        if (index !== messages.length - 1){
+        if (index !== messages.length - 1 && delay > 0){
             console.log(`下一条助手消息于${delay}ms后发送`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }

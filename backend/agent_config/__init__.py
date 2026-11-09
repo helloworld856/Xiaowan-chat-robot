@@ -3,12 +3,14 @@
 """
 from .agent_factory import create_agents
 from log_config import logger
+from threading import RLock
 
 analysis_agent = None
 text_agent = None
 friend_agent = None
+agent_lock = RLock()
 
-def switch_agents(merchant: str, api_key: str, model_name: str):
+def switch_agents(merchant: str, api_key: str, model_name: str, base_url: str = ''):
     """
     切换到新的代理配置
     
@@ -21,10 +23,11 @@ def switch_agents(merchant: str, api_key: str, model_name: str):
     
     try:
         logger.info(f'切换代理配置: {merchant}/{model_name}')
-        agents = create_agents(merchant, api_key, model_name)
+        agents = create_agents(merchant, api_key, model_name, base_url)
         
         # 切换成功，更新全局代理
-        analysis_agent, text_agent, friend_agent = agents
+        with agent_lock:
+            analysis_agent, text_agent, friend_agent = agents
         
         logger.info(f'代理切换成功: {merchant}/{model_name}')
         return True

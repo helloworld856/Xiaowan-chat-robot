@@ -14,7 +14,7 @@ export async function sendMessage() {
     }
     
     //获取用户输入的内容
-    const input = document.getElementById("userInput") as HTMLInputElement; //断言
+    const input = document.getElementById("userInput") as HTMLTextAreaElement;
     const text = input.value.trim();
 
     //如果用户没有输入内容就什么也不做
