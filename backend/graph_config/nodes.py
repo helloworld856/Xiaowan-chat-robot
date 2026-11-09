@@ -7,7 +7,6 @@ from memory_config import memorier
 from persona_config import persona
 from state_config import AIChatState
 from utils import count_tokens, safe_parse_json
-from settings_config import settings_store, reply_guidance, format_replies
 
 
 def get_last_message(response: dict):
@@ -139,7 +138,6 @@ def generate(state: AIChatState) -> AIChatState:
     try:
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
-        preferences = settings_store.get().preferences
 
         if memorier.abstract_cache:
             user_prompt = f"""【历史对话（用户对应'user'）和{persona.BOT_NAME}对应'assistant'）】{memorier.history_cache}
@@ -158,7 +156,7 @@ def generate(state: AIChatState) -> AIChatState:
 
 情绪分析和建议回复可能不准确，以用户原话和最近的对话为准，不必把情绪标签说出来。
 以你的人设回应用户当前说的事，不必为了符合分析结果而强行安慰、提问或转移话题。
-{reply_guidance(preferences)}
+通常回复一条消息；有自然停顿时可以分成两条，不为凑条数拆句。用户认真提问时，按内容需要展开。
 请直接返回标准 JSON，所有键名和字符串都使用双引号，不要用代码块包裹，也不要输出额外文字。
 回答维度:
 1、"reply":你要回复给用户的话（非空字符串列表，每个元素是一条完整消息）。
@@ -183,7 +181,7 @@ def generate(state: AIChatState) -> AIChatState:
             not isinstance(part, str) or not part.strip() for part in reply
         ):
             reply = configer.GENERATE_DEFAULT_RESULT["reply"].copy()
-        state['ai_response'] = format_replies(reply, preferences)
+        state['ai_response'] = reply
         state['ai_monologue'] = ai_response.get('inner monologue', '')
         state['ai_emotion'] = ai_response.get('emotion', '')
         state['ai_action'] = ai_response.get('action', '')

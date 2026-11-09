@@ -80,7 +80,7 @@ class SettingsAPITests(unittest.TestCase):
 
     def test_invalid_request_does_not_write(self):
         with self.assertRaises(ValidationError):
-            self.settings.Preferences(reply_interval_ms=-1)
+            self.settings.Preferences(send_shortcut='unknown')
         with self.assertRaises(ValidationError):
             self.model.ModelConfigRequest(**{**self.config, 'base_url': 'file:///secret'})
         self.assertFalse(self.store.path.exists())

@@ -24,7 +24,7 @@ test('custom model address and case survive both connection-test and save reques
 });
 
 test('settings are loaded/saved through backend and save failures are reported', async t => {
-    const preferences = {reply_length: 'short', split_reply: false, playback_mode: 'instant', reply_interval_ms: 500, send_shortcut: 'ctrl_enter'};
+    const preferences = {send_shortcut: 'ctrl_enter'};
     const calls = [];
     t.mock.method(globalThis, 'fetch', async (url, options) => {
         calls.push({url, method: options.method, body: options.body});

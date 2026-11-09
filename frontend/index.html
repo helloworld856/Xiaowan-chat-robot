@@ -148,25 +148,12 @@
 
                 <form id="preferences-form">
                     <fieldset id="preferences-fields" disabled>
-                        <legend>聊天节奏</legend>
-                        <label class="preference-row" for="playback-mode"><span>消息显示方式</span>
-                            <select id="playback-mode"><option value="sequential">逐条显示</option><option value="instant">立即全部显示</option></select>
-                        </label>
-                        <label class="preference-row" for="reply-interval"><span>每条消息间隔</span>
-                            <select id="reply-interval"><option value="0">无等待</option><option value="500">0.5 秒</option><option value="1000">1 秒</option><option value="1500">1.5 秒</option><option value="2000">2 秒</option><option value="3000">3 秒</option><option value="5000">5 秒</option></select>
-                        </label>
-                        <h2>回复偏好</h2>
-                        <label class="preference-row" for="reply-length"><span>回复长度</span>
-                            <select id="reply-length"><option value="short">简短</option><option value="balanced">适中</option><option value="detailed">详细</option></select>
-                        </label>
-                        <label class="preference-row" for="split-reply"><span>允许自然分成多条回复</span><input id="split-reply" type="checkbox" checked></label>
-                        <p class="settings-help">长度作为表达偏好；关闭分条后，回复会合并为一条。保存后对下一轮回复生效。</p>
-                        <h2>输入习惯</h2>
+                        <legend>输入习惯</legend>
                         <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
                             <select id="send-shortcut"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
                         </label>
                         <p class="settings-help">Shift+Enter 始终换行；Ctrl+Enter 模式下也支持 ⌘+Enter。</p>
-                        <button type="submit" id="save-preferences" class="model-submit settings-save">保存聊天设置</button>
+                        <button type="submit" id="save-preferences" class="model-submit settings-save">保存输入设置</button>
                     </fieldset>
                     <p id="preferences-status" role="status"></p>
                     <button type="button" id="reload-settings">重新读取设置</button>

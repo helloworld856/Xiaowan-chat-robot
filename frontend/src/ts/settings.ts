@@ -15,21 +15,8 @@ function updateModelDisplay() {
     document.getElementById('display-base-url')!.textContent = modelConfig.model.base_url || '厂商默认地址';
 }
 
-function updatePlaybackControl() {
-    select('reply-interval').disabled = select('playback-mode').value === 'instant';
-}
-
 function renderPreferences() {
-    select('playback-mode').value = preferences.playback_mode;
-    const interval = select('reply-interval');
-    if (!Array.from(interval.options).some(option => Number(option.value) === preferences.reply_interval_ms)) {
-        interval.add(new Option(`${preferences.reply_interval_ms / 1000} 秒`, String(preferences.reply_interval_ms)));
-    }
-    interval.value = String(preferences.reply_interval_ms);
-    select('reply-length').value = preferences.reply_length;
-    input('split-reply').checked = preferences.split_reply;
     select('send-shortcut').value = preferences.send_shortcut;
-    updatePlaybackControl();
 }
 
 export async function loadSettings() {
@@ -127,7 +114,6 @@ export function initSettings() {
 
     form.addEventListener('submit', event => { event.preventDefault(); void configure(false); });
     document.getElementById('test-model-btn')!.addEventListener('click', () => { void configure(true); });
-    select('playback-mode').addEventListener('change', updatePlaybackControl);
     const reload = document.getElementById('reload-settings') as HTMLButtonElement;
     reload.addEventListener('click', async () => {
         if (preferencesBusy) return;
@@ -139,10 +125,6 @@ export function initSettings() {
         event.preventDefault();
         if (preferencesBusy || fields().disabled) return;
         const next: Preferences = {
-            playback_mode: select('playback-mode').value as Preferences['playback_mode'],
-            reply_interval_ms: Number(select('reply-interval').value),
-            reply_length: select('reply-length').value as Preferences['reply_length'],
-            split_reply: input('split-reply').checked,
             send_shortcut: select('send-shortcut').value as Preferences['send_shortcut']
         };
         preferencesBusy = true;
@@ -153,7 +135,7 @@ export function initSettings() {
             const saved = await settingsAPI(next);
             Object.assign(preferences, saved.preferences);
             renderPreferences();
-            status().textContent = '聊天设置已保存';
+            status().textContent = '输入设置已保存';
         } catch (error) {
             status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
         } finally {

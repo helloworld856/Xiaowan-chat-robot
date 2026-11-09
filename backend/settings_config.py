@@ -34,10 +34,6 @@ class ModelSettings(BaseModel):
 
 class Preferences(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    reply_length: Literal['short', 'balanced', 'detailed'] = 'balanced'
-    split_reply: bool = True
-    playback_mode: Literal['sequential', 'instant'] = 'sequential'
-    reply_interval_ms: int = Field(default=1000, ge=0, le=5000, strict=True)
     send_shortcut: Literal['enter', 'ctrl_enter'] = 'enter'
 
 
@@ -56,7 +52,12 @@ class SettingsStore:
         with self.lock:
             if not self.path.exists():
                 return AppSettings()
-            return AppSettings.model_validate_json(self.path.read_text(encoding='utf-8'))
+            data = json.loads(self.path.read_text(encoding='utf-8'))
+            # 兼容旧配置文件，仅忽略已移除的设置，保留模型与输入快捷键。
+            if isinstance(data, dict) and isinstance(data.get('preferences'), dict):
+                for key in ('reply_length', 'split_reply', 'playback_mode', 'reply_interval_ms'):
+                    data['preferences'].pop(key, None)
+            return AppSettings.model_validate(data)
 
     def _save(self, settings: AppSettings):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,21 +88,6 @@ class SettingsStore:
             settings.preferences = preferences
             self._save(settings)
             return settings
-
-
-def reply_guidance(preferences: Preferences) -> str:
-    length = {
-        'short': '优先简短回答，直接回应重点；必要信息仍需完整。',
-        'balanced': '回复长度适中，按内容需要展开。',
-        'detailed': '用户需要解释时充分展开，提供细节和例子，避免无关铺陈。',
-    }[preferences.reply_length]
-    split = ('通常回复一条消息；有自然停顿时可以分成两条，不为凑条数拆句。'
-             if preferences.split_reply else '本轮只回复一条完整消息，将所有内容放在 reply 的一个元素中。')
-    return f'【用户的回复偏好】{length}\n{split}'
-
-
-def format_replies(replies: list[str], preferences: Preferences) -> list[str]:
-    return replies if preferences.split_reply else ['\n\n'.join(replies)]
 
 
 settings_store = SettingsStore(Path(__file__).resolve().parent / 'settings.json')

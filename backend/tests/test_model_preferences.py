@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import sys
 import types
 import unittest
@@ -17,7 +16,7 @@ def load_file(name, relative_path):
     return module
 
 
-class ModelPreferencesTests(unittest.TestCase):
+class ModelSettingsTests(unittest.TestCase):
     def test_validation_clients_have_network_timeout_and_limited_retries(self):
         def client(**options):
             return options
@@ -43,28 +42,3 @@ class ModelPreferencesTests(unittest.TestCase):
         for agent in custom:
             self.assertEqual(agent['model']['base_url'], 'https://example.com/v1')
             self.assertEqual(agent['model']['model'], 'Custom-V2')
-
-    def test_generate_applies_saved_preferences_to_prompt_and_output(self):
-        from settings_config import AppSettings, Preferences
-        prompts = []
-        def invoke(request):
-            prompts.append(request['messages'][0]['content'])
-            return {'messages': [types.SimpleNamespace(content=json.dumps({'reply': ['你好', '今天如何']}))]}
-        logger = types.SimpleNamespace(info=lambda _: None, error=lambda _: None)
-        config = types.SimpleNamespace(GENERATE_DEFAULT_RESULT={'reply': ['fallback']})
-        with patch.dict(sys.modules, {
-            'agent_config': types.SimpleNamespace(friend_agent=types.SimpleNamespace(invoke=invoke)),
-            'config': types.SimpleNamespace(configer=config),
-            'log_config': types.SimpleNamespace(logger=logger),
-            'memory_config': types.SimpleNamespace(memorier=types.SimpleNamespace(abstract_cache='', history_cache=[])),
-            'persona_config': types.SimpleNamespace(persona=types.SimpleNamespace(BOT_NAME='小晚')),
-            'utils': types.SimpleNamespace(count_tokens=lambda _: 0, safe_parse_json=lambda value, _: json.loads(value)),
-        }):
-            nodes = load_file('tested_nodes', 'graph_config/nodes.py')
-        saved = AppSettings(preferences=Preferences(reply_length='short', split_reply=False))
-        with patch.object(nodes.settings_store, 'get', return_value=saved):
-            state = nodes.generate({'user_input': '你好', 'analysis_result': {}, 'total_tokens': 0, 'message': {}})
-        self.assertIn('简短', prompts[0])
-        self.assertIn('只回复一条', prompts[0])
-        self.assertEqual(state['ai_response'], ['你好\n\n今天如何'])
-        self.assertEqual(state['message']['assistant'], ['你好\n\n今天如何'])
