@@ -1,5 +1,9 @@
 {
-  "model": null,
+  "model": {
+    "model_merchant": "deepseek",
+    "model_name": "deepseek-v4-flash",
+    "base_url": ""
+  },
   "preferences": {
     "send_shortcut": "enter"
   }
