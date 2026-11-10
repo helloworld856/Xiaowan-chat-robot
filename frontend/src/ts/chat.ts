@@ -1,6 +1,6 @@
 //发送消息并获得回复
 
-import {chatAPI} from './api.ts'
+import {chatAPI, AuthRequiredError, CancelledRequestError, getRequestGeneration} from './api.ts'
 import { lockSendBtn, unlockSendBtn, scrollToBottom, sendBtn, showTypingIndicator, hideTypingIndicator, showAlert } from './ui.ts';
 import { addUserMessage, addAssistantMessage} from './utils.ts';
 import {modelConfig} from './global_config.ts'
@@ -19,6 +19,7 @@ export async function sendMessage() {
 
     //如果用户没有输入内容就什么也不做
     if (!text) return;
+    const generation = getRequestGeneration();
     lockSendBtn(); // 在第一个 await 前锁住，防止重复发送。
 
     //清空输入框，等待期间仍可以输入下一条消息
@@ -34,12 +35,14 @@ export async function sendMessage() {
 
         //把回复加入聊天框
         hideTypingIndicator();
-        await addAssistantMessage(data.response);
+        await addAssistantMessage(data.response, () => generation === getRequestGeneration());
+        if (generation !== getRequestGeneration()) return;
         if (data.saved === false) {
             showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
         }
 
     } catch (err) {
+        if (generation !== getRequestGeneration() || err instanceof AuthRequiredError || err instanceof CancelledRequestError) return;
         hideTypingIndicator();
         if (err instanceof Error) {
             window.alert("❌ 错误: " + err.message);
@@ -48,9 +51,11 @@ export async function sendMessage() {
             window.alert("❌ 发生未知错误");
         }
     } finally {
-        hideTypingIndicator();
-        //无论结果如何，都把发送按钮解开
-        unlockSendBtn();
+        if (generation === getRequestGeneration()) {
+            hideTypingIndicator();
+            // 当前登录页面的请求结束后才解开发送按钮。
+            unlockSendBtn();
+        }
     }
 }
 

@@ -17,6 +17,7 @@ function createUserMessage(text: string) {
     const bubble = document.createElement('div');
     const triangle = document.createElement('div');
     const avatar = createAvatar(window.USER_AVATAR, '你的头像', 'user_avatar');
+    avatar.title = window.USER_NAME || 'admin';
 
     message.className = 'user_message';
     bubble.className = 'user_bubble';
@@ -48,11 +49,12 @@ export async function addUserMessage(text: string){
     chatBox.appendChild(createUserMessage(text));
 }
 
-export async function addAssistantMessage(messages: string[]){
+export async function addAssistantMessage(messages: string[], isCurrent: () => boolean = () => true){
     const baseSendInterval = 1000;
     const shouldScrollToBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 2;
 
     for (const [index, text] of messages.entries()) {
+        if (!isCurrent()) return;
         chatBox.appendChild(createAssistantMessage(text));
 
         if (shouldScrollToBottom) scrollToBottom();

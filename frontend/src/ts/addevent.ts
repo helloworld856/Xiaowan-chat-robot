@@ -20,6 +20,7 @@ import {switchTheme} from './utils.ts';
 import {initChatReview} from './review.ts';
 import {preferences, shouldSendMessage} from './preferences.ts';
 import {initSettings} from './settings.ts';
+import {initProfile} from './profile.ts';
 
 function bindChatEvents() {
     sendBtn.onclick = () => sendMessage();
@@ -100,5 +101,6 @@ export function addEventToUi() {
     initChatReview();
     bindMenuEvents();
     initSettings();
+    initProfile();
     bindAlertEvents();
 }

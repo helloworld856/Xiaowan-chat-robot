@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="src/styles/main.css">
     <link rel="stylesheet" href="src/styles/message.css">
     <link rel="stylesheet" href="src/styles/components.css">
+    <link rel="stylesheet" href="src/styles/auth.css">
+    <link rel="stylesheet" href="src/styles/profile.css">
 </head>
 <body>
     <div id="loading">
@@ -23,6 +25,28 @@
             <div class="typing-shadow"></div>
         </div>
     </div>
+    <section id="login-screen" aria-labelledby="login-title" hidden>
+        <form id="login-form" class="login-card">
+            <header class="login-heading">
+                <h1 id="login-title">登录小晚</h1>
+                <p class="login-description">登录后继续聊天</p>
+            </header>
+            <div class="login-fields">
+                <div class="login-field">
+                    <label for="login-username">用户名</label>
+                    <input id="login-username" name="username" type="text" autocomplete="username" value="admin" maxlength="64" required>
+                </div>
+                <div class="login-field">
+                    <label for="login-password">密码</label>
+                    <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" aria-describedby="login-error" required>
+                </div>
+            </div>
+            <p id="login-error" class="login-error" role="alert"></p>
+            <button id="login-submit" type="submit">登录</button>
+        </form>
+    </section>
+
+    <div id="app-shell" hidden inert>
     <!-- 侧边栏 -->
     <div id="sidebar-zone">
         <button class="sidebar-btn" type="button" title="聊天回顾" aria-label="打开聊天回顾" aria-expanded="false" aria-controls="chat-review">
@@ -76,6 +100,7 @@
             </svg>
         </div>
         <div id="menu">
+            <div class="account-info">当前账户：<span id="current-username"></span></div>
             <button class="value value1">
                 <svg viewBox="0 0 16 16"><path d="m1.5 13v1a.5.5 0 0 0 .3379.4731 18.9718 18.9718 0 0 0 6.1621 1.0269 18.9629 18.9629 0 0 0 6.1621-1.0269.5.5 0 0 0 .3379-.4731v-1a6.5083 6.5083 0 0 0 -4.461-6.1676 3.5 3.5 0 1 0 -4.078 0 6.5083 6.5083 0 0 0 -4.461 6.1676zm4-9a2.5 2.5 0 1 1 2.5 2.5 2.5026 2.5026 0 0 1 -2.5-2.5zm2.5 3.5a5.5066 5.5066 0 0 1 5.5 5.5v.6392a18.08 18.08 0 0 1 -11 0v-.6392a5.5066 5.5066 0 0 1 5.5-5.5z" fill="currentColor"></path></svg>
                 <span>个人资料</span>
@@ -109,8 +134,59 @@
                     <span>樱雨绵绵</span>
                 </label>
             </div>
+            <button id="logout-btn" class="value" type="button">退出登录</button>
         </div>
     </div>
+    <dialog id="profile-dialog" aria-labelledby="profile-title">
+        <div class="profile-heading">
+            <h2 id="profile-title">个人资料</h2>
+            <button id="profile-close" class="profile-text-button" type="button">关闭</button>
+        </div>
+        <form id="profile-form">
+            <fieldset id="profile-fields" disabled>
+                <div class="profile-summary">
+                    <img id="profile-preview" alt="当前头像" width="60" height="60">
+                    <div><strong id="profile-display-name"></strong><p class="profile-account">登录账号：<span id="profile-username">admin</span></p></div>
+                </div>
+                <label class="profile-label" for="profile-nickname">昵称</label>
+                <input id="profile-nickname" class="profile-input" maxlength="24" required autocomplete="nickname">
+                <div class="profile-avatar-heading"><span class="profile-label">系统头像</span><button id="profile-default-avatar" class="profile-text-button" type="button">恢复默认</button></div>
+                <div id="profile-avatars" role="group" aria-label="系统头像"></div>
+                <button id="profile-open-password" class="profile-password-link" type="button">修改密码 <span aria-hidden="true">›</span></button>
+            </fieldset>
+            <p id="profile-status" class="profile-status" role="status"></p>
+            <div class="profile-actions">
+                <button id="profile-cancel" class="profile-secondary" type="button">取消</button>
+                <button id="profile-save" class="profile-primary" type="submit" disabled>保存</button>
+            </div>
+        </form>
+        <form id="profile-password-form" hidden>
+            <fieldset id="profile-password-fields">
+                <label class="profile-label" for="profile-current-password">当前密码</label>
+                <input id="profile-current-password" class="profile-input" type="password" autocomplete="current-password" maxlength="256" required>
+                <label class="profile-label" for="profile-new-password">新密码</label>
+                <input id="profile-new-password" class="profile-input" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+                <label class="profile-label" for="profile-confirm-password">确认新密码</label>
+                <input id="profile-confirm-password" class="profile-input" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+            </fieldset>
+            <p class="profile-help">修改成功后需要重新登录。</p>
+            <p id="profile-password-status" class="profile-status" role="status"></p>
+            <div class="profile-actions">
+                <button id="profile-password-back" class="profile-secondary" type="button">返回资料</button>
+                <button id="profile-password-save" class="profile-primary" type="submit">修改并重新登录</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="logout-dialog" role="alertdialog" aria-labelledby="logout-title" aria-describedby="logout-description">
+        <h2 id="logout-title">确认退出登录？</h2>
+        <p id="logout-description">退出后需要重新登录才能继续聊天。</p>
+        <div class="logout-actions">
+            <button id="logout-cancel" type="button" autofocus>取消</button>
+            <button id="logout-confirm" type="button">退出登录</button>
+        </div>
+    </dialog>
+
     <!-- 设置界面 -->
     <div id="setting-container">
         <div class="setting">
@@ -215,6 +291,7 @@
         </div>
      </div>
 
+    </div>
     <script type="module" src="src/ts/main.ts"></script>
 </body>
 </html>

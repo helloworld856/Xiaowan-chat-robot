@@ -4,5 +4,6 @@ declare global {
   interface Window {
     BOT_AVATAR: string;
     USER_AVATAR: string;
+    USER_NAME: string;
   }
 }

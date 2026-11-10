@@ -8,11 +8,13 @@ import {
     showAlert
 } from './ui.ts';
 
-import {personaAPI, modelAPI, historyAPI} from './api.ts';
+import {personaAPI, modelAPI, historyAPI, AuthRequiredError, CancelledRequestError, getRequestGeneration} from './api.ts';
 import {showChatHistory, switchTheme} from './utils.ts';
 import {addEventToUi} from './addevent.ts';
 import { modelConfig, personaConfig } from './global_config.ts';
 import {loadSettings} from './settings.ts';
+import {initializeAuth} from './auth.ts';
+import {loadProfile, resetProfile} from './profile.ts';
 
 const loading = document.getElementById('loading') as HTMLDivElement;
 
@@ -55,9 +57,10 @@ function loadSavedTheme() {
     });
 }
 
-async function init(){
+async function init(generation: number){
     const warnings: string[] = [];
     const steps = [
+        {name: '个人资料', load: loadProfile},
         {name: '角色信息', load: loadPersona},
         {name: '应用设置', load: loadSettings},
         {name: '模型配置', load: restoreModelConfig},
@@ -65,9 +68,12 @@ async function init(){
     ];
     // 单个步骤失败后继续启动，最后集中提示。
     for (const step of steps) {
+        if (generation !== getRequestGeneration()) throw new CancelledRequestError();
         try {
             await step.load();
         } catch (error) {
+            if (generation !== getRequestGeneration()) throw new CancelledRequestError();
+            if (error instanceof AuthRequiredError || error instanceof CancelledRequestError) throw error;
             console.warn(`${step.name}加载失败`, error);
             warnings.push(`${step.name}加载失败，请检查后端、网络或相关配置。`);
         }
@@ -75,15 +81,34 @@ async function init(){
     return warnings;
 }
 
-lockSendBtn();
-loading.classList.remove('close');
-let warnings: string[] = [];
-try {
-    addEventToUi();
-    loadSavedTheme();
-    warnings = await init();
-} finally {
-    unlockSendBtn();
-    loading.classList.add('close');
+async function initializeChat() {
+    const generation = getRequestGeneration();
+    lockSendBtn();
+    loading.classList.remove('close');
+    try {
+        const warnings = await init(generation);
+        if (generation === getRequestGeneration() && warnings.length) showAlert(warnings.join('\n'));
+    } catch (error) {
+        if (!(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) throw error;
+    } finally {
+        if (generation === getRequestGeneration()) {
+            unlockSendBtn();
+            loading.classList.add('close');
+        }
+    }
 }
-if (warnings.length) showAlert(warnings.join('\n'));
+
+function clearChat() {
+    resetProfile();
+    document.getElementById('chatBox')!.replaceChildren();
+    (document.getElementById('userInput') as HTMLTextAreaElement).value = '';
+    modelConfig.model_valid = false;
+    modelConfig.model = {model_merchant: '', model_name: '', base_url: ''};
+    personaConfig.persona_valid = false;
+    personaConfig.persona = {BOT_NAME: '', BOT_AVATAR: '', USER_AVATAR: '', BOT_BIRTHDAY: '', BOT_BIRTHPLACE: ''};
+}
+
+lockSendBtn();
+addEventToUi();
+loadSavedTheme();
+await initializeAuth(initializeChat, clearChat);

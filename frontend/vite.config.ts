@@ -11,12 +11,8 @@ export default defineConfig({
     // 发请求，开发时所有 API 调用会打到 :5173 而不是 :8000。开发环境需要代理：
 
     server: {
-        proxy: { '/chat': 'http://127.0.0.1:8000',
-            '/model': 'http://127.0.0.1:8000',
-            '/history': 'http://127.0.0.1:8000',
-            '/persona': 'http://127.0.0.1:8000',
-            '/version': 'http://127.0.0.1:8000',
-            '/settings': 'http://127.0.0.1:8000'
-        }
+        // 显式保留浏览器 Host，使后端同源写请求校验也适用于开发代理。
+        proxy: Object.fromEntries(['/chat', '/model', '/history', '/persona', '/version', '/settings', '/auth', '/profile']
+            .map(path => [path, {target: 'http://127.0.0.1:8000', changeOrigin: false}]))
     }
 });

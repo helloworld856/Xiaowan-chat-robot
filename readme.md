@@ -49,7 +49,7 @@ PASSWORD=your-mysql-password
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。
 
-模型配置和输入习惯统一写入 `backend/settings.json`，刷新和重启后恢复。输入习惯使用“保存输入设置”保存；也可手动编辑 JSON 后在设置页点击“重新读取设置”。手动修改模型配置后需要刷新页面进行验证和切换。JSON 中不保存 API Key。当前仍为单人本地配置，尚未引入账户设置。
+模型配置和输入习惯统一写入 `backend/settings.json`，刷新和重启后恢复。输入习惯使用“保存输入设置”保存；也可手动编辑 JSON 后在设置页点击“重新读取设置”。手动修改模型配置后需要刷新页面进行验证和切换。JSON 中不保存 API Key。模型和输入设置仍使用单人本地配置。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 
@@ -58,6 +58,16 @@ PASSWORD=your-mysql-password
 检查命令：`python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck`、`npm --prefix frontend run build`。测试不调用真实模型或业务数据库。
 
 ## 启动
+
+当前只有一个管理员账户：用户名 `admin`，初始密码 `123456`，没有注册功能。密码以加盐哈希保存在 `backend/auth_config/admin.json`，不写入前端或普通设置文件。
+
+打开页面后先登录，菜单中可退出登录。登录 Cookie 有效期为 8 小时，刷新页面会恢复有效登录；退出或重启后端后需要重新登录。登录失败连续达到 5 次时，同一客户端需等待 60 秒后再试。
+
+菜单中的“个人资料”支持修改昵称和选择系统头像，登录用户名 `admin` 只读。系统提供小猫、狐狸、兔子、小熊、企鹅和青蛙六张头像，默认使用小猫，不提供上传功能。资料保存在 `backend/auth_config/profile.json`，刷新和重启后保留；保存后同步更新菜单昵称和聊天头像。
+
+个人资料内可修改密码，需要输入当前密码并两次确认新密码（6–128 个字符）。成功后所有旧登录失效，使用新密码重新登录；保存失败时保留原密码和会话。头像素材位于 `frontend/public/avatars/system/`，制作提示词见 `docs/superpowers/avatars-prompts.md`。
+
+聊天、历史、人设、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
 
 开发时先启动后端：
 

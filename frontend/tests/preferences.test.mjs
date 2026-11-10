@@ -56,3 +56,17 @@ test('message rendering recalculates delay for each reply and never waits after 
     assert.deepEqual(delays, []);
     assert.equal(rendered.length, 5);
 });
+
+test('logout stops remaining delayed reply bubbles from the previous page', async () => {
+    const source = fs.readFileSync(new URL('../src/ts/utils.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+    const exports = {}, rendered = [];
+    let active = true;
+    runInNewContext(compiled, {
+        exports, require: () => ({chatBox: {scrollTop: 0, clientHeight: 0, scrollHeight: 0, appendChild: row => rendered.push(row)}, scrollToBottom() {}}),
+        window: {USER_AVATAR: '', BOT_AVATAR: ''}, document: {createElement: () => ({append() {}, appendChild() {}})},
+        console: {log() {}}, setTimeout: resolve => { active = false; resolve(); }
+    });
+    await exports.addAssistantMessage(['first', 'second', 'third'], () => active);
+    assert.equal(rendered.length, 1);
+});
