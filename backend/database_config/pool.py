@@ -1,0 +1,70 @@
+from contextlib import contextmanager
+from threading import BoundedSemaphore, Lock
+
+import pymysql
+
+from log_config import logger
+
+
+class ConnectionPool:
+    """每个调用独占连接，未提交的事务在归还时回滚。"""
+
+    def __init__(self, connect, max_connections=12, wait_timeout=5):
+        self._connect = connect
+        self._slots = BoundedSemaphore(max_connections)
+        self._wait_timeout = wait_timeout
+        self._lock = Lock()
+        self._idle = []
+        self._closed = False
+
+    @staticmethod
+    def _close_connection(connection):
+        try:
+            connection.close()
+        except (OSError, pymysql.MySQLError):
+            logger.warning('关闭数据库连接失败')
+
+    @contextmanager
+    def connection(self):
+        if not self._slots.acquire(timeout=self._wait_timeout):
+            raise pymysql.OperationalError('等待数据库连接超时')
+        connection = None
+        try:
+            with self._lock:
+                if self._closed:
+                    raise pymysql.OperationalError('数据库连接池已关闭')
+                if self._idle:
+                    connection = self._idle.pop()
+            if connection is not None:
+                try:
+                    connection.ping(reconnect=False)
+                except BaseException as error:
+                    failed, connection = connection, None
+                    self._close_connection(failed)
+                    if not isinstance(error, (OSError, pymysql.MySQLError)):
+                        raise
+            if connection is None:
+                connection = self._connect()
+            yield connection
+        finally:
+            try:
+                if connection is not None:
+                    try:
+                        connection.rollback()
+                    except (OSError, pymysql.MySQLError):
+                        self._close_connection(connection)
+                    else:
+                        with self._lock:
+                            if self._closed:
+                                self._close_connection(connection)
+                            else:
+                                self._idle.append(connection)
+            finally:
+                self._slots.release()
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            connections, self._idle = self._idle, []
+        for connection in connections:
+            self._close_connection(connection)

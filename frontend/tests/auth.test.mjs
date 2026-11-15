@@ -99,3 +99,116 @@ test('signed-out startup shows the login form silently while network failure rem
         else assert.equal(element('login-error').textContent, '', 'being signed out is not a connection error');
     }
 });
+
+test('registration returns to login and never opens the authenticated page', async () => {
+    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+    const nodes = new Map();
+    const attempts = [];
+    const user = {id: 8, username: 'new_account', role: 'user'};
+    function element(id) {
+        if (!nodes.has(id)) nodes.set(id, {
+            hidden: true, inert: true, value: '', textContent: '', listeners: new Map(),
+            focus() {}, setAttribute() {}, classList: {add() {}}, reportValidity: () => true,
+            addEventListener(name, handler) { this.listeners.set(name, handler); }
+        });
+        return nodes.get(id);
+    }
+    const exports = {};
+    runInNewContext(compiled, {
+        exports, require: name => name === './api.ts' ? {
+            invalidateRequests() {}, sessionAPI: async () => ({user: null}),
+            registerAPI: async (...args) => { attempts.push(args); return {user}; }
+        } : {lockSendBtn() {}, showAlert() {}},
+        document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
+        window: {addEventListener() {}}
+    });
+    await exports.initializeAuth(async () => assert.fail('registration must not sign in'), () => {});
+    element('open-register').listeners.get('click')();
+    assert.equal(element('register-form').hidden, false);
+    element('register-username').value = user.username;
+    element('register-password').value = 'Reg!12';
+    element('register-confirm-password').value = 'Wrong!12';
+    const submit = () => element('register-form').listeners.get('submit')({preventDefault() {}});
+    await submit();
+    assert.equal(attempts.length, 0);
+    element('register-confirm-password').value = 'Reg!12';
+    await submit();
+    assert.deepEqual(attempts, [[user.username, 'Reg!12', 'Reg!12']]);
+    assert.equal(element('app-shell').hidden, true);
+    assert.equal(element('register-form').hidden, true);
+    assert.equal(element('login-username').value, user.username);
+    assert.equal(element('register-password').value, '');
+});
+
+test('an auth change in another tab clears private state and rejects a stale startup response', async () => {
+    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+    const alice = {id: 8, username: 'alice', role: 'user'};
+    const tabs = [];
+
+    function tab(sessionAPI) {
+        const nodes = new Map(), listeners = new Map();
+        const state = {sitsIn: 0, resets: 0, discarded: 0};
+        function element(id) {
+            if (!nodes.has(id)) nodes.set(id, {
+                hidden: true, inert: true, value: '', textContent: '', listeners: new Map(),
+                focus() {}, setAttribute() {}, classList: {add() {}}, reportValidity: () => true,
+                showModal() { this.open = true; }, close() { this.open = false; },
+                addEventListener(name, handler) { this.listeners.set(name, handler); }
+            });
+            return nodes.get(id);
+        }
+        const exports = {};
+        const localStorage = {
+            setItem(key, newValue) {
+                for (const other of tabs) {
+                    if (other.storage !== this) other.listeners.get('storage')?.({key, newValue, storageArea: other.storage});
+                }
+            }
+        };
+        runInNewContext(compiled, {
+            exports, localStorage, require: name => name === './api.ts' ? {
+                invalidateRequests(user) { if (!user) state.discarded++; }, sessionAPI,
+                loginAPI: async () => ({user: alice}), logoutAPI: async () => ({ok: true})
+            } : {lockSendBtn() {}, showAlert() {}},
+            document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
+            window: {addEventListener: (name, handler) => listeners.set(name, handler)}
+        });
+        const ctx = {element, listeners, state, storage: localStorage};
+        tabs.push(ctx);
+        return {...ctx, initialized: exports.initializeAuth(async () => { state.sitsIn++; }, () => { state.resets++; })};
+    }
+
+    const active = tab(async () => ({user: alice}));
+    await active.initialized;
+    let finishSession;
+    const startedEarlier = tab(() => new Promise(resolve => { finishSession = resolve; }));
+    const trigger = tab(async () => ({user: alice}));
+    await trigger.initialized;
+    assert.equal(active.element('app-shell').hidden, false);
+    active.element('login-screen').hidden = true;
+    trigger.element('logout-btn').listeners.get('click')();
+    await trigger.element('logout-confirm').listeners.get('click')();
+    assert.equal(active.element('app-shell').hidden, true);
+    assert.equal(active.state.resets, 1);
+    assert.equal(active.state.discarded, 1);
+    finishSession({user: alice});
+    await startedEarlier.initialized;
+    assert.equal(startedEarlier.state.sitsIn, 0);
+    assert.equal(startedEarlier.element('app-shell').hidden, true);
+
+    let restoredUser = alice;
+    const cached = tab(async () => ({user: restoredUser}));
+    await cached.initialized;
+    cached.listeners.get('pagehide')?.({persisted: true});
+    assert.equal(cached.element('app-shell').hidden, true, 'cached page must hide private content before navigation');
+    await cached.listeners.get('pageshow')({persisted: true});
+    assert.equal(cached.element('app-shell').hidden, false);
+    cached.listeners.get('pagehide')({persisted: true});
+    restoredUser = {id: 9, username: 'bob', role: 'user'};
+    await cached.listeners.get('pageshow')({persisted: true});
+    assert.equal(cached.element('app-shell').hidden, true);
+    assert.equal(cached.element('login-screen').hidden, false);
+    assert.equal(cached.state.resets, 1);
+});

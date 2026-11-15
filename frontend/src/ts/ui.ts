@@ -6,10 +6,10 @@ import type { PersonaInfo } from './global_config.ts';
 export const chatBox = document.getElementById("chatBox") as HTMLDivElement;//聊天记录框
 export const sendBtn = document.querySelector<HTMLButtonElement>(".sendbtn")!;//发送按钮
 export const inputBox = document.getElementById("userInput") as HTMLTextAreaElement;//文本输入框
-export const comeToBottom = document.getElementById("comeToBottom") as HTMLDivElement;//回到底部按钮
+export const comeToBottom = document.getElementById("comeToBottom") as HTMLButtonElement;//回到底部按钮
 export const sidebarBtn = document.querySelector<HTMLButtonElement>('#sidebar-zone .sidebar-btn')!;//侧边栏唤起按钮
 export const sidebar = document.querySelector<HTMLDivElement>('#sidebar-zone .sidebar')!;//侧边栏
-export const menuBtn = document.getElementById('menuBtn') as HTMLDivElement;//菜单唤起按钮
+export const menuBtn = document.getElementById('menuBtn') as HTMLButtonElement;//菜单唤起按钮
 export const menu = document.getElementById('menu') as HTMLDivElement;//菜单
 export const menuSelect = document.querySelectorAll<HTMLButtonElement>('#menu .value')!;//获得菜单里所有选项
 export const themeInput = document.querySelectorAll<HTMLInputElement>('#menu .theme-select label input[name="themeRadio"]')!;//获得所有主题选择按钮
@@ -118,7 +118,7 @@ export function updateUi(persona: PersonaInfo){
     window.BOT_AVATAR= persona.BOT_AVATAR;
 
     //用户头像
-    window.USER_AVATAR = persona.USER_AVATAR;
+    window.USER_AVATAR ||= persona.USER_AVATAR;
 }
 
 

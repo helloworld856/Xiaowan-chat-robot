@@ -142,6 +142,40 @@
 .chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
 .chat-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 
+.chat-delivery {
+    color: var(--menu-text);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.user_message > .chat-delivery {
+    align-self: center;
+    margin-right: 0.5rem;
+    text-align: right;
+}
+
+.chat-delivery button {
+    display: block;
+    margin: 0.2rem 0 0 auto;
+    padding: 0.1rem 0.3rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.chat-delivery-uncertain {
+    margin: 0 0 1rem auto;
+    width: fit-content;
+    max-width: 80%;
+    overflow-wrap: anywhere;
+}
+
+.chat-delivery-uncertain summary { cursor: pointer; }
+.chat-delivery-uncertain p { margin-top: 0.3rem; white-space: pre-wrap; }
+
 @keyframes chatTyping {
     0%, 60%, 100% { opacity: 0.4; transform: translateY(0); }
     30% { opacity: 1; transform: translateY(-4px); }

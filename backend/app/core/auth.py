@@ -36,13 +36,21 @@ class AuthenticationMiddleware:
 
         public_static = method in ('GET', 'HEAD') and (
             path in ('/', '/index.html', '/favicon.ico') or path.startswith(('/assets/', '/ico/', '/avatars/')))
-        public_auth = (method, path) in {('POST', '/auth/login'), ('POST', '/auth/logout'), ('GET', '/auth/session')}
+        public_auth = (method, path) in {
+            ('POST', '/auth/login'), ('POST', '/auth/logout'), ('POST', '/auth/register'), ('GET', '/auth/session'),
+        }
         user = self.service.get_user(request.cookies.get(COOKIE_NAME))
-        if not public_static and not public_auth and user is None:
+        requires_user = not public_static and not public_auth
+        expected_user = request.headers.get('x-xiaowan-user')
+        identity_changed = (requires_user or (method, path) == ('POST', '/auth/logout')) and (
+            expected_user is not None and (user is None or expected_user != str(user.id)))
+        if (requires_user and user is None) or identity_changed:
             await JSONResponse({'detail': '请先登录'}, status_code=401,
                                headers={'Cache-Control': 'no-store'})(scope, receive, send)
             return
-        scope.setdefault('state', {})['username'] = user
+        state = scope.setdefault('state', {})
+        state['user'] = user
+        state['username'] = user.username if user is not None else None
 
         async def send_private(message):
             if message['type'] == 'http.response.start' and not public_static:

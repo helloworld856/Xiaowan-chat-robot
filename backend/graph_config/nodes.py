@@ -1,9 +1,8 @@
 from time import time
 
-import agent_config  # 动态获取最新的代理
 from config import configer
 from log_config import logger
-from memory_config import memorier
+from memory_config import MemoryManager
 from persona_config import persona
 from state_config import AIChatState
 from utils import count_tokens, safe_parse_json
@@ -24,7 +23,7 @@ def get_total_tokens(message) -> int:
 
 # 基础结点定义
 # 定义开始结点
-def start_node(state: AIChatState) -> AIChatState:
+def start_node(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
         logger.info('执行结点"start_node"...')
         state['start_time'] = time()
@@ -40,35 +39,29 @@ def start_node(state: AIChatState) -> AIChatState:
             o += 1
             res.append(msg['user'])
             res.extend(msg['assistant'])
-        t = count_tokens(memorier.abstract_cache + ','.join(res))
+        history_text = memorier.abstract_cache + ','.join(res)
+        t = count_tokens(history_text) if history_text else 0
         t += 4 * o  # 把每条对话的user,assistant,conversation_round都算上
 
         if t > configer.compress_history_threshold:
             # 生成历史对话摘要
-            memorier.compress_history()
-
-        if not memorier.cache_valid:    # 若压缩过历史对话，加载新的历史对话和摘要
-            logger.info('缓存失效，重新加载历史对话和摘要')
-            memorier.history_cache = memorier.load_history(0)
-            memorier.abstract_cache = memorier.load_abstract()
-            memorier.cache_valid = True
+            _, summary_agent, _ = agents
+            memorier.compress_history(summary_agent)
 
         logger.info('结点"start_node"执行完成！')
         return state
-    except Exception as e:
-        logger.error(f'执行结点"start_node"时出现错误:{e}')
+    except Exception as error:
+        logger.error('start node failed: %s', type(error).__name__)
         raise
 
 
 # 定义结束结点
-def end_node(state: AIChatState) -> AIChatState:
+def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatState:
     logger.info('执行结点"end_node"...')
 
     # 保存失败时仍返回回复，由接口明确告知前端。
     state['saved'] = memorier.record_message(state['message'])
 
-    logger.info(f'本轮对话:{state["message"]}')
-    logger.info(f'\n她的回复:{state["ai_response"]}\n她的内心独白:{state["ai_monologue"]}\n她的情绪:{state["ai_emotion"]}\n她的动作:{state["ai_action"]}')
     logger.info(f'总token使用:{state["total_tokens"]}')
     logger.info(f'执行总用时:{time()-state["start_time"]:.2f}s')
     logger.info('结点"end_node"执行完成！\n' + '-'*65)
@@ -79,7 +72,7 @@ def end_node(state: AIChatState) -> AIChatState:
 
 # AI结点定义
 # 分析用户输入
-def analysis(state: AIChatState) -> AIChatState:
+def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
         logger.info('执行结点"analysis"...')
         user_input = state.get('user_input')
@@ -111,8 +104,8 @@ def analysis(state: AIChatState) -> AIChatState:
 返回格式：
 {{"intent": "...", "emotion": "...", "answer": "..."}}"""
 
-        # 获得回复（动态获取当前代理）
-        response = agent_config.analysis_agent.invoke(
+        analysis_agent, _, _ = agents
+        response = analysis_agent.invoke(
             {
                 "messages": [{"role": "user", "content": analysis_prompt}]
             }
@@ -125,16 +118,15 @@ def analysis(state: AIChatState) -> AIChatState:
         state['analysis_result'] = ai_response
         state['total_tokens'] += get_total_tokens(last_message)
 
-        logger.info(f'分析结果:{state["analysis_result"]}')
         logger.info('结点"analysis"执行完成！')
         return state
-    except Exception as e:
-        logger.error(f'执行结点"analysis"时出现错误:{e}')
+    except Exception as error:
+        logger.error('analysis node failed: %s', type(error).__name__)
         raise
 
 
 # 生成回复结点
-def generate(state: AIChatState) -> AIChatState:
+def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
@@ -167,7 +159,8 @@ def generate(state: AIChatState) -> AIChatState:
 回复格式:
 {{"reply":["这里填写对用户的实际回复"],"inner monologue":[],"emotion":"平静","action":""}}"""
 
-        response = agent_config.friend_agent.invoke(
+        _, _, reply_agent = agents
+        response = reply_agent.invoke(
             {"messages": [{"role": "user", "content": user_prompt}]}
         )
         last_message = get_last_message(response)
@@ -194,6 +187,6 @@ def generate(state: AIChatState) -> AIChatState:
 
         logger.info('结点"generate"执行完成！')
         return state
-    except Exception as e:
-        logger.error(f'结点"generate"执行时出现错误:{e}')
+    except Exception as error:
+        logger.error('generate node failed: %s', type(error).__name__)
         raise

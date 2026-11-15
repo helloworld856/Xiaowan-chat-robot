@@ -1,4 +1,4 @@
-import {AuthRequiredError, CancelledRequestError, changePasswordAPI, profileAPI} from './api.ts';
+import {AuthRequiredError, CancelledRequestError, changePasswordAPI, getRequestGeneration, profileAPI} from './api.ts';
 import type {AvatarId, ProfileInfo} from './api.ts';
 import {menuBtn, menuSelect} from './ui.ts';
 
@@ -17,7 +17,9 @@ export function applyProfile(profile: ProfileInfo) {
 }
 
 export async function loadProfile() {
+    const generation = getRequestGeneration();
     const profile = await profileAPI();
+    if (generation !== getRequestGeneration()) throw new CancelledRequestError();
     applyProfile(profile);
 }
 
@@ -27,6 +29,11 @@ export function resetProfile() {
     window.USER_NAME = '';
     if (dialog().open) dialog().close();
     (element('profile-password-form') as HTMLFormElement).reset();
+    (element('profile-form') as HTMLFormElement).reset();
+    element('profile-display-name').textContent = '';
+    element('profile-username').textContent = '';
+    element('profile-preview').removeAttribute('src');
+    element('profile-avatars').replaceChildren();
 }
 
 export function initProfile() {
@@ -100,7 +107,9 @@ export function initProfile() {
 
     menuSelect[0].addEventListener('click', async () => {
         if (popup.open) return;
+        const generation = getRequestGeneration();
         menuBtn.classList.remove('active');
+        menuBtn.setAttribute('aria-expanded', 'false');
         showPassword(false);
         ready = false;
         message('profile-status', '正在读取资料…');
@@ -108,21 +117,27 @@ export function initProfile() {
         popup.showModal();
         try {
             await loadProfile();
+            if (generation !== getRequestGeneration()) return;
             fillProfile();
             ready = true;
             message('profile-status');
         } catch (error) {
-            if (!(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
+            if (generation === getRequestGeneration() && !(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
                 message('profile-status', error instanceof Error ? error.message : '读取失败，请关闭后重试', true);
             }
         } finally {
-            setBusy(false);
-            if (!ready) { fields.disabled = true; save.disabled = true; }
+            if (generation === getRequestGeneration()) {
+                setBusy(false);
+                if (!ready) { fields.disabled = true; save.disabled = true; }
+            }
         }
     });
     for (const button of [close, cancel]) button.addEventListener('click', () => { if (!busy) popup.close(); });
     popup.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
-    popup.addEventListener('close', () => { passwordForm.reset(); menuSelect[0].focus(); });
+    popup.addEventListener('close', () => {
+        passwordForm.reset();
+        if (!element('app-shell').hidden) menuBtn.focus();
+    });
     element('profile-default-avatar').addEventListener('click', () => { if (current) selectAvatar(current.default_avatar_id); });
     nickname.addEventListener('input', () => { element('profile-display-name').textContent = nickname.value.trim() || current?.username || ''; });
     element('profile-open-password').addEventListener('click', () => showPassword(true));
@@ -133,16 +148,20 @@ export function initProfile() {
         if (busy || !ready || !current || !form.reportValidity()) return;
         const value = nickname.value.trim();
         if (!value) { message('profile-status', '请输入昵称', true); return; }
+        if ([...value].length > 32) { message('profile-status', '昵称最多为 32 个字符', true); return; }
+        const generation = getRequestGeneration();
         setBusy(true);
         message('profile-status', '正在保存…');
         try {
-            applyProfile(await profileAPI({nickname: value, avatar_id: selected}));
+            const profile = await profileAPI({nickname: value, avatar_id: selected});
+            if (generation !== getRequestGeneration()) return;
+            applyProfile(profile);
             popup.close();
         } catch (error) {
-            if (!(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
+            if (generation === getRequestGeneration() && !(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
                 message('profile-status', error instanceof Error ? error.message : '保存失败，请重试', true);
             }
-        } finally { setBusy(false); }
+        } finally { if (generation === getRequestGeneration()) setBusy(false); }
     });
 
     passwordForm.addEventListener('submit', async event => {
@@ -153,6 +172,10 @@ export function initProfile() {
             new_password: input('profile-new-password').value,
             confirm_password: input('profile-confirm-password').value
         };
+        const length = [...passwords.new_password].length;
+        if (length < 6 || length > 15) {
+            message('profile-password-status', '新密码须为 6–15 个字符', true); return;
+        }
         if (passwords.new_password !== passwords.confirm_password) {
             message('profile-password-status', '两次新密码不一致', true); return;
         }

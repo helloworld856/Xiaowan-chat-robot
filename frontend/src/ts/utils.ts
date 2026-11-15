@@ -17,7 +17,7 @@ function createUserMessage(text: string) {
     const bubble = document.createElement('div');
     const triangle = document.createElement('div');
     const avatar = createAvatar(window.USER_AVATAR, '你的头像', 'user_avatar');
-    avatar.title = window.USER_NAME || 'admin';
+    avatar.title = window.USER_NAME || '你';
 
     message.className = 'user_message';
     bubble.className = 'user_bubble';
@@ -44,25 +44,26 @@ function createAssistantMessage(text: string) {
     return message;
 }
 
-export async function addUserMessage(text: string){
-    console.log('用户消息:' + text);
-    chatBox.appendChild(createUserMessage(text));
+export function addUserMessage(text: string){
+    const row = createUserMessage(text);
+    chatBox.appendChild(row);
+    return row;
 }
 
-export async function addAssistantMessage(messages: string[], isCurrent: () => boolean = () => true){
+export async function addAssistantMessage(messages: string[], isCurrent: () => boolean = () => true,
+                                          onFirstReply?: () => void){
     const baseSendInterval = 1000;
     const shouldScrollToBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 2;
 
     for (const [index, text] of messages.entries()) {
         if (!isCurrent()) return;
         chatBox.appendChild(createAssistantMessage(text));
+        if (index === 0) onFirstReply?.();
 
         if (shouldScrollToBottom) scrollToBottom();
 
         const delay = Math.min(baseSendInterval + 100 * text.length, 5000);
-        console.log('助手消息：', text);
         if (index !== messages.length - 1){
-            console.log(`下一条助手消息于${delay}ms后发送`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
@@ -70,11 +71,25 @@ export async function addAssistantMessage(messages: string[], isCurrent: () => b
 
 //显示历史聊天记录
 export function showChatHistory(chatHistory: ConversationItem[]){
+    const displayedRows = Array.from(chatBox.querySelectorAll<HTMLElement>('.user_message[data-conversation-round]'));
+    const displayed = new Set(displayedRows.map(row => row.dataset.conversationRound));
+    let nextDisplayed = 0;
     for (const item of chatHistory) {
-        chatBox.appendChild(createUserMessage(item.user));
-        for (const text of item.assistant) {
-            chatBox.appendChild(createAssistantMessage(text));
+        const round = String(item.conversation_round);
+        if (displayed.has(round)) continue;
+        let anchor = displayedRows[nextDisplayed];
+        while (anchor && Number(anchor.dataset.conversationRound) < item.conversation_round) {
+            anchor = displayedRows[++nextDisplayed];
         }
+        const row = createUserMessage(item.user);
+        row.dataset.conversationRound = round;
+        displayed.add(round);
+        const conversation = document.createDocumentFragment();
+        conversation.append(row);
+        for (const text of item.assistant) {
+            conversation.append(createAssistantMessage(text));
+        }
+        chatBox.insertBefore(conversation, anchor ?? null);
     }
     scrollToBottom();
 }
@@ -82,6 +97,9 @@ export function showChatHistory(chatHistory: ConversationItem[]){
 //设置主题
 export function switchTheme(theme:string){
     document.documentElement.className = theme;
-    localStorage.setItem('theme', theme);
-    console.log('主题已切换：', theme);
+    try {
+        localStorage.setItem('theme', theme);
+    } catch {
+        // 存储不可用时，仍可临时切换主题。
+    }
 }

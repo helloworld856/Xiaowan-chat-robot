@@ -34,6 +34,7 @@ class SettingsAPITests(unittest.TestCase):
         from threading import RLock
         self.agents.agent_lock = RLock()
         self.agents.analysis_agent, self.agents.text_agent, self.agents.friend_agent = self.old_agents
+        self.agents.active_model = None
         self.agent_calls = []
         def create_agents(*args):
             self.agent_calls.append(args)
@@ -49,13 +50,22 @@ class SettingsAPITests(unittest.TestCase):
             'log_config': types.SimpleNamespace(logger=types.SimpleNamespace(info=lambda _: None, warning=lambda _: None)),
         }):
             self.model = load_route('tested_model_router', 'model.py')
-        self.settings = load_route('tested_settings_router', 'settings.py')
+            self.settings = load_route('tested_settings_router', 'settings.py')
         self.model.settings_store = self.store
         self.settings.settings_store = self.store
         self.environment = patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'test-only-placeholder'})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.config = {'model_merchant': 'deepseek', 'model_name': 'MyModel-V2', 'base_url': 'https://example.com/v1'}
+        entries = {}
+        preference_store = types.SimpleNamespace(
+            get=lambda user_id: entries.get(user_id, self.settings.Preferences()),
+            update=lambda user_id, preferences: entries.__setitem__(user_id, preferences),
+        )
+        self.request_for = lambda user_id: types.SimpleNamespace(
+            state=types.SimpleNamespace(user=types.SimpleNamespace(id=user_id)),
+            app=types.SimpleNamespace(state=types.SimpleNamespace(preferences=preference_store)),
+        )
 
     def current_agents(self):
         return self.agents.analysis_agent, self.agents.text_agent, self.agents.friend_agent
@@ -63,20 +73,26 @@ class SettingsAPITests(unittest.TestCase):
     def test_connection_test_does_not_save_or_switch(self):
         result = self.model.test_model(self.model.ModelConfigRequest(**self.config))
         self.assertTrue(result.status)
-        self.assertIsNone(self.settings.get_settings().model)
+        self.assertIsNone(self.settings.get_settings(self.request_for(1)).model)
         self.assertEqual(self.current_agents(), self.old_agents)
         self.assertEqual(self.model_calls[0][0][2], 'MyModel-V2')
         self.assertEqual(self.model_calls[0][1]['base_url'], 'https://example.com/v1')
 
-    def test_save_model_and_preferences_survive_new_store(self):
+    def test_save_model_is_global_while_preferences_follow_account(self):
         self.assertTrue(self.model.validate_and_switch_model(self.model.ModelConfigRequest(**self.config)).status)
         self.assertEqual(self.current_agents(), self.new_agents)
         self.assertEqual(self.agent_calls[0][2:], ('MyModel-V2', 'https://example.com/v1'))
-        self.assertEqual(self.settings.save_settings(self.settings.Preferences(send_shortcut='ctrl_enter')).preferences.send_shortcut, 'ctrl_enter')
+        self.settings.save_settings(self.settings.Preferences(send_shortcut='ctrl_enter'), self.request_for(1))
+        settings_a = self.settings.get_settings(self.request_for(1))
+        settings_b = self.settings.get_settings(self.request_for(2))
+        self.assertTrue(settings_a.model_ready and settings_b.model_ready)
+        self.assertEqual(settings_a.model, settings_b.model)
+        self.assertEqual(settings_a.preferences.send_shortcut, 'ctrl_enter')
+        self.assertEqual(settings_b.preferences.send_shortcut, 'enter')
         from settings_config import SettingsStore
         reloaded = SettingsStore(self.store.path).get()
         self.assertEqual(reloaded.model.model_name, 'MyModel-V2')
-        self.assertEqual(reloaded.preferences.send_shortcut, 'ctrl_enter')
+        self.assertEqual(reloaded.preferences.send_shortcut, 'enter')
 
     def test_invalid_request_does_not_write(self):
         with self.assertRaises(ValidationError):
@@ -84,6 +100,25 @@ class SettingsAPITests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.model.ModelConfigRequest(**{**self.config, 'base_url': 'file:///secret'})
         self.assertFalse(self.store.path.exists())
+
+    def test_model_status_reports_active_agents_after_settings_file_is_edited(self):
+        request = self.model.ModelConfigRequest(**self.config)
+        self.assertTrue(self.model.validate_and_switch_model(request).status)
+        self.store.update_model(request.model_copy(update={'model_name': 'ManuallyEdited'}))
+
+        settings = self.settings.get_settings(self.request_for(1))
+        self.assertTrue(settings.model_ready)
+        self.assertEqual(settings.model.model_name, request.model_name)
+
+    def test_broken_settings_can_be_recovered_by_saving_a_valid_model(self):
+        self.store.path.write_text('{broken', encoding='utf-8')
+
+        settings = self.settings.get_settings(self.request_for(1))
+        self.assertFalse(settings.model_ready)
+        self.assertIsNone(settings.model)
+        request = self.model.ModelConfigRequest(**self.config)
+        self.assertTrue(self.model.validate_and_switch_model(request).status)
+        self.assertEqual(self.store.get().model.model_name, request.model_name)
 
     def test_write_failure_keeps_active_model(self):
         with patch.object(self.store, 'update_model', side_effect=OSError('write failed')):
@@ -114,6 +149,7 @@ class SettingsAPITests(unittest.TestCase):
             release.set()
             finished.wait(timeout=2)
         self.assertFalse(result.status)
+        self.assertIn('超时', result.info)
         self.assertEqual(self.current_agents(), self.old_agents)
         self.assertFalse(self.store.path.exists())
         # 超时调用退出后，新的连接仍能完成。
@@ -142,6 +178,31 @@ class SettingsAPITests(unittest.TestCase):
             worker.join(timeout=2)
         self.assertTrue(done.is_set())
         self.assertEqual(self.current_agents(), self.new_agents)
+
+    def test_model_validation_rejects_requests_when_workers_are_busy(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier, Event
+
+        capacity = self.model.MODEL_VALIDATION_CAPACITY
+        doing_work = Barrier(capacity + 1)
+        release = Event()
+
+        def slow_call(_):
+            doing_work.wait(timeout=5)
+            self.assertTrue(release.wait(timeout=5))
+
+        request = self.model.ModelConfigRequest(**self.config)
+        with patch.object(self.model, 'create_model', return_value=types.SimpleNamespace(invoke=slow_call)):
+            with ThreadPoolExecutor(max_workers=capacity + 1) as callers:
+                running = [callers.submit(self.model.test_model, request) for _ in range(capacity)]
+                try:
+                    doing_work.wait(timeout=5)
+                    extra = callers.submit(self.model.test_model, request).result(timeout=1)
+                    self.assertFalse(extra.status)
+                    self.assertIn('繁忙', extra.info)
+                finally:
+                    release.set()
+                self.assertTrue(all(item.result(timeout=5).status for item in running))
 
     def test_busy_chat_timeout_does_not_activate_model_later(self):
         from threading import Event, Thread

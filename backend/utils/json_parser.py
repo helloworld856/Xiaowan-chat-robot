@@ -9,7 +9,21 @@ from typing import Optional
 from log_config import logger
 
 
-def safe_parse_json(text: str, default_result: Optional[dict] = None) -> dict:
+def model_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ''
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+            parts.append(block['text'])
+    return ''.join(parts)
+
+
+def safe_parse_json(content: object, default_result: Optional[dict] = None) -> dict:
     """容错解析 JSON，失败时返回默认值。"""
     if default_result is None:
         default_result = {
@@ -18,7 +32,8 @@ def safe_parse_json(text: str, default_result: Optional[dict] = None) -> dict:
             "answer": "情感性回答"
         }
 
-    if not text or not text.strip():
+    text = model_text(content)
+    if not text.strip():
         return deepcopy(default_result)
 
     def try_parse(candidate: str):
@@ -62,6 +77,6 @@ def safe_parse_json(text: str, default_result: Optional[dict] = None) -> dict:
         if result is not None:
             return result
 
-    logger.warning(f'JSON 解析失败，使用默认值。原始文本: {text[:200]}')
+    logger.warning('模型返回的 JSON 无法解析，使用默认值')
     return deepcopy(default_result)
 

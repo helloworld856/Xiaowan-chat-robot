@@ -292,6 +292,7 @@ body {
     width: 2.5rem;
     height: 2.5rem;
     background: var(--chat-bg);
+    border: none;
     border-radius: 50%;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
     cursor: pointer;

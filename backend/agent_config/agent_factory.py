@@ -5,6 +5,8 @@ from langchain.agents import create_agent
 from persona_config import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
 from log_config import logger
 
+CHAT_MODEL_TIMEOUT_SECONDS = 45
+
 
 def create_model(model_merchant, api_key, model_name, temperature, max_tokens=None, base_url='', validation_timeout=None):
     merchant = model_merchant.lower().strip()
@@ -19,6 +21,8 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
         return ChatOpenAI(
             api_key=api_key,
             base_url=base_url or "https://api.deepseek.com",
+            # 基础压缩由标准库支持，避免运行环境中可选 Brotli 解码器不兼容。
+            default_headers={'Accept-Encoding': 'gzip, deflate'},
             **options,
         )
     if merchant == "tongyi":
@@ -41,7 +45,8 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, base_url: 
         )
         agents = tuple(
             create_agent(
-                model=create_model(merchant, api_key, model_name, temperature, base_url=base_url),
+                model=create_model(merchant, api_key, model_name, temperature, base_url=base_url,
+                                   validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS),
                 system_prompt=system_prompt,
             )
             for system_prompt, temperature in agent_options
@@ -50,5 +55,5 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, base_url: 
         logger.info(f'代理初始化成功: {merchant}/{model_name}')
         return agents
     except Exception as e:
-        logger.error(f'初始化代理时出现错误: {e}')
+        logger.error(f'初始化代理时出现错误: {type(e).__name__}')
         raise

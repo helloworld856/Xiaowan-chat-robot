@@ -1,91 +1,109 @@
+"""创建数据库、迁移表结构，并在应用启动时清理本次运行的聊天数据。"""
 import os
+import re
 
 import pymysql
 
 from config import configer
-from log_config import logger
+from .pool import ConnectionPool
 
 
-def rollback_db(db):
-    """尝试回滚，连接失效时记录错误，避免覆盖原来的异常。"""
-    try:
-        db.rollback()
-    except Exception as error:
-        logger.warning(f'回滚数据库操作失败:{error}')
-
-
-def init_db():
-    password = os.getenv('PASSWORD')
-    connection_config = {
+def open_pool(database='XiaoWan', **overrides):
+    if not re.fullmatch(r'[A-Za-z0-9_]+', database):
+        raise ValueError('数据库名称无效')
+    options = {
         'host': configer.host,
         'user': configer.user,
-        'password': password,
+        'password': os.getenv('PASSWORD'),
         'port': configer.port,
         'charset': configer.charset,
+        'connect_timeout': 5,
+        'read_timeout': 15,
+        'write_timeout': 15,
+        **overrides,
     }
-    # 连接数据库
-    try:
-        logger.info('连接数据库中...')
-        db = pymysql.connect(database='XiaoWan', **connection_config)
+    def connect():
+        try:
+            return pymysql.connect(database=database, **options)
+        except pymysql.OperationalError as error:
+            if error.args[0] != 1049:
+                raise
+        connection = pymysql.connect(**options)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f'CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci')
+        finally:
+            connection.close()
+        return pymysql.connect(database=database, **options)
 
-        logger.info('数据库连接成功!')
-    except pymysql.MySQLError as e:
-        if e.args[0] == 1049:   # unknown database
-            # 创建数据库
-            logger.info('数据库不存在，创建数据库...')
-            db = pymysql.connect(**connection_config)
-
-            try:
-                with db.cursor() as cursor:
-                    sql = "create database if not exists XiaoWan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-                    cursor.execute(sql)
-            finally:
-                db.close()
-
-            # 再次连接新创建的数据库
-            db = pymysql.connect(database='XiaoWan', **connection_config)
-            logger.info('数据库连接成功!')
-        else:
-            raise
-
-    try:
-        logger.info('初始化历史对话表...')
-        with db.cursor() as cursor:
-            # 建立历史对话表，若不存在，则新建
-            sql = """CREATE TABLE IF NOT EXISTS history_messages(
-                conversation_round INT PRIMARY KEY,
-                user MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-                assistant MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-            );"""
-            cursor.execute(sql)
-            # 保留每次启动时清空历史对话的设置
-            cursor.execute("delete from history_messages;")
-
-        db.commit()
-        logger.info('历史对话表初始化成功!')
-    except Exception as e:
-        rollback_db(db)
-        logger.error(f'初始化历史对话表时，出现错误:{e}')
-
-    try:
-        logger.info('初始化历史对话摘要表...')
-        with db.cursor() as cursor:
-            # 建立历史对话摘要表
-            sql = """create table if not exists abstract_messages(
-                abstract MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-            );"""
-            cursor.execute(sql)
-            # 保留每次启动时清空摘要的设置
-            cursor.execute('delete from abstract_messages;')
-            # 插入一条空摘要，否则后面无法更新
-            cursor.execute("INSERT INTO abstract_messages (abstract) VALUES ('');")
-
-        db.commit()
-        logger.info('摘要表初始化成功!')
-    except Exception as e:
-        rollback_db(db)
-        logger.error(f'初始化摘要表时，出现错误{e}')
-
-    return db
+    return ConnectionPool(connect)
 
 
+def initialize_schema(pool):
+    with pool.connection() as connection, connection.cursor() as cursor:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(32) NOT NULL,
+                username_key VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(16) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id BIGINT UNSIGNED PRIMARY KEY,
+                send_shortcut VARCHAR(16) NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS history_messages (
+                user_id BIGINT UNSIGNED NOT NULL,
+                conversation_round INT NOT NULL,
+                user MEDIUMTEXT,
+                assistant MEDIUMTEXT,
+                PRIMARY KEY (user_id, conversation_round)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        cursor.execute("SHOW COLUMNS FROM history_messages LIKE 'user_id'")
+        if cursor.fetchone() is None:
+            # 单用户历史本来就在重启时清空，迁移后按账号重新开始编号。
+            cursor.execute('DELETE FROM history_messages')
+            cursor.execute('''
+                ALTER TABLE history_messages
+                ADD COLUMN user_id BIGINT UNSIGNED NOT NULL FIRST,
+                DROP PRIMARY KEY,
+                ADD PRIMARY KEY (user_id, conversation_round)
+            ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS abstract_messages (
+                user_id BIGINT UNSIGNED PRIMARY KEY,
+                abstract MEDIUMTEXT NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        cursor.execute("SHOW COLUMNS FROM abstract_messages LIKE 'user_id'")
+        if cursor.fetchone() is None:
+            cursor.execute('DELETE FROM abstract_messages')
+            cursor.execute('''
+                ALTER TABLE abstract_messages
+                ADD COLUMN user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY FIRST
+            ''')
+        # 单用户版本继承服务器的默认引擎，压缩和清理需要两个表都支持事务。
+        cursor.execute('''
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND engine <> 'InnoDB'
+              AND table_name IN ('history_messages', 'abstract_messages')
+        ''')
+        legacy_engines = {table for (table,) in cursor.fetchall()}
+        for table in ('history_messages', 'abstract_messages'):
+            if table in legacy_engines:
+                cursor.execute(f'ALTER TABLE {table} ENGINE=InnoDB')
+        connection.commit()
+
+
+def reset_chat_history(pool):
+    with pool.connection() as connection, connection.cursor() as cursor:
+        cursor.execute('DELETE FROM history_messages')
+        cursor.execute('DELETE FROM abstract_messages')
+        connection.commit()

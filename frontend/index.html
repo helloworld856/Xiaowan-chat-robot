@@ -26,7 +26,7 @@
         </div>
     </div>
     <section id="login-screen" aria-labelledby="login-title" hidden>
-        <form id="login-form" class="login-card">
+        <form id="login-form" class="login-card" method="post">
             <header class="login-heading">
                 <h1 id="login-title">登录小晚</h1>
                 <p class="login-description">登录后继续聊天</p>
@@ -34,15 +34,36 @@
             <div class="login-fields">
                 <div class="login-field">
                     <label for="login-username">用户名</label>
-                    <input id="login-username" name="username" type="text" autocomplete="username" value="admin" maxlength="64" required>
+                    <input id="login-username" name="username" type="text" autocomplete="username" maxlength="64" required>
                 </div>
                 <div class="login-field">
                     <label for="login-password">密码</label>
-                    <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" aria-describedby="login-error" required>
+                    <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="512" aria-describedby="login-error" required>
                 </div>
             </div>
             <p id="login-error" class="login-error" role="alert"></p>
-            <button id="login-submit" type="submit">登录</button>
+            <button id="login-submit" class="login-primary" type="submit">登录</button>
+            <button id="open-register" class="login-switch" type="button">注册账号</button>
+        </form>
+        <form id="register-form" class="login-card" method="post" hidden>
+            <header class="login-heading"><h1 id="register-title">注册账号</h1></header>
+            <div class="login-fields">
+                <div class="login-field">
+                    <label for="register-username">用户名</label>
+                    <input id="register-username" name="username" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" title="用户名须为 3–32 位英文字母、数字或下划线" required>
+                </div>
+                <div class="login-field">
+                    <label for="register-password">密码</label>
+                    <input id="register-password" name="password" type="password" autocomplete="new-password" aria-describedby="register-error" required>
+                </div>
+                <div class="login-field">
+                    <label for="register-confirm-password">确认密码</label>
+                    <input id="register-confirm-password" name="confirm_password" type="password" autocomplete="new-password" aria-describedby="register-error" required>
+                </div>
+            </div>
+            <p id="register-error" class="login-error" role="alert"></p>
+            <button id="register-submit" class="login-primary" type="submit">注册</button>
+            <button id="open-login" class="login-switch" type="button">返回登录</button>
         </form>
     </section>
 
@@ -78,9 +99,9 @@
         <!-- 聊天框 -->
         <div id="chat-container">
             <div id="chatBox"></div>
-            <div id="comeToBottom" title="回到底部">
-                <img src="/ico/arrow.png" alt="↓">
-            </div>
+            <button id="comeToBottom" type="button" title="回到底部" aria-label="回到底部">
+                <img src="/ico/arrow.png" alt="">
+            </button>
         </div>
 
         <!-- 输入区 -->
@@ -92,13 +113,13 @@
 
     <!-- 菜单 -->
     <div id="menu-zone">
-        <div id="menuBtn" title="菜单">
-            <svg viewBox="0 0 24 24">
+        <button id="menuBtn" type="button" title="菜单" aria-label="账户与设置" aria-expanded="false" aria-controls="menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="6" r="2"/>
                 <circle cx="12" cy="12" r="2"/>
                 <circle cx="12" cy="18" r="2"/>
             </svg>
-        </div>
+        </button>
         <div id="menu">
             <div class="account-info">当前账户：<span id="current-username"></span></div>
             <button class="value value1">
@@ -146,10 +167,10 @@
             <fieldset id="profile-fields" disabled>
                 <div class="profile-summary">
                     <img id="profile-preview" alt="当前头像" width="60" height="60">
-                    <div><strong id="profile-display-name"></strong><p class="profile-account">登录账号：<span id="profile-username">admin</span></p></div>
+                    <div><strong id="profile-display-name"></strong><p class="profile-account">登录账号：<span id="profile-username"></span></p></div>
                 </div>
                 <label class="profile-label" for="profile-nickname">昵称</label>
-                <input id="profile-nickname" class="profile-input" maxlength="24" required autocomplete="nickname">
+                <input id="profile-nickname" class="profile-input" maxlength="64" required autocomplete="nickname">
                 <div class="profile-avatar-heading"><span class="profile-label">系统头像</span><button id="profile-default-avatar" class="profile-text-button" type="button">恢复默认</button></div>
                 <div id="profile-avatars" role="group" aria-label="系统头像"></div>
                 <button id="profile-open-password" class="profile-password-link" type="button">修改密码 <span aria-hidden="true">›</span></button>
@@ -160,16 +181,15 @@
                 <button id="profile-save" class="profile-primary" type="submit" disabled>保存</button>
             </div>
         </form>
-        <form id="profile-password-form" hidden>
+        <form id="profile-password-form" method="post" hidden>
             <fieldset id="profile-password-fields">
                 <label class="profile-label" for="profile-current-password">当前密码</label>
-                <input id="profile-current-password" class="profile-input" type="password" autocomplete="current-password" maxlength="256" required>
+                <input id="profile-current-password" class="profile-input" name="current_password" type="password" autocomplete="current-password" maxlength="512" required>
                 <label class="profile-label" for="profile-new-password">新密码</label>
-                <input id="profile-new-password" class="profile-input" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+                <input id="profile-new-password" class="profile-input" name="new_password" type="password" autocomplete="new-password" aria-describedby="profile-password-status" required>
                 <label class="profile-label" for="profile-confirm-password">确认新密码</label>
-                <input id="profile-confirm-password" class="profile-input" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+                <input id="profile-confirm-password" class="profile-input" name="confirm_password" type="password" autocomplete="new-password" aria-describedby="profile-password-status" required>
             </fieldset>
-            <p class="profile-help">修改成功后需要重新登录。</p>
             <p id="profile-password-status" class="profile-status" role="status"></p>
             <div class="profile-actions">
                 <button id="profile-password-back" class="profile-secondary" type="button">返回资料</button>
@@ -203,7 +223,7 @@
                 <!-- 模型信息展示区 -->
                 <div id="model-info-view">
                     <h2>模型连接</h2>
-                    <div class="info-item">
+                    <div class="info-item" data-model-admin hidden>
                         <label>接口地址：</label>
                         <span id="display-base-url">厂商默认地址</span>
                     </div>
@@ -216,10 +236,10 @@
                         <span id="display-model">-</span>
                     </div>
                     <div class="info-item">
-                        <label>API-key：</label>
-                          <span id="display-key">********</span>
+                        <label>模型状态：</label>
+                        <span id="display-model-status">未就绪</span>
                     </div>
-                    <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
+                    <button type="button" id="open-modify-btn" class="modify-btn" data-model-admin hidden>修改模型配置</button>
                 </div>
 
                 <form id="preferences-form">
@@ -245,10 +265,6 @@
                                     <option value="deepseek" checked>deepseek</option>
                                     <option value="tongyi">通义千问</option>
                                 </select>
-                            </div>
-                            <div class="form-group">
-                                <label>API-key:</label>
-                                <input type="password" id="apiKeyInput" placeholder="在这里输入api-key" autocomplete="off"/>
                             </div>
                             <div class="form-group">
                                 <label for="modelName">模型名:</label>
@@ -282,7 +298,7 @@
             <div class="alert-window-header">
                 <span>提示</span>
             </div>
-            <div class="alert-window-content">
+            <div class="alert-window-content" role="alert">
                 <p></p>
             </div>
             <div class="alert-window-button">

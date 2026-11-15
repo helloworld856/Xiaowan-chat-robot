@@ -10,9 +10,7 @@ import {
     themeInput,
     menuSelect,
     windowAlertContainer,
-    windowAlertP,
     chatBox,
-    openPopup,
     closePopup
 } from './ui.ts';
 import {sendMessage} from './chat.ts';
@@ -59,10 +57,19 @@ function bindMenuEvents() {
     const themeSelect = document.querySelector<HTMLDivElement>('#menu .theme-select')!;
     const themeMenuButton = menuSelect[2];
 
+    function closeMenu() {
+        menuBtn.classList.remove('active');
+        menuBtn.setAttribute('aria-expanded', 'false');
+        menuSelect.forEach(item => item.classList.remove('active'));
+    }
+
     menuBtn.addEventListener('click', event => {
         event.stopPropagation();
-        const isOpen = window.getComputedStyle(menu).display === 'flex';
-        menuBtn.classList.toggle('active', !isOpen);
+        if (menuBtn.classList.contains('active')) closeMenu();
+        else {
+            menuBtn.classList.add('active');
+            menuBtn.setAttribute('aria-expanded', 'true');
+        }
     });
 
     themeMenuButton.addEventListener('click', () => {
@@ -72,15 +79,18 @@ function bindMenuEvents() {
 
     menu.addEventListener('click', event => event.stopPropagation());
 
-    document.addEventListener('click', () => {
-        menuBtn.classList.remove('active');
-        menuSelect.forEach(item => item.classList.remove('active'));
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !menuBtn.classList.contains('active')) return;
+        if (document.activeElement === menuBtn || menu.contains(document.activeElement)) {
+            closeMenu();
+            menuBtn.focus();
+        }
     });
 
     themeInput.forEach(radio => {
         radio.addEventListener('change', () => {
             if (!radio.checked) return;
-            console.log('切换主题...');
             switchTheme(radio.value);
         });
     });

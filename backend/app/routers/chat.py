@@ -1,31 +1,34 @@
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
+
+from core.session import ChatNotStarted
 from schemas.chat import ChatRequest, ChatResponse
-from core.session import session, graph
-import agent_config
-
-
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+MAX_MESSAGE_LENGTH = 8000
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
-    if not agent_config.analysis_agent or not agent_config.text_agent or not agent_config.friend_agent:
-        raise HTTPException(400, "请先配置有效的模型")
-
+@router.post('/chat', response_model=ChatResponse)
+async def chat(req: ChatRequest, request: Request):
     try:
-        # 一轮对话完成后再切换代理，避免分析与回复使用不同配置。
-        with agent_config.agent_lock:
-            session["state"]['user_input'] = req.user_input
-            result = graph.invoke(session["state"])
-            session["state"] = result
-        return ChatResponse(
-            response=result["ai_response"],
-            conversation_round=result["message"]["conversation_round"] - 1,
-            saved=result["saved"],
-        )
-    except Exception as e:
-        raise HTTPException(500, f"AI 处理失败: {e}")
+        if len(req.user_input) > MAX_MESSAGE_LENGTH:
+            raise ChatNotStarted(422, f'消息最多可输入 {MAX_MESSAGE_LENGTH} 个字符')
+        if not req.user_input.strip():
+            raise ChatNotStarted(422, '请输入消息内容')
+        result = await request.app.state.chat.send(request.state.user.id, req.user_input)
+    except ChatNotStarted as error:
+        raise HTTPException(
+            error.status_code,
+            detail={'code': 'CHAT_NOT_STARTED', 'message': str(error)},
+        ) from None
+    except Exception as error:
+        logger.error('chat execution failed: %s', type(error).__name__)
+        raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
 
-
-
+    return ChatResponse(
+        response=result['ai_response'],
+        conversation_round=result['message']['conversation_round'] - 1,
+        saved=result['saved'],
+    )

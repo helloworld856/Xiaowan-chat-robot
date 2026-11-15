@@ -1,8 +1,9 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from threading import BoundedSemaphore
 from time import monotonic
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import agent_config
 from agent_config.agent_factory import create_model
@@ -11,27 +12,66 @@ from schemas.model import ModelConfigRequest, ModelConfigResponse
 from settings_config import settings_store
 
 router = APIRouter()
-validation_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-test')
+MODEL_VALIDATION_CAPACITY = 2
+validation_pool = ThreadPoolExecutor(max_workers=MODEL_VALIDATION_CAPACITY, thread_name_prefix='model-test')
+validation_slots = BoundedSemaphore(MODEL_VALIDATION_CAPACITY)
 VALIDATION_TIMEOUT_SECONDS = 20
 MODEL_SWITCH_TIMEOUT_SECONDS = 25
+MODEL_API_KEYS = {'deepseek': 'DEEPSEEK_API_KEY', 'tongyi': 'TONGYI_API_KEY'}
+
+
+class ModelValidationBusy(Exception):
+    pass
+
+
+def use_agents(model, agents):
+    with agent_config.agent_lock:
+        agent_config.analysis_agent, agent_config.text_agent, agent_config.friend_agent = agents
+        agent_config.active_model = model
+
+
+async def require_admin(request: Request):
+    if request.state.user.role != 'admin':
+        raise HTTPException(403, '只有管理员可以配置模型')
+
+
+def activate_saved_model(model):
+    if model is None:
+        return
+    api_key = os.getenv(MODEL_API_KEYS[model.model_merchant])
+    if not api_key:
+        logger.warning('未配置已保存模型所需的服务端 API Key')
+        return
+    try:
+        agents = agent_config.create_agents(model.model_merchant, api_key, model.model_name, model.base_url)
+        use_agents(model, agents)
+    except Exception:
+        logger.warning('启动时载入已保存的模型失败，请管理员检查配置')
 
 
 def validate_connection(llm):
     # 前端 30 秒超时前返回；后台验证即使稍后结束也不会继续切换模型。
-    future = validation_pool.submit(llm.invoke, 'hi')
+    if not validation_slots.acquire(blocking=False):
+        raise ModelValidationBusy
+    try:
+        future = validation_pool.submit(llm.invoke, 'hi')
+    except Exception:
+        validation_slots.release()
+        raise
+    future.add_done_callback(lambda _: validation_slots.release())
     try:
         future.result(timeout=VALIDATION_TIMEOUT_SECONDS)
     except TimeoutError:
         future.cancel()
-        raise TimeoutError('模型连接测试超时')
+        raise TimeoutError('模型连接测试超时') from None
 
 
-@router.post("/model", response_model=ModelConfigResponse)
+@router.post("/model", response_model=ModelConfigResponse, dependencies=[Depends(require_admin)])
 def validate_and_switch_model(request: ModelConfigRequest):
     return configure_model(request, activate=True)
 
 
-@router.post('/model/test', response_model=ModelConfigResponse)
+@router.post('/model/test', response_model=ModelConfigResponse, dependencies=[Depends(require_admin)])
 def test_model(request: ModelConfigRequest):
     return configure_model(request, activate=False)
 
@@ -46,10 +86,7 @@ def configure_model(request: ModelConfigRequest, activate: bool):
         return ModelConfigResponse(status=False, info="模型名称不能为空")
 
     try:
-        api_key_name = {
-            "deepseek": "DEEPSEEK_API_KEY",
-            "tongyi": "TONGYI_API_KEY",
-        }.get(merchant)
+        api_key_name = MODEL_API_KEYS.get(merchant)
         if api_key_name is None:
             return ModelConfigResponse(status=False, info="模型配置无效！")
 
@@ -73,17 +110,20 @@ def configure_model(request: ModelConfigRequest, activate: bool):
                 settings_store.update_model(request)
             except (OSError, ValueError):
                 return ModelConfigResponse(status=False, info='配置保存失败，原有模型仍在使用')
-            agent_config.analysis_agent, agent_config.text_agent, agent_config.friend_agent = agents
+            use_agents(request, agents)
         finally:
             agent_config.agent_lock.release()
 
         logger.info(f"模型配置切换成功: {merchant}/{model_name}")
         return ModelConfigResponse(status=True, info=f"已切换到 {merchant}/{model_name}")
 
+    except ModelValidationBusy:
+        return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
+    except TimeoutError:
+        return ModelConfigResponse(status=False, info='请求超时，请检查网络')
     except Exception as e:
-        error_msg = str(e)
-        normalized_error = error_msg.lower()
-        logger.warning(f"模型配置失败: {error_msg}")
+        normalized_error = str(e).lower()
+        logger.warning(f"模型配置失败: {type(e).__name__}")
 
         if any(
             marker in normalized_error

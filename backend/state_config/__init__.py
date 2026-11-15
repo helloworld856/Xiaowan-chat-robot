@@ -1,19 +1,16 @@
 from .state import AIChatState
 
-State: AIChatState = {
-    "user_input": '',
-    "analysis_result": {},
-    "ai_response": [],
-    'saved': False,
-    'ai_monologue': '',
-    'ai_emotion': '',
-    'ai_action': '',
-    "total_tokens": 0,
-    'message': {
-        'conversation_round': 0,
-        'user': '',
-        'assistant': [],
-    },
-    'start_time': 0,
 
-}
+def create_initial_state(next_round: int = 0) -> AIChatState:
+    return {
+        'user_input': '',
+        'analysis_result': {},
+        'ai_response': [],
+        'saved': False,
+        'ai_monologue': '',
+        'ai_emotion': '',
+        'ai_action': '',
+        'total_tokens': 0,
+        'message': {'conversation_round': next_round, 'user': '', 'assistant': []},
+        'start_time': 0,
+    }

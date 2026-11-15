@@ -70,6 +70,49 @@ test('a normal signed-out session response is returned without an auth failure e
     assert.deepEqual(events, []);
 });
 
+test('registration uses its own endpoint without the current account header', async t => {
+    const calls = [];
+    const user = {id: 7, username: 'new_user', role: 'user'};
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push({url, ...options});
+        return new Response(JSON.stringify({user}), {status: 201});
+    });
+    assert.deepEqual(await api.registerAPI('new_user', 'long-test-password', 'long-test-password'), {user});
+    assert.equal(calls[0].url, 'http://local-test/auth/register');
+    assert.equal(calls[0].headers['X-Xiaowan-User'], undefined);
+    assert.deepEqual(JSON.parse(calls[0].body), {
+        username: 'new_user', password: 'long-test-password', confirm_password: 'long-test-password'
+    });
+});
+
+test('private requests identify the signed-in account and expose a definite pre-execution rejection', async t => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push([url, options.headers['X-Xiaowan-User']]);
+        if (url.endsWith('/chat')) {
+            return new Response(JSON.stringify({detail: {code: 'CHAT_NOT_STARTED', message: '当前聊天较忙'}}), {status: 503});
+        }
+        return new Response(JSON.stringify({ok: true}));
+    });
+    api.invalidateRequests({id: 7, username: 'new_user', role: 'user'});
+    try {
+        await assert.rejects(api.chatAPI('消息'), error => error instanceof api.ChatNotStartedError && error.message === '当前聊天较忙');
+        await api.logoutAPI();
+    } finally {
+        api.invalidateRequests();
+    }
+    assert.deepEqual(calls, [['http://local-test/chat', '7'], ['http://local-test/auth/logout', '7']]);
+});
+
+test('server validation of a chat message is a definite non-retryable rejection', async t => {
+    t.mock.method(globalThis, 'fetch', async () => new Response(
+        JSON.stringify({detail: {code: 'CHAT_NOT_STARTED', message: '聊天消息最多 8000 个字符'}}),
+        {status: 422}
+    ));
+    await assert.rejects(api.chatAPI('消息'), error => error instanceof api.ChatNotStartedError &&
+        error.retryable === false && error.message === '聊天消息最多 8000 个字符');
+});
+
 test('profile saves only nickname and system avatar ID; password change goes to its own endpoint', async t => {
     assert.equal(typeof api.profileAPI, 'function', 'profile API is missing');
     assert.equal(typeof api.changePasswordAPI, 'function', 'password API is missing');

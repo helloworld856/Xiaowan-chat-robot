@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "version": "1.0.0",
-  "description": "小晚 AI 角色对话软件：单人本地聊天、模型切换与对话摘要",
+  "description": "小晚 AI 角色对话软件，支持多账号聊天、模型切换与对话摘要",
   "main": "index.js",
   "scripts": {
     "dev": "vite",

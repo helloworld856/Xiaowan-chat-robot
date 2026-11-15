@@ -11,8 +11,8 @@ from routers.auth import router as auth_router
 from routers.profile import router as profile_router
 
 def create_app(version: str, auth_service: AuthService | None = None,
-               profile_store: ProfileStore | None = None) -> FastAPI:
-    app = FastAPI(title=SOFTWARE_NAME, version=version)
+               profile_store: ProfileStore | None = None, lifespan=None) -> FastAPI:
+    app = FastAPI(title=SOFTWARE_NAME, version=version, lifespan=lifespan)
     app.state.auth = auth_service or AuthService()
     app.state.profile = profile_store if profile_store is not None else ProfileStore()
     app.add_middleware(AuthenticationMiddleware, service=app.state.auth)

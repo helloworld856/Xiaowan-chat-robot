@@ -4,35 +4,54 @@ import type {Preferences} from './preferences.ts';
 const base_url = window.location.origin;
 let requestGeneration = 0;
 let sessionRequests = new AbortController();
+let currentUser: AuthUser | undefined;
 
 export class AuthRequiredError extends Error {}
 export class CancelledRequestError extends Error {}
+export class ChatNotStartedError extends Error {
+    constructor(message: string, readonly retryable = true) { super(message); }
+}
 export function getRequestGeneration() { return requestGeneration; }
-export function invalidateRequests() {
+export function canManageModel() { return currentUser?.role === 'admin'; }
+export function invalidateRequests(user?: AuthUser) {
     requestGeneration++;
     sessionRequests.abort();
     sessionRequests = new AbortController();
+    currentUser = user;
 }
 
-async function requestJSON<T>(path: string, options: RequestInit, fallback: string, authEndpoint = false): Promise<T> {
+async function requestJSON<T>(path: string, options: RequestInit, fallback: string,
+                              mode: 'session' | 'public' | 'logout' = 'session'): Promise<T> {
     const generation = requestGeneration;
+    const sessionBound = mode === 'session';
+    const user = mode !== 'public' ? currentUser : undefined;
     let response: Response;
     try {
         response = await fetch(`${base_url}${path}`, {
             ...options, credentials: 'same-origin',
-            ...(!authEndpoint ? {signal: options.signal
+            ...(sessionBound ? {signal: options.signal
                 ? AbortSignal.any([options.signal, sessionRequests.signal]) : sessionRequests.signal} : {}),
-            headers: {'Content-Type': 'application/json', ...options.headers}
+            headers: {
+                'Content-Type': 'application/json',
+                ...(user ? {'X-Xiaowan-User': String(user.id)} : {}),
+                ...options.headers
+            }
         });
     } catch (error) {
-        if (!authEndpoint && generation !== requestGeneration) throw new CancelledRequestError();
+        if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
         throw error;
     }
     const body = await response.json().catch(() => null);
-    if (!authEndpoint && generation !== requestGeneration) throw new CancelledRequestError();
+    if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
     if (response.status === 401) {
-        if (!authEndpoint) window.dispatchEvent(new Event('auth-required'));
+        if (sessionBound) window.dispatchEvent(new Event('auth-required'));
         throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
+    }
+    if (path === '/chat' && (response.status === 422 || response.status === 429 || response.status === 503) &&
+        body?.detail?.code === 'CHAT_NOT_STARTED') {
+        const retryable = response.status !== 422;
+        const message = retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
+        throw new ChatNotStartedError(typeof body.detail.message === 'string' ? body.detail.message : message, retryable);
     }
     if (!response.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);
     if (body === null) throw new Error(fallback);
@@ -40,7 +59,9 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
 }
 
 export function chatAPI(userInput: string): Promise<ChatResponse> {
-    return requestJSON('/chat', {method: 'POST', body: JSON.stringify({user_input: userInput})}, '聊天请求失败');
+    return requestJSON('/chat', {
+        method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify({user_input: userInput})
+    }, '聊天请求失败');
 }
 
 export function historyAPI(num: number, front = true) {
@@ -62,7 +83,7 @@ export function modelAPI(model: ModelInfo, testOnly = false) {
     }, '模型配置请求失败');
 }
 
-export interface SavedSettings { model: ModelInfo | null; preferences: Preferences; }
+export interface SavedSettings { model: ModelInfo | null; model_ready: boolean; preferences: Preferences; }
 export function settingsAPI(preferences?: Preferences): Promise<SavedSettings> {
     return requestJSON('/settings', {
         method: preferences ? 'POST' : 'GET', signal: AbortSignal.timeout(15000),
@@ -70,21 +91,26 @@ export function settingsAPI(preferences?: Preferences): Promise<SavedSettings> {
     }, preferences ? '设置保存失败，请检查后端和配置文件。' : '设置读取失败，可在设置页重新读取。');
 }
 
-export interface AuthUser { username: string; }
+export interface AuthUser { id: number; username: string; role: 'admin' | 'user'; }
 export function loginAPI(username: string, password: string) {
     return requestJSON<{user: AuthUser}>('/auth/login', {
         method: 'POST', signal: AbortSignal.timeout(15000), body: JSON.stringify({username, password})
-    }, '登录失败，请检查后端连接', true);
+    }, '登录失败，请检查后端连接', 'public');
+}
+export function registerAPI(username: string, password: string, confirm_password: string) {
+    return requestJSON<{user: AuthUser}>('/auth/register', {
+        method: 'POST', signal: AbortSignal.timeout(15000), body: JSON.stringify({username, password, confirm_password})
+    }, '注册失败，请检查输入后重试', 'public');
 }
 export function sessionAPI() {
     return requestJSON<{user: AuthUser | null}>('/auth/session', {
         method: 'GET', signal: AbortSignal.timeout(15000)
-    }, '无法检查登录状态，请检查后端连接', true);
+    }, '无法检查登录状态，请检查后端连接', 'public');
 }
 export function logoutAPI() {
     return requestJSON<{ok: boolean}>('/auth/logout', {
         method: 'POST', signal: AbortSignal.timeout(15000)
-    }, '退出失败，请检查后端连接后重试', true);
+    }, '退出失败，请检查后端连接后重试', 'logout');
 }
 
 export type AvatarId = 'cat' | 'fox' | 'rabbit' | 'bear' | 'penguin' | 'frog';

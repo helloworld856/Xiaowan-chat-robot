@@ -4,6 +4,7 @@ import sys
 import unittest
 from http.cookies import SimpleCookie
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -17,13 +18,17 @@ def auth_module():
         raise AssertionError('账户验证尚未实现') from None
 
 
-def request(app, path, method='GET', payload=None, cookie=None, origin=None, scheme='http'):
+def request(app, path, method='GET', payload=None, cookie=None, origin=None, scheme='http', expected_user=None,
+            extra_headers=()):
     """执行真实 ASGI 应用；这些路由没有外部异步 I/O，不需要网络套接字。"""
     headers = [(b'host', b'testserver'), (b'content-type', b'application/json')]
+    headers.extend(extra_headers)
     if cookie:
         headers.append((b'cookie', cookie.encode()))
     if origin:
         headers.append((b'origin', origin.encode()))
+    if expected_user is not None:
+        headers.append((b'x-xiaowan-user', str(expected_user).encode()))
     scope = {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'},
              'http_version': '1.1', 'method': method, 'scheme': scheme, 'path': path,
              'raw_path': path.encode(), 'root_path': '', 'query_string': b'',
@@ -34,8 +39,12 @@ def request(app, path, method='GET', payload=None, cookie=None, origin=None, sch
     async def send(message):
         sent.append(message)
     coroutine = app(scope, receive, send)
+    async def run_locally(function, /, *args, **options):
+        return function(*args)
     try:
-        coroutine.send(None)
+        # Only replace ASGI's thread dispatch; exercise real route code in the socket-restricted test harness.
+        with patch('anyio.to_thread.run_sync', new=run_locally):
+            coroutine.send(None)
     except StopIteration:
         pass
     else:
@@ -57,16 +66,17 @@ class AuthTests(unittest.TestCase):
             self.service.login('someone', '123456', 'test')
         with self.assertRaises(self.auth.InvalidCredentials):
             self.service.login('admin', 'wrong', 'test')
-        token = self.service.login('admin', '123456', 'test')
-        self.assertEqual(self.service.get_user(token), 'admin')
+        token, user = self.service.login('admin', '123456', 'test')
+        self.assertEqual(user.username, 'admin')
+        self.assertEqual(self.service.get_user(token), user)
         self.assertIsNone(self.service.get_user('admin'))
         self.assertIsNone(self.service.get_user('forged-token'))
 
     def test_sessions_expire_and_logout_revokes_them(self):
-        token = self.service.login('admin', '123456', 'test')
+        token, _ = self.service.login('admin', '123456', 'test')
         self.service.logout(token)
         self.assertIsNone(self.service.get_user(token))
-        token = self.service.login('admin', '123456', 'test')
+        token, _ = self.service.login('admin', '123456', 'test')
         self.now += self.auth.SESSION_TTL_SECONDS + 1
         self.assertIsNone(self.service.get_user(token))
 
@@ -77,8 +87,8 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(self.auth.LoginThrottled):
             self.service.login('admin', '123456', 'test')
         self.now += 61
-        self.assertEqual(self.service.get_user(self.service.login('admin', '123456', 'test')), 'admin')
-
+        token, _ = self.service.login('admin', '123456', 'test')
+        self.assertEqual(self.service.get_user(token).username, 'admin')
 
 class AuthHTTPTests(unittest.TestCase):
     def setUp(self):
@@ -101,7 +111,7 @@ class AuthHTTPTests(unittest.TestCase):
         status, headers, body = request(self.app, '/auth/login', 'POST',
                                         {'username': 'admin', 'password': '123456'}, cookie=cookie, scheme=scheme)
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {'user': {'username': 'admin'}})
+        self.assertEqual(json.loads(body), {'user': {'id': 1, 'username': 'admin', 'role': 'admin'}})
         jar = SimpleCookie()
         jar.load(headers['set-cookie'])
         return headers, f'{self.auth.COOKIE_NAME}={jar[self.auth.COOKIE_NAME].value}'
@@ -157,10 +167,104 @@ class AuthHTTPTests(unittest.TestCase):
         self.assertEqual(json.loads(body), {'user': None})
         self.assertEqual(request(self.app, '/auth/session', cookie=new_cookie)[0], 200)
 
-    def test_cross_origin_writes_are_rejected_and_registration_is_absent(self):
+    def test_automatic_https_proxy_preserves_same_origin_and_secure_cookie(self):
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+        app = ProxyHeadersMiddleware(self.app, trusted_hosts='127.0.0.1')
+        credentials = {'username': 'admin', 'password': '123456'}
+        forwarded = ((b'x-forwarded-proto', b'https'),)
+        status, headers, _ = request(app, '/auth/login', 'POST', credentials,
+                                     origin='https://testserver', extra_headers=forwarded)
+        self.assertEqual(status, 200)
+        self.assertIn('Secure', headers['set-cookie'])
+        self.assertEqual(request(app, '/auth/login', 'POST', credentials,
+                                 origin='https://other.example', extra_headers=forwarded)[0], 403)
+
+    def test_cross_origin_writes_are_rejected(self):
         self.assertEqual(request(self.app, '/auth/login', 'POST', {'username': 'admin', 'password': '123456'}, origin='https://elsewhere.example')[0], 403)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {}, origin='https://elsewhere.example')[0], 403)
         _, cookie = self.login()
         self.assertEqual(request(self.app, '/settings', 'POST', cookie=cookie, origin='https://elsewhere.example')[0], 403)
         self.assertEqual(request(self.app, '/auth/logout', 'POST', cookie=cookie, origin='http://testserver')[0], 200)
+
+    def test_registration_creates_only_an_ordinary_account_and_requires_separate_login(self):
+        password = 'Reg!12'
+        credentials = {'username': 'NewUser', 'password': password, 'confirm_password': password}
+        status, headers, body = request(self.app, '/auth/register', 'POST', credentials)
+        self.assertEqual(status, 201, body)
+        user = json.loads(body)['user']
+        self.assertEqual((user['username'], user['role']), ('NewUser', 'user'))
+        self.assertNotEqual(user['id'], 1)
+        self.assertNotIn('set-cookie', headers)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'username': 'newuser'})[0], 409)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'username': 'AdMiN'})[0], 409)
+        status, headers, body = request(self.app, '/auth/login', 'POST', {'username': 'newuser', 'password': password})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body), {'user': user})
+        cookie = headers['set-cookie'].split(';', 1)[0]
+        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2]), {'user': user})
+
+    def test_registration_rejects_client_role_invalid_password_length_and_invalid_username(self):
+        secret = 'Reg!12'
+        credentials = {'username': 'Valid_User', 'password': secret, 'confirm_password': secret}
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'role': 'admin'})[0], 422)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'username': 'bad-name'})[0], 422)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'password': 'short'})[0], 422)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {
+            **credentials, 'password': '密' * 16, 'confirm_password': '密' * 16,
+        })[0], 422)
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {**credentials, 'confirm_password': 'Mismatch!12'})[0], 400)
+
+    def test_auth_validation_errors_only_return_field_diagnostics(self):
         _, cookie = self.login()
-        self.assertEqual(request(self.app, '/auth/register', 'POST', cookie=cookie)[0], 404)
+        sample = 'synthetic' * 30
+        cases = (
+            ('/auth/login', {'username': 'sample', 'password': sample}, 'password'),
+            ('/auth/register', {'username': 'sample', 'password': sample, 'confirm_password': sample}, 'password'),
+            ('/auth/password', {'current_password': sample, 'new_password': sample, 'confirm_password': sample},
+             'current_password'),
+            ('/auth/login', sample, None),
+            ('/auth/login', {'password': sample}, 'username'),
+            ('/auth/login', {'username': 'sample', 'password': 'sample', sample: True}, None),
+        )
+        for path, payload, field in cases:
+            with self.subTest(path=path, field=field):
+                status, headers, body = request(self.app, path, 'POST', payload, cookie=cookie)
+                self.assertEqual(status, 422)
+                self.assertEqual(headers['cache-control'], 'no-store')
+                errors = json.loads(body)['detail']
+                expected = ['body', field] if field else ['body']
+                self.assertIn(expected, [error['loc'] for error in errors])
+                for error in errors:
+                    self.assertEqual(set(error), {'type', 'loc', 'msg'})
+                self.assertFalse(sample.encode() in body)
+
+    def test_stale_tab_cannot_mutate_new_cookie_account_or_log_it_out(self):
+        _, admin_cookie = self.login()
+        second = self.service.register('OtherUser', 'Reg!12', 'other-client')
+        for path in ['/settings', '/auth/logout']:
+            self.assertEqual(request(self.app, path, 'POST', cookie=admin_cookie, expected_user=second.id)[0], 401)
+        self.assertEqual(self.business_calls, [])
+        # Session discovery still sees the real Cookie, and matching requests go through.
+        status, _, body = request(self.app, '/auth/session', cookie=admin_cookie, expected_user=second.id)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['user']['username'], 'admin')
+        self.assertEqual(request(self.app, '/settings', 'POST', cookie=admin_cookie, expected_user=1)[0], 200)
+
+    def test_password_change_revokes_two_sessions_for_only_one_account(self):
+        old = 'Reg!12'
+        new = 'Change!56'
+        self.assertEqual(request(self.app, '/auth/register', 'POST',
+            {'username': 'Alice', 'password': old, 'confirm_password': old})[0], 201)
+        alice = [self.service.login('alice', old, 'test')[0] for _ in range(2)]
+        _, admin_cookie = self.login()
+        status, _, _ = request(self.app, '/auth/password', 'POST',
+            {'current_password': old, 'new_password': new, 'confirm_password': new},
+            cookie=f'{self.auth.COOKIE_NAME}={alice[0]}')
+        self.assertEqual(status, 200)
+        for token in alice:
+            self.assertIsNone(self.service.get_user(token))
+        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=admin_cookie)[2])['user']['role'], 'admin')
+        with self.assertRaises(self.auth.InvalidCredentials):
+            self.service.login('alice', old, 'test')
+        self.assertEqual(self.service.login('alice', new, 'test')[1].username, 'Alice')

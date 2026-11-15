@@ -42,7 +42,6 @@
 .profile-status { margin-top: 12px; font-size: 12px; color: #71717a; }
 .profile-status:empty { display: none; }
 .profile-status.is-error { color: #b42318; }
-.profile-help { margin-top: 12px; color: #71717a; font-size: 12px; }
 #profile-password-fields .profile-label:not(:first-child) { margin-top: 18px; }
 #profile-dialog button:disabled { opacity: 0.5; cursor: default; }
 #profile-dialog button:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }

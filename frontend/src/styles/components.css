@@ -184,6 +184,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    border: none;
     background: var(--menu-hover);
     border-radius: 12px;
     cursor: pointer;
@@ -397,6 +398,8 @@
 #model-info-view .info-item span {
     color: var(--menu-text);
 }
+
+[data-model-admin][hidden] { display: none; }
 
 .modify-btn {    
     margin-top: 0.5rem;

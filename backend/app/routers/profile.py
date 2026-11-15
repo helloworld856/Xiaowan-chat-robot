@@ -1,19 +1,19 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
-from profile_config import AVATARS, DEFAULT_AVATAR_ID, AvatarId, Profile
+from profile_config import AVATARS, DEFAULT_AVATAR_ID, MAX_NICKNAME_LENGTH, AvatarId, Profile
 
 router = APIRouter(tags=['profile'])
 
 
 class ProfileRequest(Profile):
-    nickname: str = Field(min_length=1, max_length=24)
+    nickname: str = Field(min_length=1, max_length=MAX_NICKNAME_LENGTH)
     avatar_id: AvatarId = Field(...)
 
 
-def profile_response(profile: Profile):
+def profile_response(username: str, profile: Profile):
     return {
-        'username': 'admin',
+        'username': username,
         **profile.model_dump(),
         'avatar_url': profile.avatar_url,
         'avatars': [{'id': avatar_id, 'name': name, 'url': f'/avatars/system/{avatar_id}.png'}
@@ -23,16 +23,18 @@ def profile_response(profile: Profile):
 
 
 @router.get('/profile')
-async def get_profile(request: Request):
+def get_profile(request: Request):
+    user = request.state.user
     try:
-        return profile_response(request.app.state.profile.get())
+        return profile_response(user.username, request.app.state.profile.get(user.id, user.username))
     except (OSError, ValueError):
         raise HTTPException(500, '读取个人资料失败，请检查 profile.json') from None
 
 
 @router.post('/profile')
-async def save_profile(profile: ProfileRequest, request: Request):
+def save_profile(profile: ProfileRequest, request: Request):
+    user = request.state.user
     try:
-        return profile_response(request.app.state.profile.update(profile))
+        return profile_response(user.username, request.app.state.profile.update(user.id, profile))
     except OSError:
         raise HTTPException(500, '保存个人资料失败，原有资料仍保留') from None

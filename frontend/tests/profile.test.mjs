@@ -33,7 +33,7 @@ test('a failed profile read cannot save an uninitialized or cancelled draft', as
         classList: {toggle() {}, remove() {}}, listeners: new Map(),
         addEventListener(name, listener) { this.listeners.set(name, listener); },
         querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-        reset() {}, focus() {}, reportValidity() { return true; },
+        reset() {}, focus() {}, setAttribute() {}, reportValidity() { return true; },
         showModal() { this.open = true; }, close() { this.open = false; }
     });
     const getElement = id => {
@@ -49,7 +49,7 @@ test('a failed profile read cannot save an uninitialized or cancelled draft', as
         exports, window: {},
         document: {getElementById: getElement, querySelectorAll: () => []},
         require: name => name === './ui.ts' ? {menuBtn: makeElement(), menuSelect: [menu]} : {
-            AuthRequiredError, CancelledRequestError,
+            AuthRequiredError, CancelledRequestError, getRequestGeneration: () => 0,
             profileAPI: async payload => {
                 if (!payload) throw new Error('GET failed');
                 posts.push(payload);

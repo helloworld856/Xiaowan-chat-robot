@@ -3,7 +3,7 @@
     width: 100%;
     height: 100%;
 }
-#login-screen[hidden], #app-shell[hidden] { display: none; }
+#login-screen[hidden], #app-shell[hidden], .login-card[hidden] { display: none; }
 #login-screen {
     display: flex;
     width: 100%;
@@ -48,7 +48,7 @@
 .login-error { margin-top: 12px; font-size: 13px; line-height: 1.5; color: #b42318; overflow-wrap: anywhere; }
 .login-error:empty { display: none; }
 .login-error[data-tone="success"] { color: #166534; }
-#login-submit {
+.login-primary {
     width: 100%;
     height: 40px;
     margin-top: 24px;
@@ -63,16 +63,29 @@
     cursor: pointer;
     transition: background-color 120ms;
 }
-#login-submit:hover:not(:disabled) { background: #303036; }
-#login-submit:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }
-#login-submit:disabled { opacity: 0.55; cursor: wait; }
+.login-primary:hover:not(:disabled) { background: #303036; }
+.login-primary:focus-visible, .login-switch:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }
+.login-primary:disabled, .login-switch:disabled { opacity: 0.55; cursor: wait; }
+.login-switch {
+    display: block;
+    margin: 12px auto 0;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #3f3f46;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.login-switch:hover:not(:disabled) { background: #f4f4f5; }
 @media (max-width: 480px) {
     #login-screen { padding: 20px; }
     .login-card { padding: 24px; }
-    .login-card input, #login-submit { height: 44px; }
+    .login-card input, .login-primary { height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .login-card input, #login-submit { transition: none; }
+    .login-card input, .login-primary { transition: none; }
 }
 .account-info { padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--menu-text); border-bottom: 1px solid var(--chat-border); }
 #logout-btn { margin-top: 0.3rem; border-top: 1px solid var(--chat-border); }

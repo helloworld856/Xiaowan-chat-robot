@@ -16,15 +16,13 @@ class SettingsTests(unittest.TestCase):
         self.path = Path(self.temp.name) / 'settings.json'
         self.store = SettingsStore(self.path)
 
-    def test_round_trip_preserves_model_and_preferences_independently(self):
-        from settings_config import ModelSettings, Preferences, SettingsStore
+    def test_round_trip_persists_only_global_model(self):
+        from settings_config import ModelSettings, SettingsStore
         self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='MyModel-V2', base_url='https://example.com/v1/'))
-        self.store.update_preferences(Preferences(send_shortcut='ctrl_enter'))
         loaded = SettingsStore(self.path).get()
         self.assertEqual(loaded.model.model_name, 'MyModel-V2')
         self.assertEqual(loaded.model.base_url, 'https://example.com/v1')
-        self.assertEqual(loaded.preferences.send_shortcut, 'ctrl_enter')
-        self.assertEqual(loaded.preferences.model_dump(), {'send_shortcut': 'ctrl_enter'})
+        self.assertEqual(set(json.loads(self.path.read_text(encoding='utf-8'))), {'model'})
         self.assertNotIn('api_key', self.path.read_text(encoding='utf-8'))
 
     def test_bad_input_is_rejected(self):
@@ -37,12 +35,12 @@ class SettingsTests(unittest.TestCase):
             Preferences(send_shortcut='unknown')
 
     def test_failed_write_keeps_previous_config(self):
-        from settings_config import Preferences
-        self.store.update_preferences(Preferences(send_shortcut='enter'))
+        from settings_config import ModelSettings
+        self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'))
         original = self.path.read_bytes()
         with patch('settings_config.os.replace', side_effect=OSError('write failed')):
             with self.assertRaises(OSError):
-                self.store.update_preferences(Preferences(send_shortcut='ctrl_enter'))
+                self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Replacement'))
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
@@ -54,10 +52,6 @@ class SettingsTests(unittest.TestCase):
         loaded = self.store.get()
         self.assertEqual(loaded.preferences.model_dump(), {'send_shortcut': 'ctrl_enter'})
         self.assertEqual(loaded.model.model_name, 'MyModel')
-        self.store.update_preferences(loaded.preferences)
-        saved = json.loads(self.path.read_text(encoding='utf-8'))
-        self.assertEqual(saved['preferences'], {'send_shortcut': 'ctrl_enter'})
-        self.assertEqual(saved['model']['model_name'], 'MyModel')
 
 
 if __name__ == '__main__':

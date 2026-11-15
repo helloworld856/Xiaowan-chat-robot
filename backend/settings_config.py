@@ -1,4 +1,4 @@
-"""单人本地模式的非密钥设置。账号接入后可替换存储层。"""
+"""全站模型设置及用户输入习惯的存储。"""
 import json
 import os
 import tempfile
@@ -43,6 +43,35 @@ class AppSettings(BaseModel):
     preferences: Preferences = Field(default_factory=Preferences)
 
 
+class UserSettings(AppSettings):
+    model_ready: bool
+
+
+class UserPreferencesStore:
+    def __init__(self, pool):
+        self._pool = pool
+
+    def get(self, user_id: int) -> Preferences:
+        with self._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute('SELECT send_shortcut FROM user_preferences WHERE user_id=%s', (user_id,))
+            row = cursor.fetchone()
+        return Preferences(send_shortcut=row[0]) if row else Preferences()
+
+    def update(self, user_id: int, preferences: Preferences):
+        with self._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute('''INSERT INTO user_preferences (user_id, send_shortcut) VALUES (%s, %s)
+                              ON DUPLICATE KEY UPDATE send_shortcut=%s''',
+                           (user_id, preferences.send_shortcut, preferences.send_shortcut))
+            connection.commit()
+
+    def import_legacy(self, user_id: int, preferences: Preferences):
+        with self._pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute('''INSERT INTO user_preferences (user_id, send_shortcut) VALUES (%s, %s)
+                              ON DUPLICATE KEY UPDATE user_id=%s''',
+                           (user_id, preferences.send_shortcut, user_id))
+            connection.commit()
+
+
 class SettingsStore:
     def __init__(self, path: Path):
         self.path = path
@@ -66,7 +95,7 @@ class SettingsStore:
             with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
                                              prefix='.settings-', suffix='.tmp', delete=False) as file:
                 temporary = Path(file.name)
-                json.dump(settings.model_dump(), file, ensure_ascii=False, indent=2)
+                json.dump(settings.model_dump(include={'model'}), file, ensure_ascii=False, indent=2)
                 file.write('\n')
                 file.flush()
                 os.fsync(file.fileno())
@@ -77,17 +106,8 @@ class SettingsStore:
 
     def update_model(self, model: ModelSettings):
         with self.lock:
-            settings = self.get()
-            settings.model = model
+            settings = AppSettings(model=model)
             self._save(settings)
             return settings
-
-    def update_preferences(self, preferences: Preferences):
-        with self.lock:
-            settings = self.get()
-            settings.preferences = preferences
-            self._save(settings)
-            return settings
-
 
 settings_store = SettingsStore(Path(__file__).resolve().parent / 'settings.json')

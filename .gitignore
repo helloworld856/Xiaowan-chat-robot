@@ -14,6 +14,7 @@ env/
 .env.*
 *.env
 !.env.example
+/backend/user_data/
 
 # 前端依赖与构建缓存
 node_modules/

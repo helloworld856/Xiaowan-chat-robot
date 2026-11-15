@@ -1,17 +1,23 @@
-from typing import Optional
+from __future__ import annotations
 
-from transformers import AutoTokenizer
+from typing import TYPE_CHECKING
 
 from config import configer
 
-_TOKENIZER_CACHE: Optional[AutoTokenizer] = None
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
 
 
-def _get_tokenizer() -> AutoTokenizer:
+_TOKENIZER_CACHE: PreTrainedTokenizerBase | None = None
+
+
+def _get_tokenizer() -> PreTrainedTokenizerBase:
     """模块级缓存 tokenizer，避免每次 count_tokens 都重复加载。"""
     global _TOKENIZER_CACHE
 
     if _TOKENIZER_CACHE is None:
+        from transformers import AutoTokenizer
+
         _TOKENIZER_CACHE = AutoTokenizer.from_pretrained(
             configer.tokenizer_path,
             trust_remote_code=True,

@@ -48,7 +48,10 @@ test('message rendering recalculates delay for each reply and never waits after 
         window: {USER_AVATAR: '', BOT_AVATAR: ''}, document: {createElement: element},
         console: {log() {}}, setTimeout: (resolve, milliseconds) => { delays.push(milliseconds); resolve(); }
     });
-    await exports.addAssistantMessage(['hello', 'a'.repeat(20), 'b'.repeat(100), 'last']);
+    const firstReply = [];
+    await exports.addAssistantMessage(['hello', 'a'.repeat(20), 'b'.repeat(100), 'last'], undefined,
+        () => firstReply.push({rows: rendered.length, delays: delays.length}));
+    assert.deepEqual(firstReply, [{rows: 1, delays: 0}]);
     assert.deepEqual(delays, [1500, 3000, 5000]);
     assert.equal(rendered.length, 4);
     delays.length = 0;
@@ -69,4 +72,28 @@ test('logout stops remaining delayed reply bubbles from the previous page', asyn
     });
     await exports.addAssistantMessage(['first', 'second', 'third'], () => active);
     assert.equal(rendered.length, 1);
+});
+
+test('history refresh inserts missing saved rounds in order and preserves unsent bubbles', () => {
+    const source = fs.readFileSync(new URL('../src/ts/utils.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+    const exports = {};
+    const rows = [];
+    const element = () => ({dataset: {}, children: [], append(...children) { this.children.push(...children); },
+        appendChild(child) { this.children.push(child); }});
+    const chatBox = {
+        querySelectorAll: () => rows.filter(row => row.dataset.conversationRound !== undefined),
+        appendChild: row => rows.push(row),
+        insertBefore: (fragment, next) => rows.splice(next ? rows.indexOf(next) : rows.length, 0, ...fragment.children)
+    };
+    runInNewContext(compiled, {
+        exports, require: () => ({chatBox, scrollToBottom() {}}),
+        window: {USER_AVATAR: '', BOT_AVATAR: ''}, document: {createElement: element, createDocumentFragment: element}
+    });
+    const saved = round => ({conversation_round: round, user: `user-${round}`, assistant: [`bot-${round}`]});
+    exports.showChatHistory([saved(0), saved(2)]);
+    const unsent = exports.addUserMessage('unsent');
+    exports.showChatHistory([saved(0), saved(1), saved(2)]);
+    assert.deepEqual(rows.map(row => row.dataset.conversationRound), ['0', undefined, '1', undefined, '2', undefined, undefined]);
+    assert.equal(rows.at(-1), unsent);
 });

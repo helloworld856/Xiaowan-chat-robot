@@ -36,6 +36,7 @@ class ModelSettingsTests(unittest.TestCase):
             custom = factory.create_agents('tongyi', 'test-placeholder', 'Custom-V2', 'https://example.com/v1')
         self.assertEqual(openai['timeout'], 8)
         self.assertEqual(openai['max_retries'], 0)
+        self.assertEqual(openai['default_headers']['Accept-Encoding'], 'gzip, deflate')
         self.assertEqual(native['max_retries'], 1)
         self.assertEqual(native['model_kwargs']['request_timeout'], 8)
         self.assertEqual(len(custom), 3)

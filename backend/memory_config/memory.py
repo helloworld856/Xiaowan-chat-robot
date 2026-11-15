@@ -1,136 +1,97 @@
-import agent_config  # 动态获取代理
-from database_config import init_db, rollback_db
-from log_config import logger
-from persona_config import persona
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-# 定义记忆管理器
+def load_history(connection, user_id: int, k: int, front: bool = True):
+    """Read committed history for one authenticated account."""
+    ascending = front if k >= 0 else not front
+    direction = 'ASC' if ascending else 'DESC'
+    sql = (
+        'SELECT conversation_round, user, assistant FROM history_messages '
+        f'WHERE user_id = %s ORDER BY conversation_round {direction}'
+    )
+    params = (user_id,)
+    if k != 0:
+        sql += ' LIMIT %s'
+        params += (max(k, 1),)
+    with connection() as db, db.cursor() as cursor:
+        cursor.execute(sql, params)
+        return [
+            {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
+            for row in cursor.fetchall()
+        ]
+
+
 class MemoryManager:
-    def __init__(self):
-        logger.info('初始化记忆管理器Memory Manager...')
+    """Cache an account's committed chat history and summary."""
 
-        # 初始化数据库
-        self.db = init_db()
+    def __init__(self, user_id: int, connection):
+        self.user_id = user_id
+        self._connection = connection
+        self.history_cache = load_history(connection, user_id, 0)
+        with connection() as db, db.cursor() as cursor:
+            cursor.execute('SELECT abstract FROM abstract_messages WHERE user_id = %s', (user_id,))
+            row = cursor.fetchone()
+        self.abstract_cache = row[0] if row else ''
 
-        # 历史对话和历史对话摘要缓存，提高运行效率
-        # 加载历史对话和摘要
-        self.history_cache = self.load_history(0)    # 列表
-        self.abstract_cache = self.load_abstract()
+    @property
+    def next_round(self) -> int:
+        return self.history_cache[-1]['conversation_round'] + 1 if self.history_cache else 0
 
-        # 缓存是否有效
-        self.cache_valid = True
-
-        logger.info('记忆管理器初始化完成！')
-
-    # 记录对话
     def record_message(self, message) -> bool:
-        logger.info('记录本轮对话...')
-        # 保存独立副本，后续修改轮次或回复不会改写历史。
-        self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
         try:
-            sql = 'insert into history_messages values(%s,%s,%s)'
-            with self.db.cursor() as cursor:
-                # 多条回复通过同一分隔符保存和读取。
-                cursor.execute(sql, (message['conversation_round'], message['user'], '|||'.join(message['assistant'])))
-
-            # 提交修改
-            self.db.commit()
-            return True
-        except Exception as e:
-            rollback_db(self.db)
-            logger.error(f'记录对话时出现错误:{e}')
+            with self._connection() as db:
+                with db.cursor() as cursor:
+                    cursor.execute(
+                        'INSERT INTO history_messages (user_id, conversation_round, user, assistant) '
+                        'VALUES (%s, %s, %s, %s)',
+                        (self.user_id, message['conversation_round'], message['user'],
+                         json.dumps(message['assistant'], ensure_ascii=False)),
+                    )
+                db.commit()
+        except Exception as error:
+            logger.warning('history write failed: %s', type(error).__name__)
             return False
 
-    # 加载历史对话
-    def load_history(self, k, front=True):  # k=-1加载最后一条记录，k=0加载所有记录， k>0加载k条记录， front表示应从头开始加载，还是从尾开始加载
+        self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
+        return True
+
+    def compress_history(self, summary_agent):
+        from persona_config import persona
+        from utils.json_parser import model_text
+
+        count = len(self.history_cache) // 2
+        if count == 0:
+            return
+        older = self.history_cache[:count]
+        prompt = f"""请你对用户（对应user）和{persona.BOT_NAME}（对应assistant）的历史对话及更早的历史对话摘要进行缩减，保留重点，返回精确的重点摘要。
+历史对话：{older}。
+更早的历史对话摘要：{self.abstract_cache}。"""
         try:
-            logger.info('加载历史对话...')
-            ascending = front if k >= 0 else not front
-            direction = 'asc' if ascending else 'desc'
-            limit = None if k == 0 else max(k, 1)
-            sql = f'select * from history_messages order by conversation_round {direction}'
-            params = None
-            if limit is not None:
-                sql += ' limit %s'
-                params = [limit]
-            with self.db.cursor() as cursor:
-                cursor.execute(sql, params)
-                return [
-                    {'conversation_round': data[0], 'user': data[1], 'assistant': data[2].split('|||')}
-                    for data in cursor.fetchall()
-                ]
+            result = summary_agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})
+            messages = result.get('messages', [])
+            summary = model_text(messages[-1].content) if messages else ''
+            if not summary.strip():
+                raise ValueError('模型返回的摘要为空')
+            with self._connection() as db:
+                with db.cursor() as cursor:
+                    cursor.execute(
+                        'INSERT INTO abstract_messages (user_id, abstract) VALUES (%s, %s) '
+                        'ON DUPLICATE KEY UPDATE abstract = %s',
+                        (self.user_id, summary, summary),
+                    )
+                    removed = cursor.execute(
+                        'DELETE FROM history_messages WHERE user_id = %s AND conversation_round <= %s',
+                        (self.user_id, older[-1]['conversation_round']),
+                    )
+                    if removed != count:
+                        raise ValueError('历史对话在压缩时发生变化')
+                db.commit()
+        except Exception as error:
+            logger.warning('history compression failed: %s', type(error).__name__)
+            return
 
-        except Exception as e:
-            logger.info(f'加载历史对话失败:{e}，返回空列表')
-            return []
-
-    # 加载历史对话摘要
-    def load_abstract(self, strict=False):
-        """加载摘要；压缩时严格检查，读取失败就中止压缩。"""
-        try:
-            logger.info('加载历史对话摘要...')
-            with self.db.cursor() as cursor:
-                cursor.execute("select * from abstract_messages;")
-                data = cursor.fetchone()
-                if strict and data is None:
-                    raise ValueError('摘要记录不存在，取消压缩')
-                return data[0] if data is not None else ''
-
-        except Exception as e:
-            if strict:
-                raise
-            logger.info(f'加载历史对话摘要失败:{e}，返回空历史摘要')
-            return ''
-
-    # 压缩历史对话，生成摘要
-    def compress_history(self):
-        try:
-            logger.info('压缩历史对话...')
-            # 先获取总历史对话数
-            with self.db.cursor() as cursor:
-                cursor.execute("select count(*) from history_messages;")
-                data = cursor.fetchone()
-
-            # 压缩一半的对话记录
-            k = data[0] // 2
-            if k == 0:
-                return
-            half_history = self.load_history(k)
-            if len(half_history) != k:
-                raise ValueError('历史对话读取不完整，取消压缩')
-
-            # 加载历史对话摘要，一起压缩
-            abstract_history = self.load_abstract(strict=True)
-
-            analysis_prompt = f"""请你对用户（对应user）和{persona.BOT_NAME}（对应assistant）的历史对话及更早的历史对话摘要进行缩减，保留重点，返回精确的重点摘要。
-历史对话：{half_history}。
-更早的历史对话摘要：{abstract_history}。"""
-
-            response = agent_config.text_agent.invoke(
-                {"messages": [{"role": "user", "content": analysis_prompt}]}
-            )
-
-            # 提取出回复
-            messages = response.get("messages", [])
-            if not messages:
-                raise ValueError("模型返回结果中没有 messages")
-            compressed_history = messages[-1].content
-
-            with self.db.cursor() as cursor:
-                # 写入新的摘要
-                cursor.execute('update abstract_messages set abstract=%s;', [compressed_history])
-                # 删除压缩的历史对话，保留较新的历史对话
-                cursor.execute('delete from history_messages order by conversation_round limit %s;', [k])
-
-            # 提交修改
-            self.db.commit()
-
-            # 缓存置为无效
-            self.cache_valid = False
-
-        except Exception as e:
-            rollback_db(self.db)
-            logger.info(f'压缩历史对话失败:{e}')
-
-
-memorier = MemoryManager()
+        self.abstract_cache = summary
+        del self.history_cache[:count]

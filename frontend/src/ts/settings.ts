@@ -1,4 +1,5 @@
-import {modelAPI, settingsAPI} from './api.ts';
+import {canManageModel, getRequestGeneration, modelAPI, settingsAPI} from './api.ts';
+import type {SavedSettings} from './api.ts';
 import {modelConfig} from './global_config.ts';
 import {preferences} from './preferences.ts';
 import type {Preferences} from './preferences.ts';
@@ -8,30 +9,64 @@ const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 const fields = () => document.getElementById('preferences-fields') as HTMLFieldSetElement;
 const status = () => document.getElementById('preferences-status')!;
+let modelRevision = 0;
 
 function updateModelDisplay() {
     document.getElementById('display-merchant')!.textContent = modelConfig.model.model_merchant || '未配置';
     document.getElementById('display-model')!.textContent = modelConfig.model.model_name || '未配置';
     document.getElementById('display-base-url')!.textContent = modelConfig.model.base_url || '厂商默认地址';
+    document.getElementById('display-model-status')!.textContent = modelConfig.model_valid ? '可用' : '未就绪';
 }
 
 function renderPreferences() {
     select('send-shortcut').value = preferences.send_shortcut;
 }
 
+function applySettings(saved: SavedSettings, requestedModelRevision: number) {
+    Object.assign(preferences, saved.preferences);
+    renderPreferences();
+    if (requestedModelRevision === modelRevision) {
+        modelConfig.model = saved.model ? {...saved.model} : {model_merchant: '', model_name: '', base_url: ''};
+        modelConfig.model_valid = saved.model_ready;
+        updateModelDisplay();
+    }
+}
+
+export function updateSettingsPermissions() {
+    const admin = canManageModel();
+    document.querySelectorAll<HTMLElement>('[data-model-admin]').forEach(element => { element.hidden = !admin; });
+}
+
+export function resetSettings() {
+    preferences.send_shortcut = 'enter';
+    modelConfig.model = {model_merchant: '', model_name: '', base_url: ''};
+    modelConfig.model_valid = false;
+    renderPreferences();
+    updateModelDisplay();
+    updateSettingsPermissions();
+    fields().disabled = true;
+    status().textContent = '';
+    (document.getElementById('reload-settings') as HTMLButtonElement).disabled = false;
+    const form = document.getElementById('model-config-form') as HTMLFormElement;
+    form.reset();
+    form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
+        .forEach(control => { control.disabled = false; });
+    document.getElementById('model-test-status')!.textContent = '';
+}
+
 export async function loadSettings() {
+    const generation = getRequestGeneration();
+    const requestedModelRevision = modelRevision;
     fields().disabled = true;
     status().textContent = '正在读取设置…';
     try {
         const saved = await settingsAPI();
-        Object.assign(preferences, saved.preferences);
-        if (saved.model && !modelConfig.model_valid) modelConfig.model = {...saved.model};
-        renderPreferences();
-        updateModelDisplay();
+        if (generation !== getRequestGeneration()) return;
+        applySettings(saved, requestedModelRevision);
         fields().disabled = false;
         status().textContent = '';
     } catch (error) {
-        status().textContent = error instanceof Error ? error.message : '设置读取失败';
+        if (generation === getRequestGeneration()) status().textContent = error instanceof Error ? error.message : '设置读取失败';
         throw error;
     }
 }
@@ -48,8 +83,8 @@ export function initSettings() {
         deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
         tongyi: ['qwen3-max', 'qwen-plus', 'qwen-turbo', 'qwen-flash']
     };
-    let modelBusy = false;
-    let preferencesBusy = false;
+    let modelOperation: number | null = null;
+    let preferencesOperation: number | null = null;
 
     function updateSuggestions() {
         const list = document.getElementById('model-name-options')!;
@@ -68,7 +103,8 @@ export function initSettings() {
         }
     });
     document.getElementById('open-modify-btn')!.addEventListener('click', () => {
-        if (!modelBusy) {
+        if (!canManageModel()) return;
+        if (modelOperation !== getRequestGeneration()) {
             merchant.value = modelConfig.model.model_merchant || 'deepseek';
             updateSuggestions();
             name.value = modelConfig.model.model_name || suggestions[merchant.value]![0]!;
@@ -87,28 +123,35 @@ export function initSettings() {
     form.addEventListener('input', () => { modelStatus.textContent = ''; });
 
     async function configure(testOnly: boolean) {
-        if (modelBusy || !form.reportValidity()) return;
+        const generation = getRequestGeneration();
+        if (!canManageModel() || modelOperation === generation || !form.reportValidity()) return;
         const model = {model_merchant: merchant.value, model_name: name.value.trim(), base_url: address.value.trim()};
         if (!model.model_name) { modelStatus.textContent = '请输入模型名'; return; }
-        modelBusy = true;
+        modelOperation = generation;
         form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
             .forEach(control => { control.disabled = true; });
         modelStatus.textContent = testOnly ? '正在测试连接…' : '正在验证并保存模型配置…';
         try {
             const result = await modelAPI(model, testOnly);
+            if (generation !== getRequestGeneration()) return;
             modelStatus.textContent = result.info || (result.status ? '操作成功' : '连接失败');
             if (result.status && !testOnly) {
+                modelRevision++;
                 modelConfig.model = model;
                 modelConfig.model_valid = true;
                 updateModelDisplay();
                 await closePopup(modal);
             }
         } catch {
-            modelStatus.textContent = '请求失败或超时，请检查后端、接口地址和模型配置。';
+            if (generation === getRequestGeneration()) {
+                modelStatus.textContent = '请求失败或超时，请检查后端、接口地址和模型配置。';
+            }
         } finally {
-            modelBusy = false;
-            form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
-                .forEach(control => { control.disabled = false; });
+            if (modelOperation === generation) modelOperation = null;
+            if (generation === getRequestGeneration()) {
+                form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
+                    .forEach(control => { control.disabled = false; });
+            }
         }
     }
 
@@ -116,32 +159,37 @@ export function initSettings() {
     document.getElementById('test-model-btn')!.addEventListener('click', () => { void configure(true); });
     const reload = document.getElementById('reload-settings') as HTMLButtonElement;
     reload.addEventListener('click', async () => {
-        if (preferencesBusy) return;
+        const generation = getRequestGeneration();
+        if (preferencesOperation === generation) return;
         reload.disabled = true;
         try { await loadSettings(); } catch { /* 表单状态已展示错误。 */ }
-        finally { reload.disabled = false; }
+        finally { if (generation === getRequestGeneration()) reload.disabled = false; }
     });
     document.getElementById('preferences-form')!.addEventListener('submit', async event => {
         event.preventDefault();
-        if (preferencesBusy || fields().disabled) return;
+        const generation = getRequestGeneration();
+        if (preferencesOperation === generation || fields().disabled) return;
         const next: Preferences = {
             send_shortcut: select('send-shortcut').value as Preferences['send_shortcut']
         };
-        preferencesBusy = true;
+        preferencesOperation = generation;
         fields().disabled = true;
         reload.disabled = true;
         status().textContent = '正在保存…';
+        const requestedModelRevision = modelRevision;
         try {
             const saved = await settingsAPI(next);
-            Object.assign(preferences, saved.preferences);
-            renderPreferences();
+            if (generation !== getRequestGeneration()) return;
+            applySettings(saved, requestedModelRevision);
             status().textContent = '输入设置已保存';
         } catch (error) {
-            status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
+            if (generation === getRequestGeneration()) status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
         } finally {
-            preferencesBusy = false;
-            fields().disabled = false;
-            reload.disabled = false;
+            if (preferencesOperation === generation) preferencesOperation = null;
+            if (generation === getRequestGeneration()) {
+                fields().disabled = false;
+                reload.disabled = false;
+            }
         }
     });
 }
