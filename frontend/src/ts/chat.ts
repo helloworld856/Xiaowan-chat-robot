@@ -7,25 +7,25 @@ import {addAssistantMessage, addUserMessage, showChatHistory} from './utils.ts';
 const maxMessageLength = 8000;
 
 function showDeliveryFailure(row: HTMLDivElement, text: string, error: ChatNotStartedError) {
-    const notice = document.createElement('div');
-    notice.className = 'chat-delivery';
-    const status = document.createElement('span');
-    status.setAttribute('role', 'status');
-    status.textContent = error.message;
-    notice.append(status);
-    if (error.retryable) {
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.textContent = '重试';
-        retry.addEventListener('click', async () => {
-            if (sendBtn.disabled || !row.isConnected) return;
-            notice.remove();
-            chatBox.appendChild(row);
-            await submitMessage(text, row);
-        });
-        notice.append(retry);
-    }
-    row.prepend(notice);
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = 'chat-send-failed';
+    marker.textContent = '!';
+    marker.title = error.retryable ? '发送失败，点击重试' : '发送失败';
+    marker.setAttribute('aria-label', error.retryable ? '发送失败，重试发送' : '发送失败，查看原因');
+    marker.addEventListener('click', async () => {
+        if (!row.isConnected) return;
+        if (!error.retryable) {
+            showAlert(error.message);
+            return;
+        }
+        if (sendBtn.disabled) return;
+        marker.remove();
+        chatBox.appendChild(row);
+        await submitMessage(text, row);
+    });
+    row.prepend(marker);
+    showAlert(error.message);
 }
 
 async function checkUncertainDelivery(row: HTMLDivElement, text: string, isCurrent: () => boolean) {

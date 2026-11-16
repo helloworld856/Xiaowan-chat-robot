@@ -25,11 +25,16 @@ function harness(chatAPI, historyAPI) {
         return {
             tag, children: [], isConnected: true, events: {}, dataset: {},
             append(...children) { this.children.push(...children); },
-            prepend(child) { this.children.unshift(child); },
+            prepend(child) { child.parentElement = this; this.children.unshift(child); },
             addEventListener(name, handler) { this.events[name] = handler; },
             setAttribute() {},
             remove() {
                 this.isConnected = false;
+                if (this.parentElement) {
+                    const siblings = this.parentElement.children;
+                    siblings.splice(siblings.indexOf(this), 1);
+                    this.parentElement = undefined;
+                }
                 const index = rows.indexOf(this);
                 if (index >= 0) rows.splice(index, 1);
             }
@@ -81,7 +86,7 @@ test('the chat limit counts Unicode characters and preserves an oversized draft'
     assert.deepEqual(sent, [valid]);
 });
 
-test('a definite rejection offers retry for the original message without replacing the current draft', async () => {
+test('a retryable failure uses a red marker that resends the original and clears after retry', async () => {
     const sent = [];
     const app = harness(async (text, Rejected, input) => {
         sent.push(text);
@@ -91,20 +96,35 @@ test('a definite rejection offers retry for the original message without replaci
     await app.sendMessage();
     assert.equal(app.inputBox.value, '新草稿');
     assert.equal(app.rows.length, 1);
-    await app.rows[0].children[0].children.find(child => child.tag === 'button').events.click();
+    const marker = app.rows[0].children[0];
+    assert.equal(marker.className, 'chat-send-failed');
+    assert.equal(marker.tag, 'button');
+    assert.equal(marker.textContent, '!');
+    assert.match(marker.title, /发送失败/);
+    await marker.events.click();
     assert.deepEqual(sent, ['原文', '原文']);
     assert.equal(app.rows.length, 1);
+    assert.equal(app.rows[0].children.length, 0);
     assert.equal(app.inputBox.value, '新草稿');
     assert.deepEqual(app.confirmed, ['回复']);
     assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
 });
 
-test('server validation leaves the original message visible without offering an identical retry', async () => {
-    const app = harness(async (_text, Rejected) => { throw new Rejected('消息不符合要求', false); },
+test('a missing personal model shows the existing alert and only a failure marker by the original', async () => {
+    const message = '请先在设置中配置个人模型和 API Key';
+    let calls = 0;
+    const app = harness(async (_text, Rejected) => { calls++; throw new Rejected(message, false); },
         async () => assert.fail('validation must not need history'));
     await app.sendMessage();
     assert.equal(app.rows[0].textContent, '原文');
-    assert.equal(app.rows[0].children[0].children.some(child => child.tag === 'button'), false);
+    assert.deepEqual(app.alerts, [message]);
+    const [marker] = app.rows[0].children;
+    assert.equal(app.rows[0].children.length, 1);
+    assert.equal(marker.textContent, '!');
+    assert.equal(marker.title, '发送失败');
+    await marker.events.click();
+    assert.deepEqual(app.alerts, [message, message]);
+    assert.equal(calls, 1);
 });
 
 test('an uncertain send refreshes history without offering a duplicate send', async () => {

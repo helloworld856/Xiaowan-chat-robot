@@ -148,22 +148,27 @@
     line-height: 1.5;
 }
 
-.user_message > .chat-delivery {
+.chat-send-failed {
+    display: grid;
+    place-items: center;
     align-self: center;
-    margin-right: 0.5rem;
-    text-align: right;
+    flex: 0 0 1.35rem;
+    height: 1.35rem;
+    margin: 0.5rem 0.5rem 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #c52639;
+    color: #fff;
+    font: 700 0.9rem/1 sans-serif;
+    cursor: pointer;
 }
 
-.chat-delivery button {
-    display: block;
-    margin: 0.2rem 0 0 auto;
-    padding: 0.1rem 0.3rem;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-decoration: underline;
-    cursor: pointer;
+.chat-send-failed:hover { background: #a51d2e; }
+
+.chat-send-failed:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -4px;
 }
 
 .chat-delivery-uncertain {
