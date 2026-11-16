@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pymysql
 
 from test_auth import ROOT, request
-from auth_config import AuthService, COOKIE_NAME, DuplicateUsername, InvalidCredentials, SQLAccountStore, hash_password
+from auth_config import AccountStorageError, AuthService, COOKIE_NAME, DuplicateUsername, InvalidCredentials, SQLAccountStore, hash_password
 
 
 class _Cursor:
@@ -125,6 +125,28 @@ class AccountStoreTests(unittest.TestCase):
         with self.pool.connection() as db, db.cursor() as cursor:
             cursor.execute('SELECT COUNT(*) FROM users')
             self.assertEqual(cursor.fetchone(), (1,))
+
+    def test_registration_reserves_admin_even_before_admin_is_seeded(self):
+        from core.app import create_app
+
+        store = SQLAccountStore(self.pool)
+        app = create_app('test', auth_service=AuthService(account_store=store))
+        for name in ('admin', 'ADMIN', 'AdMiN'):
+            status, _, body = request(app, '/auth/register', 'POST', {
+                'username': name, 'password': 'Reg!12', 'confirm_password': 'Reg!12',
+            })
+            self.assertEqual(status, 409)
+            self.assertIn('保留', json.loads(body)['detail'])
+        self.assertIsNone(store.find('admin'))
+
+    def test_config_write_failure_rolls_back_registration(self):
+        def failing_prepare(_):
+            raise OSError('write failed')
+
+        store = SQLAccountStore(self.pool, prepare_user=failing_prepare)
+        with self.assertRaises(AccountStorageError):
+            store.register('member', 'test credential hash')
+        self.assertIsNone(store.find('member'))
 
     def test_lost_commit_response_requires_relogin_and_revokes_only_target_account(self):
         from core.app import create_app

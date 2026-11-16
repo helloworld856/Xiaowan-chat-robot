@@ -47,9 +47,9 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
         if (sessionBound) window.dispatchEvent(new Event('auth-required'));
         throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
     }
-    if (path === '/chat' && (response.status === 422 || response.status === 429 || response.status === 503) &&
+    if (path === '/chat' && (response.status === 403 || response.status === 422 || response.status === 429 || response.status === 503) &&
         body?.detail?.code === 'CHAT_NOT_STARTED') {
-        const retryable = response.status !== 422;
+        const retryable = response.status === 429 || response.status === 503;
         const message = retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
         throw new ChatNotStartedError(typeof body.detail.message === 'string' ? body.detail.message : message, retryable);
     }
@@ -76,10 +76,12 @@ export function personaAPI() {
     }, '角色信息加载失败');
 }
 
-export function modelAPI(model: ModelInfo, testOnly = false) {
-    return requestJSON<{status: boolean; info: string}>(`/model${testOnly ? '/test' : ''}`, {
+export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string) {
+    const options = {model_merchant: model.model_merchant, model_name: model.model_name};
+    const personal = apiKey !== undefined;
+    return requestJSON<{status: boolean; info: string}>(`/model${personal ? '/personal' : ''}${testOnly ? '/test' : ''}`, {
         method: 'POST', signal: AbortSignal.timeout(30000),
-        body: JSON.stringify({model_merchant: model.model_merchant || '', model_name: model.model_name || '', base_url: model.base_url || ''})
+        body: JSON.stringify(personal ? {...options, api_key: apiKey} : {...options, base_url: model.base_url || ''})
     }, '模型配置请求失败');
 }
 

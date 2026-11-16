@@ -7,7 +7,15 @@ from settings_config import Preferences, UserSettings, settings_store
 router = APIRouter()
 
 
-def settings_for(preferences: Preferences) -> UserSettings:
+def settings_for(request: Request, preferences: Preferences) -> UserSettings:
+    user = request.state.user
+    if user.role != 'admin':
+        try:
+            personal = request.app.state.personal_models.get(user.id)
+        except ValueError:
+            personal = None
+        return UserSettings(model=personal.public_model() if personal else None,
+                            preferences=preferences, model_ready=personal is not None)
     with agent_config.agent_lock:
         model = agent_config.active_model
         ready = model is not None and all(agent is not None for agent in (
@@ -23,7 +31,7 @@ def settings_for(preferences: Preferences) -> UserSettings:
 @router.get('/settings', response_model=UserSettings)
 def get_settings(request: Request):
     try:
-        return settings_for(request.app.state.preferences.get(request.state.user.id))
+        return settings_for(request, request.app.state.preferences.get(request.state.user.id))
     except (OSError, ValueError, pymysql.MySQLError):
         raise HTTPException(500, '读取设置失败，请稍后重试') from None
 
@@ -31,7 +39,7 @@ def get_settings(request: Request):
 @router.post('/settings', response_model=UserSettings)
 def save_settings(preferences: Preferences, request: Request):
     try:
-        result = settings_for(preferences)
+        result = settings_for(request, preferences)
         request.app.state.preferences.update(request.state.user.id, preferences)
         return result
     except (OSError, ValueError, pymysql.MySQLError):

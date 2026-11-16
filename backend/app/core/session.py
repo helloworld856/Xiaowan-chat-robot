@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
+from auth_config import User
 from memory_config import MemoryManager
+from personal_model_config import PersonalModelStore
 from state_config import AIChatState, create_initial_state
 
 logger = logging.getLogger(__name__)
@@ -36,10 +38,12 @@ class AccountChat:
 
 
 class ChatSessions:
-    def __init__(self, connection, *, graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
+    def __init__(self, connection, *, personal_models: PersonalModelStore | None = None,
+                 graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
         if max_running < 1 or max_waiting < 0 or not wait_timeout > 0:
             raise ValueError('invalid chat capacity')
         self._connection = connection
+        self._personal_models = personal_models
         self._graph_factory = graph_factory
         self._users: dict[int, AccountChat] = {}
         self._slots = asyncio.BoundedSemaphore(max_running)
@@ -54,8 +58,9 @@ class ChatSessions:
         logger.info('chat admission rejected status=%d', status)
         raise ChatNotStarted(status, message)
 
-    async def send(self, user_id: int, text: str):
+    async def send(self, user: User, text: str):
         start = perf_counter()
+        user_id = user.id
         if self._closing:
             self._reject(503, '聊天服务正在关闭，请稍后重试')
         entry = self._users.get(user_id)
@@ -113,7 +118,7 @@ class ChatSessions:
             entry.lock.release()
             self._reject(503, '聊天服务正在关闭，请稍后重试')
         logger.info('chat queue_ms=%.1f', (perf_counter() - start) * 1000)
-        work = asyncio.create_task(self._execute(entry, user_id, text))
+        work = asyncio.create_task(self._execute(entry, user, text))
         entry.worker = work
         work.add_done_callback(self._consume_error)
         # The worker owns both permits until graph execution and saving finish.
@@ -134,10 +139,10 @@ class ChatSessions:
         if not task.cancelled():
             task.exception()
 
-    async def _execute(self, entry: AccountChat, user_id: int, text: str):
+    async def _execute(self, entry: AccountChat, user: User, text: str):
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, self._run, entry, user_id, text)
+            return await loop.run_in_executor(self._executor, self._run, entry, user, text)
         finally:
             entry.worker = None
             self._slots.release()
@@ -166,10 +171,24 @@ class ChatSessions:
         logger.info('chat initialization_ms=%.1f', (perf_counter() - start) * 1000)
         return ChatRuntime(memorier, graph, state)
 
-    def _run(self, entry: AccountChat, user_id: int, text: str):
-        agents = self._snapshot_agents()
+    def _agents_for(self, user: User):
+        if user.role == 'admin':
+            return self._snapshot_agents()
+        try:
+            agents = self._personal_models.agents_for(user.id) if self._personal_models else None
+        except ValueError:
+            agents = None
+        except Exception as error:
+            logger.warning('personal model unavailable: %s', type(error).__name__)
+            raise ChatNotStarted(503, '个人模型暂时无法加载，请稍后重试') from None
+        if agents is None:
+            raise ChatNotStarted(403, '请先在设置中配置个人模型和 API Key')
+        return agents
+
+    def _run(self, entry: AccountChat, user: User, text: str):
+        agents = self._agents_for(user)
         if entry.runtime is None:
-            entry.runtime = self._initialize(user_id)
+            entry.runtime = self._initialize(user.id)
         runtime = entry.runtime
         state = deepcopy(runtime.state)
         state['user_input'] = text

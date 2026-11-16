@@ -11,7 +11,7 @@ from threading import Lock
 from typing import Callable
 
 from .accounts import (HASH_ITERATIONS, AccountStorageError, AccountStore, DuplicateUsername,
-                       LocalAccountStore, PasswordCommitUnknown, SQLAccountStore, User, unpack_hash)
+                       LocalAccountStore, PasswordCommitUnknown, ReservedUsername, SQLAccountStore, User, unpack_hash)
 
 COOKIE_NAME = 'xiaowan_session'
 SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -153,6 +153,8 @@ class AuthService:
     def register(self, username: str, password: str, client: str) -> User:
         if re.fullmatch(USERNAME_PATTERN, username) is None:
             raise ValueError('用户名须为 3–32 位字母、数字或下划线')
+        if username.lower() == 'admin':
+            raise ReservedUsername()
         _validate_new_password(password)
         attempt = self._registrations.reserve(client)
         try:

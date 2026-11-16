@@ -72,17 +72,27 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         raise TimeoutError('B did not finish independently')
                 return response('{"intent":"test","emotion":"平静","answer":"日常互动"}')
 
-            def reply(payload):
+            def reply(payload, label):
                 prompt = payload['messages'][0]['content']
                 if 'message B' in prompt:
                     self.assertNotIn('wait for B', prompt)
-                return response('{"reply":["隔离回复|||标记"]}')
+                return response(json.dumps({'reply': [f'{label}|||标记']}, ensure_ascii=False))
+
+            admin_key = 'admin-only-placeholder'
+            personal_key = 'personal-placeholder'
+
+            def create_agents(merchant, key, name, base_url):
+                self.assertEqual(base_url, '')
+                self.assertIn(key, (admin_key, personal_key))
+                return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
+                        SimpleNamespace(invoke=lambda payload: reply(payload, name)))
 
             with patch.object(main, 'settings_store', model_settings), patch.object(settings_router, 'settings_store', model_settings), \
-                    patch.object(main.model, 'activate_saved_model'), \
-                    patch.object(agent_config, 'analysis_agent', SimpleNamespace(invoke=analyze)), \
-                    patch.object(agent_config, 'text_agent', SimpleNamespace(invoke=lambda _: response('summary'))), \
-                    patch.object(agent_config, 'friend_agent', SimpleNamespace(invoke=reply)):
+                    patch.dict(os.environ, {'DEEPSEEK_API_KEY': admin_key}), \
+                    patch.object(agent_config, 'analysis_agent', None), patch.object(agent_config, 'text_agent', None), \
+                    patch.object(agent_config, 'friend_agent', None), patch.object(agent_config, 'active_model', None), \
+                    patch.object(agent_config, 'create_agents', side_effect=create_agents) as factory, \
+                    patch.object(main.model, 'create_model', return_value=SimpleNamespace(invoke=lambda _: None)) as validator:
                 app = main.build_application(pool, profiles, folder)
                 async with app.router.lifespan_context(app):
                     with pool.connection() as connection, connection.cursor() as cursor:
@@ -101,15 +111,41 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual((await a.get('/settings')).json()['preferences']['send_shortcut'], 'ctrl_enter')
                         user_credential = 'UserTest!2026'
                         registration = {'username': 'Second_User', 'password': user_credential, 'confirm_password': user_credential}
-                        first, second = await asyncio.gather(b.post('/auth/register', json=registration), b.post('/auth/register', json=registration))
+                        first, second = await asyncio.gather(b.post('/auth/register', json=registration),
+                            b.post('/auth/register', json={**registration, 'username': 'second_user'}))
                         self.assertEqual(sorted([first.status_code, second.status_code]), [201, 409])
                         login_b = await b.post('/auth/login', json={'username': 'second_user', 'password': user_credential})
                         self.assertEqual(login_b.status_code, 200, login_b.text)
                         self.assertEqual(login_b.json()['user']['role'], 'user')
+                        personal_file = profiles.root / str(login_b.json()['user']['id']) / 'model.json'
+                        self.assertEqual(json.loads(personal_file.read_text(encoding='utf-8')), {'model': None})
+                        self.assertFalse((profiles.root / str(admin_info['id']) / 'model.json').exists())
+                        self.assertFalse((await b.get('/settings')).json()['model_ready'])
+                        self.assertEqual(factory.call_args.args[1], admin_key)
+                        rejected = await b.post('/chat', json={'user_input': 'must not use admin'})
+                        self.assertEqual(rejected.status_code, 403, rejected.text)
+                        self.assertEqual(rejected.json()['detail']['code'], 'CHAT_NOT_STARTED')
+                        self.assertEqual(factory.call_count, 1)
                         options = {'model_merchant': 'deepseek', 'model_name': 'blocked'}
                         for path in ('/model', '/model/test'):
                             denied = await b.post(path, json=options)
                             self.assertEqual(denied.status_code, 403, denied.text)
+                        personal = {**options, 'model_name': 'my-model', 'api_key': personal_key}
+                        self.assertEqual((await a.post('/model/personal', json=personal)).status_code, 403)
+                        invalid = await b.post('/model/personal', json={**personal, 'base_url': 'https://example.com'})
+                        self.assertEqual(invalid.status_code, 422)
+                        self.assertNotIn(personal_key, invalid.text)
+                        test = await b.post('/model/personal/test', json=personal)
+                        self.assertTrue(test.json()['status'], test.text)
+                        self.assertEqual(json.loads(personal_file.read_text(encoding='utf-8')), {'model': None})
+                        self.assertTrue((await b.post('/model/personal', json=personal)).json()['status'])
+                        self.assertEqual(validator.call_args.args[1], personal_key)
+                        self.assertEqual(factory.call_args.args[1], personal_key)
+                        public_settings = (await b.get('/settings')).json()
+                        self.assertTrue(public_settings['model_ready'])
+                        self.assertNotIn('api_key', public_settings['model'])
+                        self.assertEqual(public_settings['model']['model_name'], 'my-model')
+                        self.assertEqual((await a.get('/settings')).json()['model']['model_name'], 'test-model')
                         updated_b = await b.post('/profile', json={'nickname': '第二个账号', 'avatar_id': 'fox'})
                         self.assertEqual(updated_b.status_code, 200, updated_b.text)
                         self.assertEqual((await a.get('/profile')).json()['nickname'], '旧昵称')
@@ -136,7 +172,8 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(reply_a.json()['conversation_round'], reply_b.json()['conversation_round'])
                         for client, message in ((a, 'wait for B'), (b, 'message B')):
                             rows = (await client.post('/history', json={'num': 0, 'front': True})).json()['history_messages']
-                            self.assertEqual([(row['user'], row['assistant']) for row in rows], [(message, ['隔离回复|||标记'])])
+                            label = 'test-model' if client is a else 'my-model'
+                            self.assertEqual([(row['user'], row['assistant']) for row in rows], [(message, [f'{label}|||标记'])])
                         new_admin_password = 'NewAdmin!2026'
                         changed = await a.post('/auth/password', json={
                             'current_password': credential, 'new_password': new_admin_password,
@@ -155,6 +192,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual((await b.post('/auth/login', json={'username': 'Second_User', 'password': user_credential})).status_code, 200)
                         self.assertEqual((await b.get('/profile')).json()['nickname'], '第二个账号')
                         self.assertEqual((await b.get('/settings')).json()['preferences']['send_shortcut'], 'ctrl_enter')
+                        self.assertEqual((await b.get('/settings')).json()['model']['model_name'], 'my-model')
                         self.assertEqual((await b.post('/history', json={'num': 0, 'front': True})).json()['history_messages'], [])
                         login_admin = await b.post('/auth/login', json={'username': 'admin', 'password': new_admin_password})
                         self.assertEqual(login_admin.status_code, 200, login_admin.text)

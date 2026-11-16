@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import RLock
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 import pymysql
 
@@ -29,6 +29,10 @@ class Account:
 
 
 class DuplicateUsername(Exception):
+    pass
+
+
+class ReservedUsername(DuplicateUsername):
     pass
 
 
@@ -71,8 +75,9 @@ def read_legacy_admin(path: Path) -> str:
 
 
 class SQLAccountStore:
-    def __init__(self, pool):
+    def __init__(self, pool, *, prepare_user: Callable[[int], None] | None = None):
         self.pool = pool
+        self.prepare_user = prepare_user
 
     def find(self, username_key: str) -> Account | None:
         try:
@@ -95,6 +100,8 @@ class SQLAccountStore:
                 cursor.execute('INSERT INTO users (username, username_key, password_hash, role) VALUES (%s, %s, %s, %s)',
                                (username, username.lower(), password_hash, role))
                 user_id = cursor.lastrowid
+                if role == 'user' and self.prepare_user is not None:
+                    self.prepare_user(user_id)
                 db.commit()
         except pymysql.IntegrityError as error:
             if error.args and error.args[0] == 1062:

@@ -8,7 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from auth_config import (COOKIE_NAME, SESSION_TTL_SECONDS, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH,
                          USERNAME_PATTERN, AccountStorageError, DuplicateUsername, InvalidCredentials,
-                         InvalidPassword, InvalidSession, LoginThrottled, PasswordCommitUnknown, PasswordSaveFailed)
+                         InvalidPassword, InvalidSession, LoginThrottled, PasswordCommitUnknown, PasswordSaveFailed,
+                         ReservedUsername)
 
 
 class CredentialRoute(APIRoute):
@@ -102,6 +103,8 @@ def register(credentials: RegistrationRequest, request: Request):
     client = request.client.host if request.client else 'unknown'
     try:
         user = service.register(credentials.username, credentials.password, client)
+    except ReservedUsername:
+        return JSONResponse({'detail': 'admin 是保留用户名'}, status_code=409)
     except DuplicateUsername:
         return JSONResponse({'detail': '该用户名已注册'}, status_code=409)
     except (InvalidPassword, ValueError) as error:

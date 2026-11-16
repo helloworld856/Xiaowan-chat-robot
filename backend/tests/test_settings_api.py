@@ -24,10 +24,12 @@ def load_route(name, filename):
 
 class SettingsAPITests(unittest.TestCase):
     def setUp(self):
+        from personal_model_config import PersonalModelStore
         from settings_config import SettingsStore
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
         self.store = SettingsStore(Path(self.directory.name) / 'settings.json')
+        personal_models = PersonalModelStore(Path(self.directory.name) / 'users')
         self.old_agents = (object(), object(), object())
         self.new_agents = (object(), object(), object())
         self.agents = types.ModuleType('agent_config')
@@ -63,8 +65,8 @@ class SettingsAPITests(unittest.TestCase):
             update=lambda user_id, preferences: entries.__setitem__(user_id, preferences),
         )
         self.request_for = lambda user_id: types.SimpleNamespace(
-            state=types.SimpleNamespace(user=types.SimpleNamespace(id=user_id)),
-            app=types.SimpleNamespace(state=types.SimpleNamespace(preferences=preference_store)),
+            state=types.SimpleNamespace(user=types.SimpleNamespace(id=user_id, role='admin' if user_id == 1 else 'user')),
+            app=types.SimpleNamespace(state=types.SimpleNamespace(preferences=preference_store, personal_models=personal_models)),
         )
 
     def current_agents(self):
@@ -78,15 +80,16 @@ class SettingsAPITests(unittest.TestCase):
         self.assertEqual(self.model_calls[0][0][2], 'MyModel-V2')
         self.assertEqual(self.model_calls[0][1]['base_url'], 'https://example.com/v1')
 
-    def test_save_model_is_global_while_preferences_follow_account(self):
+    def test_admin_model_and_preferences_are_isolated_from_ordinary_user(self):
         self.assertTrue(self.model.validate_and_switch_model(self.model.ModelConfigRequest(**self.config)).status)
         self.assertEqual(self.current_agents(), self.new_agents)
         self.assertEqual(self.agent_calls[0][2:], ('MyModel-V2', 'https://example.com/v1'))
         self.settings.save_settings(self.settings.Preferences(send_shortcut='ctrl_enter'), self.request_for(1))
         settings_a = self.settings.get_settings(self.request_for(1))
         settings_b = self.settings.get_settings(self.request_for(2))
-        self.assertTrue(settings_a.model_ready and settings_b.model_ready)
-        self.assertEqual(settings_a.model, settings_b.model)
+        self.assertTrue(settings_a.model_ready)
+        self.assertFalse(settings_b.model_ready)
+        self.assertIsNone(settings_b.model)
         self.assertEqual(settings_a.preferences.send_shortcut, 'ctrl_enter')
         self.assertEqual(settings_b.preferences.send_shortcut, 'enter')
         from settings_config import SettingsStore

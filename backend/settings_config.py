@@ -10,9 +10,12 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+ModelMerchant = Literal['deepseek', 'tongyi']
+
+
 class ModelSettings(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    model_merchant: Literal['deepseek', 'tongyi']
+    model_merchant: ModelMerchant
     model_name: str = Field(min_length=1, max_length=200)
     base_url: str = Field(default='', max_length=2000)
 

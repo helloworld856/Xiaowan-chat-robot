@@ -98,6 +98,12 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
     registration.addEventListener('submit', async event => {
         event.preventDefault();
         if (busy || !registration.reportValidity()) return;
+        const chosenUsername = registerUsername.value.trim();
+        if (chosenUsername.toLowerCase() === 'admin') {
+            registerError.textContent = 'admin 是保留用户名';
+            registerUsername.focus();
+            return;
+        }
         const length = [...registerPassword.value].length;
         if (length < 6 || length > 15) {
             registerError.textContent = '密码须为 6–15 个字符';
@@ -115,7 +121,7 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
         registerButton.textContent = '注册中…';
         registerError.textContent = '';
         try {
-            const {user} = await registerAPI(registerUsername.value.trim(), registerPassword.value, registerConfirmation.value);
+            const {user} = await registerAPI(chosenUsername, registerPassword.value, registerConfirmation.value);
             showRegister(false);
             registerUsername.value = '';
             username.value = user.username;

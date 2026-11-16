@@ -23,6 +23,22 @@ test('custom model address and case survive both connection-test and save reques
     ]);
 });
 
+test('a personal API key is sent only to the personal model endpoints', async t => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push({url, payload: JSON.parse(options.body)});
+        return new Response(JSON.stringify({status: true}));
+    });
+    const model = {model_merchant: 'deepseek', model_name: 'User-Model', base_url: 'https://example.com/v1'};
+    const payload = {model_merchant: 'deepseek', model_name: 'User-Model', api_key: 'test-personal-placeholder'};
+    await api.modelAPI(model, true, payload.api_key);
+    await api.modelAPI(model, false, payload.api_key);
+    assert.deepEqual(calls, [
+        {url: 'http://local-test/model/personal/test', payload},
+        {url: 'http://local-test/model/personal', payload}
+    ]);
+});
+
 test('private 401 requests return to login; wrong login passwords do not fire a second expiry event', async t => {
     const events = [];
     t.mock.method(window, 'dispatchEvent', event => { events.push(event.type); return true; });
@@ -111,6 +127,15 @@ test('server validation of a chat message is a definite non-retryable rejection'
     ));
     await assert.rejects(api.chatAPI('消息'), error => error instanceof api.ChatNotStartedError &&
         error.retryable === false && error.message === '聊天消息最多 8000 个字符');
+});
+
+test('a missing personal model is a definite rejection with the setup instructions', async t => {
+    const message = '请先在设置中配置个人模型和 API Key';
+    t.mock.method(globalThis, 'fetch', async () => new Response(
+        JSON.stringify({detail: {code: 'CHAT_NOT_STARTED', message}}), {status: 403}
+    ));
+    await assert.rejects(api.chatAPI('消息'), error => error instanceof api.ChatNotStartedError &&
+        error.retryable === false && error.message === message);
 });
 
 test('profile saves only nickname and system avatar ID; password change goes to its own endpoint', async t => {

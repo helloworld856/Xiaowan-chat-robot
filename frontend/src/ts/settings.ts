@@ -35,6 +35,10 @@ function applySettings(saved: SavedSettings, requestedModelRevision: number) {
 export function updateSettingsPermissions() {
     const admin = canManageModel();
     document.querySelectorAll<HTMLElement>('[data-model-admin]').forEach(element => { element.hidden = !admin; });
+    document.querySelectorAll<HTMLElement>('[data-model-personal]').forEach(element => { element.hidden = admin; });
+    input('model-api-key').required = !admin;
+    document.getElementById('open-modify-btn')!.textContent = admin ? '修改模型配置' : '配置个人模型';
+    document.getElementById('submit-model-btn')!.textContent = admin ? '保存并切换' : '保存模型';
 }
 
 export function resetSettings() {
@@ -79,6 +83,7 @@ export function initSettings() {
     const merchant = select('modelSelect');
     const name = input('modelName');
     const address = input('model-base-url');
+    const apiKey = input('model-api-key');
     const suggestions: Record<string, string[]> = {
         deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
         tongyi: ['qwen3-max', 'qwen-plus', 'qwen-turbo', 'qwen-flash']
@@ -100,45 +105,54 @@ export function initSettings() {
         if (await closePopup(container)) {
             modal.classList.remove('open', 'closing');
             modal.inert = false;
+            apiKey.value = '';
         }
     });
     document.getElementById('open-modify-btn')!.addEventListener('click', () => {
-        if (!canManageModel()) return;
         if (modelOperation !== getRequestGeneration()) {
             merchant.value = modelConfig.model.model_merchant || 'deepseek';
             updateSuggestions();
             name.value = modelConfig.model.model_name || suggestions[merchant.value]![0]!;
             address.value = modelConfig.model.base_url || '';
+            apiKey.value = '';
             modelStatus.textContent = '';
         }
         openPopup(modal);
     });
-    document.getElementById('cancel-modify-btn')!.addEventListener('click', () => { void closePopup(modal); });
+    document.getElementById('cancel-modify-btn')!.addEventListener('click', () => {
+        apiKey.value = '';
+        void closePopup(modal);
+    });
     merchant.addEventListener('change', () => {
         updateSuggestions();
         name.value = suggestions[merchant.value]![0]!;
         address.value = '';
+        apiKey.value = '';
         modelStatus.textContent = '';
     });
     form.addEventListener('input', () => { modelStatus.textContent = ''; });
 
     async function configure(testOnly: boolean) {
         const generation = getRequestGeneration();
-        if (!canManageModel() || modelOperation === generation || !form.reportValidity()) return;
-        const model = {model_merchant: merchant.value, model_name: name.value.trim(), base_url: address.value.trim()};
+        if (modelOperation === generation || !form.reportValidity()) return;
+        const admin = canManageModel();
+        const key = admin ? undefined : apiKey.value.trim();
+        const model = {model_merchant: merchant.value, model_name: name.value.trim(), base_url: admin ? address.value.trim() : ''};
         if (!model.model_name) { modelStatus.textContent = '请输入模型名'; return; }
+        if (key === '') { modelStatus.textContent = '请输入你的 API Key'; return; }
         modelOperation = generation;
         form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
             .forEach(control => { control.disabled = true; });
         modelStatus.textContent = testOnly ? '正在测试连接…' : '正在验证并保存模型配置…';
         try {
-            const result = await modelAPI(model, testOnly);
+            const result = await modelAPI(model, testOnly, key);
             if (generation !== getRequestGeneration()) return;
             modelStatus.textContent = result.info || (result.status ? '操作成功' : '连接失败');
             if (result.status && !testOnly) {
                 modelRevision++;
                 modelConfig.model = model;
                 modelConfig.model_valid = true;
+                apiKey.value = '';
                 updateModelDisplay();
                 await closePopup(modal);
             }

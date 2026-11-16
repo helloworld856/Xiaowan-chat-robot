@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 import agent_config
 from agent_config.agent_factory import create_model
 from log_config import logger
+from personal_model_config import PersonalModel
+from routers.auth import CredentialRoute
 from schemas.model import ModelConfigRequest, ModelConfigResponse
 from settings_config import settings_store
 
-router = APIRouter()
+router = APIRouter(route_class=CredentialRoute)
 MODEL_VALIDATION_CAPACITY = 2
 validation_pool = ThreadPoolExecutor(max_workers=MODEL_VALIDATION_CAPACITY, thread_name_prefix='model-test')
 validation_slots = BoundedSemaphore(MODEL_VALIDATION_CAPACITY)
@@ -33,6 +35,11 @@ def use_agents(model, agents):
 async def require_admin(request: Request):
     if request.state.user.role != 'admin':
         raise HTTPException(403, '只有管理员可以配置模型')
+
+
+async def require_personal_account(request: Request):
+    if request.state.user.role != 'user':
+        raise HTTPException(403, '管理员的 API Key 由服务端配置')
 
 
 def activate_saved_model(model):
@@ -76,6 +83,33 @@ def test_model(request: ModelConfigRequest):
     return configure_model(request, activate=False)
 
 
+@router.post('/model/personal', response_model=ModelConfigResponse, dependencies=[Depends(require_personal_account)])
+def save_personal_model(model: PersonalModel, request: Request):
+    return configure_personal_model(model, request, activate=True)
+
+
+@router.post('/model/personal/test', response_model=ModelConfigResponse, dependencies=[Depends(require_personal_account)])
+def test_personal_model(model: PersonalModel, request: Request):
+    return configure_personal_model(model, request, activate=False)
+
+
+def configure_personal_model(model: PersonalModel, request: Request, activate: bool):
+    try:
+        llm = create_model(model.model_merchant, model.api_key.get_secret_value(), model.model_name,
+                           0.1, max_tokens=10, validation_timeout=8)
+        validate_connection(llm)
+        if not activate:
+            return ModelConfigResponse(status=True, info='连接测试通过')
+        agents = model.create_agents()
+        try:
+            request.app.state.personal_models.update(request.state.user.id, model, agents)
+        except (OSError, ValueError):
+            return ModelConfigResponse(status=False, info='个人模型保存失败，请稍后重试')
+        return ModelConfigResponse(status=True, info='个人模型已保存')
+    except Exception as error:
+        return connection_failure(error, model.model_name)
+
+
 def configure_model(request: ModelConfigRequest, activate: bool):
     """验证模型配置并切换代理"""
     deadline = monotonic() + MODEL_SWITCH_TIMEOUT_SECONDS
@@ -117,22 +151,21 @@ def configure_model(request: ModelConfigRequest, activate: bool):
         logger.info(f"模型配置切换成功: {merchant}/{model_name}")
         return ModelConfigResponse(status=True, info=f"已切换到 {merchant}/{model_name}")
 
-    except ModelValidationBusy:
-        return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
-    except TimeoutError:
-        return ModelConfigResponse(status=False, info='请求超时，请检查网络')
-    except Exception as e:
-        normalized_error = str(e).lower()
-        logger.warning(f"模型配置失败: {type(e).__name__}")
+    except Exception as error:
+        return connection_failure(error, model_name)
 
-        if any(
-            marker in normalized_error
-            for marker in ("401", "unauthorized", "invalid_api_key", "invalid api key")
-        ):
-            return ModelConfigResponse(status=False, info="API Key 无效或已过期")
-        elif "404" in normalized_error or "not found" in normalized_error:
-            return ModelConfigResponse(status=False, info=f"模型 {model_name} 不存在")
-        elif "timeout" in normalized_error or "timed out" in normalized_error:
-            return ModelConfigResponse(status=False, info="请求超时，请检查网络")
-        else:
-            return ModelConfigResponse(status=False, info='连接失败，请检查接口地址、模型名及服务端配置')
+
+def connection_failure(error: Exception, model_name: str):
+    if isinstance(error, ModelValidationBusy):
+        return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
+    if isinstance(error, TimeoutError):
+        return ModelConfigResponse(status=False, info='请求超时，请检查网络')
+    normalized_error = str(error).lower()
+    logger.warning(f'模型配置失败: {type(error).__name__}')
+    if any(marker in normalized_error for marker in ('401', 'unauthorized', 'invalid_api_key', 'invalid api key')):
+        return ModelConfigResponse(status=False, info='API Key 无效或已过期')
+    if '404' in normalized_error or 'not found' in normalized_error:
+        return ModelConfigResponse(status=False, info=f'模型 {model_name} 不存在')
+    if 'timeout' in normalized_error or 'timed out' in normalized_error:
+        return ModelConfigResponse(status=False, info='请求超时，请检查网络')
+    return ModelConfigResponse(status=False, info='连接失败，请检查模型名、API Key 和接口配置')

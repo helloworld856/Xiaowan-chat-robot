@@ -19,6 +19,7 @@ from auth_config import AuthService, SQLAccountStore
 from database_config import initialize_schema, open_pool, reset_chat_history
 from graph_config import create_graph
 from log_config import logger
+from personal_model_config import PersonalModelStore
 from profile_config import ProfileStore
 from settings_config import UserPreferencesStore, settings_store
 
@@ -32,7 +33,8 @@ def positive_setting(name, default):
 
 
 def build_application(db, profile_store, legacy_root):
-    accounts = SQLAccountStore(db)
+    personal_models = PersonalModelStore(profile_store.root)
+    accounts = SQLAccountStore(db, prepare_user=personal_models.ensure)
     preferences = UserPreferencesStore(db)
 
     def startup():
@@ -61,8 +63,10 @@ def build_application(db, profile_store, legacy_root):
     application = create_app(VERSION, AuthService(account_store=accounts), profile_store, lifespan=lifespan)
     application.state.db = db
     application.state.preferences = preferences
+    application.state.personal_models = personal_models
     application.state.chat = ChatSessions(
         db.connection,
+        personal_models=personal_models,
         graph_factory=create_graph,
         max_running=positive_setting('XIAOWAN_CHAT_CONCURRENCY', 4),
         max_waiting=positive_setting('XIAOWAN_CHAT_QUEUE_SIZE', 8),

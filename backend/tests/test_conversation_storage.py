@@ -161,6 +161,10 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
+        from auth_config import User
+
+        first_user = User(1, 'First', 'admin')
+        second_user = User(2, 'Second', 'admin')
         sessions = ChatSessions(pool.connection, wait_timeout=3)
         first_entered = threading.Event()
         release = threading.Event()
@@ -183,13 +187,13 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
             patch('graph_config.nodes.count_tokens', return_value=1),
         ):
-            first = asyncio.create_task(sessions.send(1, 'private-A-first'))
+            first = asyncio.create_task(sessions.send(first_user, 'private-A-first'))
             second = None
             try:
                 self.assertTrue(await asyncio.to_thread(first_entered.wait, 3))
                 account_a = sessions._users[1].runtime
-                second = asyncio.create_task(sessions.send(1, 'private-A-second'))
-                other_result = await asyncio.wait_for(sessions.send(2, 'private-B'), 1)
+                second = asyncio.create_task(sessions.send(first_user, 'private-A-second'))
+                other_result = await asyncio.wait_for(sessions.send(second_user, 'private-B'), 1)
                 self.assertFalse(first.done())
                 self.assertFalse(second.done())
             finally:

@@ -239,7 +239,7 @@
                         <label>模型状态：</label>
                         <span id="display-model-status">未就绪</span>
                     </div>
-                    <button type="button" id="open-modify-btn" class="modify-btn" data-model-admin hidden>修改模型配置</button>
+                    <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
                 </div>
 
                 <form id="preferences-form">
@@ -271,11 +271,15 @@
                                 <input id="modelName" list="model-name-options" required placeholder="选择或输入模型名">
                                 <datalist id="model-name-options"></datalist>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" data-model-admin hidden>
                                 <label for="model-base-url">接口地址:</label>
                                 <input id="model-base-url" type="url" placeholder="留空使用厂商默认地址">
                             </div>
-                            <p class="settings-help">自定义地址需兼容 OpenAI 接口，填写完整 API 基础路径。密钥仍使用所选厂商的服务端配置。</p>
+                            <div class="form-group" data-model-personal hidden>
+                                <label for="model-api-key">API Key</label>
+                                <input id="model-api-key" type="password" maxlength="1024" autocomplete="off" spellcheck="false">
+                            </div>
+                            <p class="settings-help" data-model-admin hidden>自定义地址需兼容 OpenAI 接口，填写完整 API 基础路径。密钥仍使用所选厂商的服务端配置。</p>
                             <p id="model-test-status" role="status"></p>
                             <div class="modal-btns">
                                 <button type="button" id="cancel-modify-btn">取消</button>

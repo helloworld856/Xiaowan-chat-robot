@@ -11,6 +11,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'app'))
 
 
+from auth_config import User
+
+FIRST_USER = User(1, 'First', 'admin')
+SECOND_USER = User(2, 'Second', 'admin')
+
+
 class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from core.session import ChatSessions
@@ -24,17 +30,17 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_different_accounts_can_run_while_first_is_blocked(self):
         entered = threading.Event()
 
-        def run(self_, entry, user_id, text):
-            if user_id == 1:
+        def run(self_, entry, user, text):
+            if user.id == FIRST_USER.id:
                 entered.set()
                 self.release.wait(3)
             return text
 
         with patch.object(type(self.sessions), '_run', run):
-            first = asyncio.create_task(self.sessions.send(1, 'first'))
+            first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             try:
                 await self.wait_until_entered(entered)
-                self.assertEqual(await asyncio.wait_for(self.sessions.send(2, 'other'), 1), 'other')
+                self.assertEqual(await asyncio.wait_for(self.sessions.send(SECOND_USER, 'other'), 1), 'other')
                 self.assertFalse(first.done())
             finally:
                 self.release.set()
@@ -45,7 +51,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
         entered = threading.Event()
         calls = []
 
-        def run(self_, entry, user_id, text):
+        def run(self_, entry, user, text):
             calls.append(text)
             if text == 'first':
                 entered.set()
@@ -53,19 +59,19 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             return text
 
         with patch.object(type(self.sessions), '_run', run):
-            first = asyncio.create_task(self.sessions.send(1, 'first'))
+            first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             try:
                 await self.wait_until_entered(entered)
                 first.cancel()
                 with self.assertRaises(asyncio.CancelledError):
                     await first
                 with self.assertRaises(ChatNotStarted) as timed_out:
-                    await self.sessions.send(1, 'must not run')
+                    await self.sessions.send(FIRST_USER, 'must not run')
                 self.assertEqual(timed_out.exception.status_code, 503)
                 self.assertEqual(calls, ['first'])
             finally:
                 self.release.set()
-            self.assertEqual(await self.sessions.send(1, 'next'), 'next')
+            self.assertEqual(await self.sessions.send(FIRST_USER, 'next'), 'next')
             self.assertEqual(calls, ['first', 'next'])
 
     async def test_global_and_account_queue_limits(self):
@@ -73,24 +79,24 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = ChatSessions(None, max_running=1, max_waiting=1, wait_timeout=1)
         entered = threading.Event()
 
-        def run(self_, entry, user_id, text):
+        def run(self_, entry, user, text):
             if text == 'first':
                 entered.set()
                 self.release.wait(3)
             return text
 
         with patch.object(type(self.sessions), '_run', run):
-            first = asyncio.create_task(self.sessions.send(1, 'first'))
+            first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             waiting = None
             try:
                 await self.wait_until_entered(entered)
-                waiting = asyncio.create_task(self.sessions.send(1, 'second'))
+                waiting = asyncio.create_task(self.sessions.send(FIRST_USER, 'second'))
                 await asyncio.sleep(0)
                 with self.assertRaises(ChatNotStarted) as duplicate:
-                    await self.sessions.send(1, 'third')
+                    await self.sessions.send(FIRST_USER, 'third')
                 self.assertEqual(duplicate.exception.status_code, 429)
                 with self.assertRaises(ChatNotStarted) as full:
-                    await self.sessions.send(2, 'busy')
+                    await self.sessions.send(SECOND_USER, 'busy')
                 self.assertEqual(full.exception.status_code, 503)
             finally:
                 self.release.set()
@@ -106,7 +112,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         now = 10.0
 
-        def run(self_, entry, user_id, text):
+        def run(self_, entry, user, text):
             calls.append(text)
             if text == 'first':
                 entered.set()
@@ -117,10 +123,10 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ChatSessions, '_run', run),
             patch('core.session.perf_counter', side_effect=lambda: now),
         ):
-            first = asyncio.create_task(self.sessions.send(1, 'first'))
+            first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             try:
                 await self.wait_until_entered(entered)
-                queued = asyncio.create_task(self.sessions.send(2, 'too late'))
+                queued = asyncio.create_task(self.sessions.send(SECOND_USER, 'too late'))
                 await asyncio.sleep(0)
                 now = 11.1
             finally:
@@ -129,20 +135,20 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ChatNotStarted) as late:
                 await queued
             self.assertEqual(late.exception.status_code, 503)
-            self.assertEqual(await self.sessions.send(2, 'next'), 'next')
+            self.assertEqual(await self.sessions.send(SECOND_USER, 'next'), 'next')
             self.assertEqual(calls, ['first', 'next'])
 
     async def test_shutdown_finishes_an_admitted_turn_and_rejects_new_turns(self):
         from core.session import ChatNotStarted
         entered = threading.Event()
 
-        def run(self_, entry, user_id, text):
+        def run(self_, entry, user, text):
             entered.set()
             self.release.wait(3)
             return text
 
         with patch.object(type(self.sessions), '_run', run):
-            first = asyncio.create_task(self.sessions.send(1, 'first'))
+            first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             shutdown = None
             try:
                 await self.wait_until_entered(entered)
@@ -153,7 +159,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
                 self.assertFalse(shutdown.done())
                 with self.assertRaises(ChatNotStarted):
-                    await self.sessions.send(2, 'must not run')
+                    await self.sessions.send(SECOND_USER, 'must not run')
             finally:
                 self.release.set()
                 if shutdown is not None:
@@ -168,8 +174,8 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             patch.object(type(self.sessions), '_initialize', side_effect=[OSError('DB down'), runtime]) as build,
         ):
             with self.assertRaises(OSError):
-                await self.sessions.send(1, 'first attempt')
-            result = await self.sessions.send(1, 'retry')
+                await self.sessions.send(FIRST_USER, 'first attempt')
+            result = await self.sessions.send(FIRST_USER, 'retry')
             self.assertEqual(result['user_input'], 'retry')
             self.assertEqual(build.call_count, 2)
 
@@ -192,8 +198,8 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         from httpx import ASGITransport, AsyncClient
         from routers.chat import router
 
-        async def send(user_id, text):
-            self.assertEqual(user_id, 42)
+        async def send(user, text):
+            self.assertEqual(user.id, 42)
             self.assertEqual(text, ' ' + '晚' * 7998 + ' ')
             return {'ai_response': ['回复'], 'message': {'conversation_round': 1}, 'saved': True}
 
