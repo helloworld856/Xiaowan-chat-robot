@@ -3,13 +3,15 @@ import type {SavedSettings} from './api.ts';
 import {modelConfig} from './global_config.ts';
 import {preferences} from './preferences.ts';
 import type {Preferences} from './preferences.ts';
-import {openPopup, closePopup, menuSelect} from './ui.ts';
+import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect} from './ui.ts';
 
 const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 const fields = () => document.getElementById('preferences-fields') as HTMLFieldSetElement;
 const status = () => document.getElementById('preferences-status')!;
 let modelRevision = 0;
+const settingsPopup = () => document.getElementById('setting-container') as HTMLDialogElement;
+const modelPopup = () => document.getElementById('model-edit-modal') as HTMLDialogElement;
 
 function updateModelDisplay() {
     document.getElementById('display-merchant')!.textContent = modelConfig.model.model_merchant || '未配置';
@@ -36,18 +38,21 @@ export function updateSettingsPermissions() {
     const admin = canManageModel();
     document.querySelectorAll<HTMLElement>('[data-model-admin]').forEach(element => { element.hidden = !admin; });
     document.querySelectorAll<HTMLElement>('[data-model-personal]').forEach(element => { element.hidden = admin; });
+    input('model-base-url').disabled = !admin;
+    input('model-api-key').disabled = admin;
     input('model-api-key').required = !admin;
     document.getElementById('open-modify-btn')!.textContent = admin ? '修改模型配置' : '配置个人模型';
     document.getElementById('submit-model-btn')!.textContent = admin ? '保存并切换' : '保存模型';
 }
 
 export function resetSettings() {
+    resetPopup(modelPopup());
+    resetPopup(settingsPopup());
     preferences.send_shortcut = 'enter';
     modelConfig.model = {model_merchant: '', model_name: '', base_url: ''};
     modelConfig.model_valid = false;
     renderPreferences();
     updateModelDisplay();
-    updateSettingsPermissions();
     fields().disabled = true;
     status().textContent = '';
     (document.getElementById('reload-settings') as HTMLButtonElement).disabled = false;
@@ -55,6 +60,7 @@ export function resetSettings() {
     form.reset();
     form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
         .forEach(control => { control.disabled = false; });
+    updateSettingsPermissions();
     document.getElementById('model-test-status')!.textContent = '';
 }
 
@@ -76,8 +82,8 @@ export async function loadSettings() {
 }
 
 export function initSettings() {
-    const container = document.getElementById('setting-container')!;
-    const modal = document.getElementById('model-edit-modal')!;
+    const container = settingsPopup();
+    const modal = modelPopup();
     const form = document.getElementById('model-config-form') as HTMLFormElement;
     const modelStatus = document.getElementById('model-test-status')!;
     const merchant = select('modelSelect');
@@ -98,15 +104,15 @@ export function initSettings() {
 
     menuSelect[1].addEventListener('click', event => {
         event.stopPropagation();
+        closeMenu();
+        menuBtn.focus();
         updateModelDisplay();
         openPopup(container);
     });
-    document.querySelector('.close-setting')!.addEventListener('click', async () => {
-        if (await closePopup(container)) {
-            modal.classList.remove('open', 'closing');
-            modal.inert = false;
-            apiKey.value = '';
-        }
+    document.querySelector('.close-setting')!.addEventListener('click', () => { void closePopup(container); });
+    container.addEventListener('cancel', event => {
+        event.preventDefault();
+        void closePopup(container);
     });
     document.getElementById('open-modify-btn')!.addEventListener('click', () => {
         if (modelOperation !== getRequestGeneration()) {
@@ -119,9 +125,15 @@ export function initSettings() {
         }
         openPopup(modal);
     });
-    document.getElementById('cancel-modify-btn')!.addEventListener('click', () => {
+    function cancelModelEdit() {
+        if (modelOperation === getRequestGeneration()) return;
         apiKey.value = '';
         void closePopup(modal);
+    }
+    document.getElementById('cancel-modify-btn')!.addEventListener('click', cancelModelEdit);
+    modal.addEventListener('cancel', event => {
+        event.preventDefault();
+        cancelModelEdit();
     });
     merchant.addEventListener('change', () => {
         updateSuggestions();
@@ -165,6 +177,8 @@ export function initSettings() {
             if (generation === getRequestGeneration()) {
                 form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
                     .forEach(control => { control.disabled = false; });
+                address.disabled = !admin;
+                apiKey.disabled = admin;
             }
         }
     }

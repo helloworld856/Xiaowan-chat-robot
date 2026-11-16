@@ -104,6 +104,22 @@ class ProfileHTTPTests(unittest.TestCase):
         self.profile.import_legacy_profile(1, legacy)
         self.assertEqual(self.profile.get(1, 'admin').nickname, '新昵称')
 
+    def test_corrupt_profile_can_be_replaced_using_defaults(self):
+        corrupt = b'{"avatar_id":'
+        self.profile_path.parent.mkdir(parents=True)
+        self.profile_path.write_bytes(corrupt)
+        cookie = self.login()
+
+        status, _, body = request(self.app, '/profile', cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['avatar_id'], 'cat')
+        self.assertEqual(self.profile_path.read_bytes(), corrupt)
+
+        status, _, body = request(self.app, '/profile', 'POST',
+                                  {'nickname': '新资料', 'avatar_id': 'fox'}, cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['avatar_id'], 'fox')
+
     def test_profile_rejects_invalid_nickname_avatar_and_extra_fields(self):
         cookie = self.login()
         invalid = [

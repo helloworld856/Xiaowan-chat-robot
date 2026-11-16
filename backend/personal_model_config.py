@@ -31,7 +31,8 @@ class PersonalModel(BaseModel):
     def create_agents(self):
         from agent_config import create_agents
 
-        return create_agents(self.model_merchant, self.api_key.get_secret_value(), self.model_name, '')
+        return create_agents(self.model_merchant, self.api_key.get_secret_value(), self.model_name, '',
+                             official_only=True)
 
 
 class _PersonalSettings(BaseModel):

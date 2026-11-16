@@ -2,7 +2,7 @@
 <html lang="zh-CN" class="theme0">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>来聊天吧</title>
     <link rel="icon" href="/ico/favicon.ico" type="image/x-icon">
     
@@ -208,11 +208,11 @@
     </dialog>
 
     <!-- 设置界面 -->
-    <div id="setting-container">
+    <dialog id="setting-container" aria-labelledby="settings-title">
         <div class="setting">
             <div class="setting-head">
-                <span>设置</span>
-                <button type="button" class="close-setting" title="关闭设置界面">
+                <span id="settings-title">设置</span>
+                <button type="button" class="close-setting" aria-label="关闭设置" autofocus>
                     <svg viewBox="0 0 17 17" height="17" width="17">
                         <line x1="0" y1="0" x2="17" y2="17" stroke="currentColor" stroke-width="2"/>
                         <line x1="17" y1="0" x2="0" y2="17" stroke="currentColor" stroke-width="2"/>
@@ -256,13 +256,13 @@
                 </form>
 
                 <!-- 修改模型配置的弹窗 -->
-                <div id="model-edit-modal" class="modal">
+                <dialog id="model-edit-modal" class="modal" aria-labelledby="open-modify-btn">
                     <div class="modal-content">
                         <form id="model-config-form">
                             <div class="form-group">
                                 <label for="modelSelect">选择模型厂商:</label>
-                                <select id="modelSelect">
-                                    <option value="deepseek" checked>deepseek</option>
+                                <select id="modelSelect" autofocus>
+                                    <option value="deepseek">deepseek</option>
                                     <option value="tongyi">通义千问</option>
                                 </select>
                             </div>
@@ -290,26 +290,26 @@
                         <!-- 验证过程中的加载动画 -->
                         <div class="valid-loader"></div>
                     </div>
-                </div>
+                </dialog>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- 提示弹窗，就不使用浏览器的alert了 -->
-     <div id="alert-window-container">
+     <dialog id="alert-window-container" role="alertdialog" aria-labelledby="alert-window-title" aria-describedby="alert-window-message">
         <div class="alert-window">
             <!-- 提示弹窗头 -->
             <div class="alert-window-header">
-                <span>提示</span>
+                <span id="alert-window-title">提示</span>
             </div>
             <div class="alert-window-content" role="alert">
-                <p></p>
+                <p id="alert-window-message"></p>
             </div>
             <div class="alert-window-button">
                 <button type="button">确定</button>
             </div>
         </div>
-     </div>
+     </dialog>
 
     </div>
     <script type="module" src="src/ts/main.ts"></script>

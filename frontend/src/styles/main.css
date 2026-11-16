@@ -10,10 +10,7 @@
 /*提示弹窗*/
 #alert-window-container{
     display: none;
-    position: absolute;
     background-color: rgba(174, 172, 172, 0.795); 
-    width: 100vw;
-    height: 100vh;
     justify-content: center;
     align-items: center;
     z-index: 1001;
@@ -25,9 +22,8 @@
     display: flex;
     flex-direction: column;
     height: 15rem;
-    max-height: 370px;
-    width: 20rem;
-    max-width: 340px;
+    max-height: calc(100% - 2rem);
+    width: min(20rem, calc(100% - 2rem));
     background: var(--setting-bg);
     border-radius: 15px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
@@ -52,6 +48,8 @@
     display: flex;
     position: relative;
     flex: 1;
+    min-height: 0;
+    overflow: auto;
     margin: 1rem;
 }
 .alert-window .alert-window-content p{
@@ -245,6 +243,7 @@ body {
 /* --- 聊天容器 --- */
 #chat-container {
     flex: 1;
+    min-height: 0;
     position: relative;
     background: var(--chat-bg);
     border: 1px solid var(--chat-border);
@@ -335,6 +334,11 @@ body {
 
 #userInput::placeholder {
     color: #878787;
+}
+
+#userInput:focus-visible {
+    outline: 2px solid var(--input-border);
+    outline-offset: 2px;
 }
 
 textarea#userInput {

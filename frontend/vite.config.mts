@@ -1,4 +1,4 @@
-// vite.config.ts，自定义vite配置
+// Vite 构建和开发代理配置
 import { defineConfig } from 'vite';
 
 export default defineConfig({

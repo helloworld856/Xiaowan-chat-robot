@@ -129,13 +129,13 @@ test('server validation of a chat message is a definite non-retryable rejection'
         error.retryable === false && error.message === '聊天消息最多 8000 个字符');
 });
 
-test('a missing personal model is a definite rejection with the setup instructions', async t => {
+test('a missing personal model is a definite rejection that can be retried after setup', async t => {
     const message = '请先在设置中配置个人模型和 API Key';
     t.mock.method(globalThis, 'fetch', async () => new Response(
         JSON.stringify({detail: {code: 'CHAT_NOT_STARTED', message}}), {status: 403}
     ));
     await assert.rejects(api.chatAPI('消息'), error => error instanceof api.ChatNotStartedError &&
-        error.retryable === false && error.message === message);
+        error.retryable === true && error.message === message);
 });
 
 test('profile saves only nickname and system avatar ID; password change goes to its own endpoint', async t => {

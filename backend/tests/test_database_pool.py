@@ -7,6 +7,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 class ConnectionPoolTests(unittest.TestCase):
+    def test_checkout_rejects_connection_opened_during_close(self):
+        import pymysql
+        from database_config import ConnectionPool
+
+        connection = Mock()
+
+        def connect():
+            pool.close()
+            return connection
+
+        pool = ConnectionPool(connect, max_connections=1)
+        with self.assertRaises(pymysql.OperationalError):
+            with pool.connection():
+                self.fail('connection checked out after pool closed')
+        connection.close.assert_called_once()
+
     def test_reuse_resets_transaction_and_never_shares_an_active_connection(self):
         from database_config import ConnectionPool
 

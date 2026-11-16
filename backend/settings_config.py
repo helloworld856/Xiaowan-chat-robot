@@ -24,7 +24,10 @@ class ModelSettings(BaseModel):
     def validate_url(cls, value):
         if not value:
             return ''
-        parsed = urlsplit(value)
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            raise ValueError('接口地址须为有效的 HTTP(S) 地址') from None
         if (parsed.scheme not in ('http', 'https') or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
             raise ValueError('接口地址须为不含账号、参数或片段的 HTTP(S) 地址')

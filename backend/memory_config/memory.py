@@ -6,6 +6,11 @@ logger = logging.getLogger(__name__)
 
 def load_history(connection, user_id: int, k: int, front: bool = True):
     """Read committed history for one authenticated account."""
+    with connection() as db, db.cursor() as cursor:
+        return _read_history(cursor, user_id, k, front)
+
+
+def _read_history(cursor, user_id: int, k: int, front: bool = True):
     ascending = front if k >= 0 else not front
     direction = 'ASC' if ascending else 'DESC'
     sql = (
@@ -16,12 +21,11 @@ def load_history(connection, user_id: int, k: int, front: bool = True):
     if k != 0:
         sql += ' LIMIT %s'
         params += (max(k, 1),)
-    with connection() as db, db.cursor() as cursor:
-        cursor.execute(sql, params)
-        return [
-            {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
-            for row in cursor.fetchall()
-        ]
+    cursor.execute(sql, params)
+    return [
+        {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
+        for row in cursor.fetchall()
+    ]
 
 
 class MemoryManager:
@@ -30,11 +34,27 @@ class MemoryManager:
     def __init__(self, user_id: int, connection):
         self.user_id = user_id
         self._connection = connection
-        self.history_cache = load_history(connection, user_id, 0)
-        with connection() as db, db.cursor() as cursor:
-            cursor.execute('SELECT abstract FROM abstract_messages WHERE user_id = %s', (user_id,))
+        self._stale = True
+        self.refresh_if_needed()
+
+    def refresh_if_needed(self):
+        if not self._stale:
+            return
+        with self._connection() as db, db.cursor() as cursor:
+            history = _read_history(cursor, self.user_id, 0)
+            cursor.execute('SELECT abstract FROM abstract_messages WHERE user_id = %s', (self.user_id,))
             row = cursor.fetchone()
+        self.history_cache = history
         self.abstract_cache = row[0] if row else ''
+        self._stale = False
+
+    def _commit(self, db):
+        try:
+            db.commit()
+        except Exception:
+            # A lost response can leave either outcome on the server.
+            self._stale = True
+            raise
 
     @property
     def next_round(self) -> int:
@@ -50,7 +70,7 @@ class MemoryManager:
                         (self.user_id, message['conversation_round'], message['user'],
                          json.dumps(message['assistant'], ensure_ascii=False)),
                     )
-                db.commit()
+                self._commit(db)
         except Exception as error:
             logger.warning('history write failed: %s', type(error).__name__)
             return False
@@ -88,7 +108,7 @@ class MemoryManager:
                     )
                     if removed != count:
                         raise ValueError('历史对话在压缩时发生变化')
-                db.commit()
+                self._commit(db)
         except Exception as error:
             logger.warning('history compression failed: %s', type(error).__name__)
             return

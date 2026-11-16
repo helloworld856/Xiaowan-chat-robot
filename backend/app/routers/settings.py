@@ -12,7 +12,7 @@ def settings_for(request: Request, preferences: Preferences) -> UserSettings:
     if user.role != 'admin':
         try:
             personal = request.app.state.personal_models.get(user.id)
-        except ValueError:
+        except (OSError, ValueError):
             personal = None
         return UserSettings(model=personal.public_model() if personal else None,
                             preferences=preferences, model_ready=personal is not None)

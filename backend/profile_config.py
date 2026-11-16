@@ -1,5 +1,6 @@
 """为每个账号保存独立的个人资料。"""
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+logger = logging.getLogger(__name__)
 AVATARS = (
     ('cat', '小猫'), ('fox', '狐狸'), ('rabbit', '兔子'),
     ('bear', '小熊'), ('penguin', '企鹅'), ('frog', '青蛙'),
@@ -52,7 +54,10 @@ class ProfileStore:
             try:
                 return self._read(path)
             except FileNotFoundError:
-                return Profile(nickname=username)
+                pass
+            except ValueError:
+                logger.warning('个人资料文件格式无效，暂时使用默认资料')
+            return Profile(nickname=username)
 
     def import_legacy_profile(self, user_id: int, legacy_path: Path):
         path = self.path_for(user_id)

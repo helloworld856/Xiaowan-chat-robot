@@ -26,6 +26,6 @@
 
   // === 项目引用（顶层字段，不可放在 compilerOptions 内）===
   "references": [
-    { "path": "./tsconfig.node.json" }   // 引用 Node 端配置，解决 vite.config.ts 不在 tsconfig 范围内的报错
+    { "path": "./tsconfig.node.json" }   // 引用 Vite 的 Node 端配置
   ]
 }

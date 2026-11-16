@@ -23,7 +23,7 @@
 
 ```bash
 python -m pip install -r requirements.txt
-npm --prefix frontend install
+npm --prefix frontend ci
 npm --prefix frontend run build
 ```
 
@@ -85,7 +85,7 @@ cd frontend
 npm run dev
 ```
 
-访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/config/cfg.py` 中的 `listen_port`，请同步更新 `frontend/vite.config.ts` 的代理端口。
+访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/config/cfg.py` 中的 `listen_port`，请同步更新 `frontend/vite.config.mts` 的代理端口。
 
 如果只想启动一个服务，先构建前端：
 

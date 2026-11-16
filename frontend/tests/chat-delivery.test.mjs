@@ -100,7 +100,7 @@ test('a retryable failure uses a red marker that resends the original and clears
     assert.equal(marker.className, 'chat-send-failed');
     assert.equal(marker.tag, 'button');
     assert.equal(marker.textContent, '!');
-    assert.match(marker.title, /发送失败/);
+    assert.equal(marker.title, '发送失败');
     await marker.events.click();
     assert.deepEqual(sent, ['原文', '原文']);
     assert.equal(app.rows.length, 1);
@@ -110,11 +110,14 @@ test('a retryable failure uses a red marker that resends the original and clears
     assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
 });
 
-test('a missing personal model shows the existing alert and only a failure marker by the original', async () => {
+test('a missing personal model shows the existing alert and the original can be retried after setup', async () => {
     const message = '请先在设置中配置个人模型和 API Key';
     let calls = 0;
-    const app = harness(async (_text, Rejected) => { calls++; throw new Rejected(message, false); },
-        async () => assert.fail('validation must not need history'));
+    const app = harness(async (text, Rejected) => {
+        assert.equal(text, '原文');
+        if (++calls === 1) throw new Rejected(message);
+        return {response: ['个人模型回复'], conversation_round: 1, saved: true};
+    }, async () => assert.fail('validation must not need history'));
     await app.sendMessage();
     assert.equal(app.rows[0].textContent, '原文');
     assert.deepEqual(app.alerts, [message]);
@@ -123,8 +126,9 @@ test('a missing personal model shows the existing alert and only a failure marke
     assert.equal(marker.textContent, '!');
     assert.equal(marker.title, '发送失败');
     await marker.events.click();
-    assert.deepEqual(app.alerts, [message, message]);
-    assert.equal(calls, 1);
+    assert.deepEqual(app.alerts, [message]);
+    assert.equal(calls, 2);
+    assert.deepEqual(app.confirmed, ['个人模型回复']);
 });
 
 test('an uncertain send refreshes history without offering a duplicate send', async () => {

@@ -16,9 +16,14 @@ def get_last_message(response: dict):
 
 
 def get_total_tokens(message) -> int:
-    metadata = getattr(message, "response_metadata", {}) or {}
-    token_usage = metadata.get("token_usage", {}) or {}
-    return token_usage.get("total_tokens", 0)
+    metadata = getattr(message, 'response_metadata', None)
+    legacy_usage = metadata.get('token_usage') if isinstance(metadata, dict) else None
+    for usage in (getattr(message, 'usage_metadata', None), legacy_usage):
+        if isinstance(usage, dict):
+            tokens = usage.get('total_tokens')
+            if type(tokens) is int and tokens >= 0:
+                return tokens
+    return 0
 
 
 # 基础结点定义
@@ -31,6 +36,8 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents) -> AIChatSta
         # 清空上轮的回复
         state['ai_response'] = []
         state['saved'] = False
+        memorier.refresh_if_needed()
+        state['message']['conversation_round'] = memorier.next_round
 
         # 计算tokens
         res = []
@@ -113,9 +120,13 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         last_message = get_last_message(response)
 
         # 提取出回复并转成字典格式（使用容错解析）
-        ai_response = safe_parse_json(last_message.content, configer.ANALYSIS_DEFAULT_RESULT)
+        defaults = configer.ANALYSIS_DEFAULT_RESULT
+        ai_response = safe_parse_json(last_message.content, defaults)
 
-        state['analysis_result'] = ai_response
+        state['analysis_result'] = {}
+        for field, default in defaults.items():
+            value = ai_response.get(field)
+            state['analysis_result'][field] = value if isinstance(value, str) else default
         state['total_tokens'] += get_total_tokens(last_message)
 
         logger.info('结点"analysis"执行完成！')
@@ -175,9 +186,17 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         ):
             reply = configer.GENERATE_DEFAULT_RESULT["reply"].copy()
         state['ai_response'] = reply
-        state['ai_monologue'] = ai_response.get('inner monologue', '')
-        state['ai_emotion'] = ai_response.get('emotion', '')
-        state['ai_action'] = ai_response.get('action', '')
+
+        monologue = ai_response.get('inner monologue', '')
+        if not isinstance(monologue, str) and (
+            not isinstance(monologue, list) or any(not isinstance(part, str) for part in monologue)
+        ):
+            monologue = []
+        emotion = ai_response.get('emotion')
+        action = ai_response.get('action')
+        state['ai_monologue'] = monologue
+        state['ai_emotion'] = emotion if isinstance(emotion, str) else ''
+        state['ai_action'] = action if isinstance(action, str) else ''
 
         state['total_tokens'] += get_total_tokens(last_message)
 

@@ -7,6 +7,30 @@ import {runInNewContext} from 'node:vm';
 const source = fs.readFileSync(new URL('../src/ts/settings.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
 
+test('only the relevant model fields are visible and active for each role', () => {
+    let admin = true;
+    const nodes = new Map();
+    function element(id) {
+        if (!nodes.has(id)) nodes.set(id, {});
+        return nodes.get(id);
+    }
+    const exports = {};
+    runInNewContext(compiled, {
+        exports,
+        require: () => ({canManageModel: () => admin}),
+        document: {getElementById: element, querySelectorAll: selector => [element(selector)]}
+    });
+
+    for (admin of [true, false]) {
+        exports.updateSettingsPermissions();
+        assert.equal(element('[data-model-admin]').hidden, !admin);
+        assert.equal(element('[data-model-personal]').hidden, admin);
+        assert.equal(element('model-base-url').disabled, !admin);
+        assert.equal(element('model-api-key').disabled, admin);
+        assert.equal(element('model-api-key').required, !admin);
+    }
+});
+
 test('a delayed settings response does not replace a model that the admin just switched to', async () => {
     const nodes = new Map();
     function element(id) {

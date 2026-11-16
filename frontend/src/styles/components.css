@@ -309,11 +309,21 @@
     accent-color: var(--loading-color);
 }
 
-/* 设置容器 默认关闭*/
-#setting-container{
+/* 弹窗遮罩覆盖当前视口，内容由各弹窗布局。 */
+#setting-container, #alert-window-container, #model-edit-modal {
     position: fixed;
-    width: 100vw;
-    height: 100vh;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    color: var(--menu-text);
+}
+#setting-container::backdrop, #alert-window-container::backdrop, #model-edit-modal::backdrop {
+    background: transparent;
+}
+#setting-container{
     display: none;
     justify-content: center;
     align-items: center;
@@ -399,7 +409,7 @@
     color: var(--menu-text);
 }
 
-[data-model-admin][hidden] { display: none; }
+[data-model-admin][hidden], [data-model-personal][hidden] { display: none; }
 
 .modify-btn {    
     margin-top: 0.5rem;
@@ -421,11 +431,6 @@
 /* --- 修改设置弹窗样式 --- */
 .modal {
     display: none;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
     background: var(--setting-bg);
     border-radius: 20px;
     z-index: 1010;
@@ -666,13 +671,14 @@
 }
 
 /* 设置内容增多后，正文独立滚动，模型弹窗覆盖整个设置窗口。 */
-#setting-container .setting {
+#setting-container .setting, #model-edit-modal {
     width: calc(100% - 2rem);
     max-width: 560px;
     height: min(82dvh, 760px);
     opacity: 1;
     color: var(--menu-text);
 }
+#model-edit-modal { margin: auto; }
 #setting-container .setting-content {
     flex: 1;
     min-height: 0;
@@ -704,4 +710,4 @@
 #model-edit-modal .form-group { flex-direction: column; align-items: stretch; gap: 0.4rem; margin-bottom: 0.8rem; }
 #model-edit-modal .form-group label { width: auto; }
 #model-edit-modal .form-group input, #model-edit-modal .form-group select { min-width: 0; width: 100%; background: var(--input-bg); color: var(--menu-text); }
-#model-edit-modal .modal-btns { margin-top: 1rem; gap: 0.5rem; }
+#model-edit-modal .modal-btns { margin-top: 1rem; gap: 0.5rem; flex-wrap: wrap; }

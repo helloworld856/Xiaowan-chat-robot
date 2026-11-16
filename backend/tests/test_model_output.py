@@ -24,3 +24,9 @@ class ModelOutputTests(unittest.TestCase):
             output = parser.safe_parse_json('private chat text', {'reply': ['fallback']})
         self.assertEqual(output, {'reply': ['fallback']})
         self.assertNotIn('private chat text', '\n'.join(logs.output))
+
+    def test_deeply_nested_output_uses_fallback(self):
+        with self.assertLogs(parser.logger, level='WARNING'):
+            nested = '[' * 10_000 + '0'
+            output = parser.safe_parse_json('{"reply":' + nested + '}', {'reply': ['fallback']})
+        self.assertEqual(output, {'reply': ['fallback']})

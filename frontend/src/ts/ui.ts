@@ -13,9 +13,14 @@ export const menuBtn = document.getElementById('menuBtn') as HTMLButtonElement;/
 export const menu = document.getElementById('menu') as HTMLDivElement;//菜单
 export const menuSelect = document.querySelectorAll<HTMLButtonElement>('#menu .value')!;//获得菜单里所有选项
 export const themeInput = document.querySelectorAll<HTMLInputElement>('#menu .theme-select label input[name="themeRadio"]')!;//获得所有主题选择按钮
-export const windowAlertContainer = document.querySelector<HTMLDivElement>('#alert-window-container')!;//提示弹窗
+export const windowAlertContainer = document.querySelector<HTMLDialogElement>('#alert-window-container')!;//提示弹窗
 export const windowAlertP = document.querySelector<HTMLParagraphElement>('.alert-window .alert-window-content p')!;//提示弹窗内容
 
+export function closeMenu() {
+    menuBtn.classList.remove('active');
+    menuBtn.setAttribute('aria-expanded', 'false');
+    menuSelect.forEach(item => item.classList.remove('active'));
+}
 
 export function lockSendBtn() {//锁住发送按钮
     sendBtn.disabled = true;
@@ -39,10 +44,11 @@ export function scrollToBottom(smooth = true) {// 启用平滑滚动
 }
 
 // 打开时取消退出状态，便于快速关闭后再次打开。
-export function openPopup(element: HTMLElement) {
+export function openPopup(element: HTMLDialogElement) {
     element.classList.remove('closing');
     element.inert = false;
     element.classList.add('open');
+    if (!element.open) element.showModal();
 }
 
 export function showAlert(message: string) {
@@ -51,8 +57,14 @@ export function showAlert(message: string) {
 }
 
 // 等 CSS 退出动画结束再隐藏；减少动态效果时会立即完成。
-export async function closePopup(element: HTMLElement): Promise<boolean> {
-    if (!element.classList.contains('open') || element.classList.contains('closing')) return false;
+export function resetPopup(element: HTMLDialogElement) {
+    if (element.open) element.close();
+    element.classList.remove('open', 'closing');
+    element.inert = false;
+}
+
+export async function closePopup(element: HTMLDialogElement): Promise<void> {
+    if (!element.open || element.classList.contains('closing')) return;
     element.classList.add('closing');
     element.inert = true;
     try {
@@ -62,12 +74,9 @@ export async function closePopup(element: HTMLElement): Promise<boolean> {
         }
         await Promise.all(animations.map(animation => animation.finished));
     } catch {
-        return false; // 重新打开时，原来的退出动画会被取消。
+        return; // 重新打开时，原来的退出动画会被取消。
     }
-    if (!element.classList.contains('closing')) return false;
-    element.classList.remove('open', 'closing');
-    element.inert = false;
-    return true;
+    if (element.classList.contains('closing')) resetPopup(element);
 }
 
 // 临时提示只放在页面里，不写入聊天记录。

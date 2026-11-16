@@ -4,7 +4,10 @@ import {
     lockSendBtn,
     unlockSendBtn,
     themeInput,
-    showAlert
+    showAlert,
+    resetPopup,
+    windowAlertContainer,
+    windowAlertP
 } from './ui.ts';
 
 import {personaAPI, historyAPI, AuthRequiredError, CancelledRequestError, getRequestGeneration} from './api.ts';
@@ -93,6 +96,8 @@ async function initializeChat() {
 }
 
 function clearChat() {
+    resetPopup(windowAlertContainer);
+    windowAlertP.textContent = '';
     resetProfile();
     resetSettings();
     document.getElementById('chatBox')!.replaceChildren();

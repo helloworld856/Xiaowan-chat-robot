@@ -11,7 +11,7 @@ function showDeliveryFailure(row: HTMLDivElement, text: string, error: ChatNotSt
     marker.type = 'button';
     marker.className = 'chat-send-failed';
     marker.textContent = '!';
-    marker.title = error.retryable ? '发送失败，点击重试' : '发送失败';
+    marker.title = '发送失败';
     marker.setAttribute('aria-label', error.retryable ? '发送失败，重试发送' : '发送失败，查看原因');
     marker.addEventListener('click', async () => {
         if (!row.isConnected) return;

@@ -17,17 +17,10 @@ sys.path.insert(0, str(ROOT))
 
 @unittest.skipUnless(os.getenv('XIAOWAN_TEST_MYSQL_PORT'), 'requires an isolated MySQL instance')
 class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
-    async def test_migration_account_isolation_concurrent_graphs_and_restart(self):
-        import httpx
+    def make_database(self):
         import pymysql
 
-        import agent_config
-        from app import main
-        from auth_config import hash_password
         from database_config import open_pool
-        from profile_config import ProfileStore
-        from routers import settings as settings_router
-        from settings_config import SettingsStore
 
         database = f'xiaowan_test_{uuid4().hex}'
         db_options = {'host': '127.0.0.1', 'port': int(os.environ['XIAOWAN_TEST_MYSQL_PORT']),
@@ -40,6 +33,45 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(drop_test_database)
         pool = open_pool(database, **db_options)
         self.addCleanup(pool.close)
+        return pool, database, db_options
+
+    async def test_corrupt_legacy_profile_does_not_prevent_startup(self):
+        import httpx
+
+        from app import main
+        from auth_config import hash_password
+        from profile_config import ProfileStore
+        from settings_config import SettingsStore
+
+        pool, _, _ = self.make_database()
+        with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
+            folder = Path(directory)
+            password = 'test configuration'
+            (folder / 'admin.json').write_text(json.dumps({
+                'username': 'admin', 'password_hash': hash_password(password),
+            }), encoding='utf-8')
+            (folder / 'profile.json').write_text('{invalid', encoding='utf-8')
+            profiles = ProfileStore(folder / 'profiles')
+            with patch.object(main, 'settings_store', SettingsStore(folder / 'settings.json')):
+                app = main.build_application(pool, profiles, folder)
+                async with app.router.lifespan_context(app):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+                        login = await client.post('/auth/login', json={'username': 'admin', 'password': password})
+                        self.assertEqual(login.status_code, 200)
+                        self.assertEqual((await client.get('/profile')).json()['nickname'], 'admin')
+
+    async def test_migration_account_isolation_concurrent_graphs_and_restart(self):
+        import httpx
+
+        import agent_config
+        from app import main
+        from auth_config import hash_password
+        from database_config import open_pool
+        from profile_config import ProfileStore
+        from routers import settings as settings_router
+        from settings_config import SettingsStore
+
+        pool, database, db_options = self.make_database()
         with pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute('CREATE TABLE history_messages (conversation_round INT PRIMARY KEY, user MEDIUMTEXT, assistant MEDIUMTEXT) ENGINE=MyISAM')
             cursor.execute('CREATE TABLE abstract_messages (abstract MEDIUMTEXT) ENGINE=MyISAM')
@@ -81,9 +113,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             admin_key = 'admin-only-placeholder'
             personal_key = 'personal-placeholder'
 
-            def create_agents(merchant, key, name, base_url):
+            def create_agents(merchant, key, name, base_url, *, official_only=False):
                 self.assertEqual(base_url, '')
                 self.assertIn(key, (admin_key, personal_key))
+                self.assertEqual(official_only, key == personal_key)
                 return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
                         SimpleNamespace(invoke=lambda payload: reply(payload, name)))
 

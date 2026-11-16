@@ -49,8 +49,9 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
     }
     if (path === '/chat' && (response.status === 403 || response.status === 422 || response.status === 429 || response.status === 503) &&
         body?.detail?.code === 'CHAT_NOT_STARTED') {
-        const retryable = response.status === 429 || response.status === 503;
-        const message = retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
+        const retryable = response.status !== 422;
+        const message = response.status === 403 ? '请先在设置中配置个人模型和 API Key' :
+            retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
         throw new ChatNotStartedError(typeof body.detail.message === 'string' ? body.detail.message : message, retryable);
     }
     if (!response.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);

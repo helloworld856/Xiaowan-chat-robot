@@ -11,6 +11,7 @@ import {
     menuSelect,
     windowAlertContainer,
     chatBox,
+    closeMenu,
     closePopup
 } from './ui.ts';
 import {sendMessage} from './chat.ts';
@@ -57,12 +58,6 @@ function bindMenuEvents() {
     const themeSelect = document.querySelector<HTMLDivElement>('#menu .theme-select')!;
     const themeMenuButton = menuSelect[2];
 
-    function closeMenu() {
-        menuBtn.classList.remove('active');
-        menuBtn.setAttribute('aria-expanded', 'false');
-        menuSelect.forEach(item => item.classList.remove('active'));
-    }
-
     menuBtn.addEventListener('click', event => {
         event.stopPropagation();
         if (menuBtn.classList.contains('active')) closeMenu();
@@ -101,6 +96,10 @@ function bindAlertEvents() {
         '.alert-window .alert-window-button button'
     )!;
     closeAlertButton.addEventListener('click', () => {
+        void closePopup(windowAlertContainer);
+    });
+    windowAlertContainer.addEventListener('cancel', event => {
+        event.preventDefault();
         void closePopup(windowAlertContainer);
     });
 }

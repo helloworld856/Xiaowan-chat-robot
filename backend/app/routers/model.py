@@ -96,7 +96,7 @@ def test_personal_model(model: PersonalModel, request: Request):
 def configure_personal_model(model: PersonalModel, request: Request, activate: bool):
     try:
         llm = create_model(model.model_merchant, model.api_key.get_secret_value(), model.model_name,
-                           0.1, max_tokens=10, validation_timeout=8)
+                           0.1, max_tokens=10, validation_timeout=8, official_only=True)
         validate_connection(llm)
         if not activate:
             return ModelConfigResponse(status=True, info='连接测试通过')
@@ -107,7 +107,7 @@ def configure_personal_model(model: PersonalModel, request: Request, activate: b
             return ModelConfigResponse(status=False, info='个人模型保存失败，请稍后重试')
         return ModelConfigResponse(status=True, info='个人模型已保存')
     except Exception as error:
-        return connection_failure(error, model.model_name)
+        return connection_failure(error)
 
 
 def configure_model(request: ModelConfigRequest, activate: bool):
@@ -152,10 +152,10 @@ def configure_model(request: ModelConfigRequest, activate: bool):
         return ModelConfigResponse(status=True, info=f"已切换到 {merchant}/{model_name}")
 
     except Exception as error:
-        return connection_failure(error, model_name)
+        return connection_failure(error)
 
 
-def connection_failure(error: Exception, model_name: str):
+def connection_failure(error: Exception):
     if isinstance(error, ModelValidationBusy):
         return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
     if isinstance(error, TimeoutError):
@@ -165,7 +165,7 @@ def connection_failure(error: Exception, model_name: str):
     if any(marker in normalized_error for marker in ('401', 'unauthorized', 'invalid_api_key', 'invalid api key')):
         return ModelConfigResponse(status=False, info='API Key 无效或已过期')
     if '404' in normalized_error or 'not found' in normalized_error:
-        return ModelConfigResponse(status=False, info=f'模型 {model_name} 不存在')
+        return ModelConfigResponse(status=False, info='模型不存在')
     if 'timeout' in normalized_error or 'timed out' in normalized_error:
         return ModelConfigResponse(status=False, info='请求超时，请检查网络')
     return ModelConfigResponse(status=False, info='连接失败，请检查模型名、API Key 和接口配置')

@@ -45,6 +45,9 @@ class ConnectionPool:
                         raise
             if connection is None:
                 connection = self._connect()
+            with self._lock:
+                if self._closed:
+                    raise pymysql.OperationalError('数据库连接池已关闭')
             yield connection
         finally:
             try:
@@ -55,10 +58,11 @@ class ConnectionPool:
                         self._close_connection(connection)
                     else:
                         with self._lock:
-                            if self._closed:
-                                self._close_connection(connection)
-                            else:
+                            closed = self._closed
+                            if not closed:
                                 self._idle.append(connection)
+                        if closed:
+                            self._close_connection(connection)
             finally:
                 self._slots.release()
 

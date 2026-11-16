@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'app'))
 
+from core.app import create_app
+from test_auth import request
+
 
 def load_route(name, filename):
     spec = importlib.util.spec_from_file_location(name, ROOT / 'app' / 'routers' / filename)
@@ -103,6 +106,24 @@ class SettingsAPITests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.model.ModelConfigRequest(**{**self.config, 'base_url': 'file:///secret'})
         self.assertFalse(self.store.path.exists())
+
+    def test_invalid_model_address_does_not_echo_url_parser_details(self):
+        app = create_app('test')
+        app.include_router(self.model.router)
+        token, _ = app.state.auth.login('admin', '123456', 'test')
+        address = 'https://synthetic-password＠example.test'
+        status, _, response = request(app, '/model/test', 'POST', {**self.config, 'base_url': address},
+                                      cookie=f'xiaowan_session={token}')
+        self.assertEqual(status, 422)
+        self.assertNotIn(b'synthetic-password', response)
+
+    def test_unreadable_personal_model_does_not_block_preferences(self):
+        request = self.request_for(2)
+        with patch.object(request.app.state.personal_models, 'get', side_effect=OSError):
+            self.assertFalse(self.settings.get_settings(request).model_ready)
+            updated = self.settings.save_settings(self.settings.Preferences(send_shortcut='ctrl_enter'), request)
+        self.assertEqual(updated.preferences.send_shortcut, 'ctrl_enter')
+        self.assertEqual(self.settings.get_settings(request).preferences.send_shortcut, 'ctrl_enter')
 
     def test_model_status_reports_active_agents_after_settings_file_is_edited(self):
         request = self.model.ModelConfigRequest(**self.config)

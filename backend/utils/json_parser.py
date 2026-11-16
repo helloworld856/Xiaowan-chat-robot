@@ -41,7 +41,7 @@ def safe_parse_json(content: object, default_result: Optional[dict] = None) -> d
             result = json.loads(candidate)
             if isinstance(result, dict):
                 return result
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             pass
 
         try:
@@ -55,7 +55,7 @@ def safe_parse_json(content: object, default_result: Optional[dict] = None) -> d
             result = ast.literal_eval(py_candidate)
             if isinstance(result, dict):
                 return result
-        except (ValueError, SyntaxError, TypeError, tokenize.TokenError):
+        except (ValueError, SyntaxError, TypeError, RecursionError, tokenize.TokenError):
             pass
         return None
 

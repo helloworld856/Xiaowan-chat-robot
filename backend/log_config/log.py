@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 
 from config import configer
 
@@ -16,7 +17,7 @@ def get_logger():
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",    # 设置输出的时间格式
         handlers=[
-            logging.FileHandler(configer.log_save_path, mode='w', encoding='utf-8'),  # 启动时清空日志
+            RotatingFileHandler(configer.log_save_path, maxBytes=2_000_000, backupCount=3, encoding='utf-8'),
         ]
     )
 

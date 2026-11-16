@@ -25,6 +25,8 @@ class TestCursor:
     def execute(self, statement, params=()):
         if statement.startswith('DELETE') and self.pool.fail_delete:
             raise OSError('simulated delete failure')
+        if statement.startswith('INSERT INTO history_messages') and self.pool.fail_insert:
+            raise OSError('simulated insert failure')
         sql = statement.replace('ON DUPLICATE KEY UPDATE', 'ON CONFLICT(user_id) DO UPDATE SET')
         return self.cursor.execute(sql.replace('%s', '?'), params).rowcount
 
@@ -42,6 +44,8 @@ class SQLitePool:
         self.path = path
         self.in_use = 0
         self.fail_delete = False
+        self.fail_insert = False
+        self.lose_commit_ack = False
         with closing(sqlite3.connect(path)) as db:
             db.executescript('''
                 CREATE TABLE history_messages (
@@ -61,8 +65,14 @@ class SQLitePool:
                 with closing(db.cursor()) as value:
                     yield TestCursor(value, self)
 
+            def commit():
+                db.commit()
+                if self.lose_commit_ack:
+                    self.lose_commit_ack = False
+                    raise OSError('simulated loss of commit acknowledgement')
+
             try:
-                yield SimpleNamespace(cursor=cursor, commit=db.commit)
+                yield SimpleNamespace(cursor=cursor, commit=commit)
             finally:
                 db.rollback()
                 self.in_use -= 1
@@ -150,11 +160,127 @@ class MemoryIsolationTests(unittest.TestCase):
         self.assertEqual(restored.history_cache, [message(1, 'previous message')])
 
 
+@unittest.skipUnless(importlib.util.find_spec('langgraph'), 'requires LangGraph')
+class GraphOutputTests(unittest.TestCase):
+    def test_token_usage_accepts_standard_metadata_and_ignores_invalid_values(self):
+        from graph_config.nodes import get_total_tokens
+
+        self.assertEqual(get_total_tokens(SimpleNamespace(
+            usage_metadata={'total_tokens': 42},
+            response_metadata={'token_usage': {'total_tokens': None}},
+        )), 42)
+        self.assertEqual(get_total_tokens(SimpleNamespace(
+            response_metadata={'token_usage': {'total_tokens': 23}},
+        )), 23)
+        for invalid in (None, '23', {}, True, -1):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(get_total_tokens(SimpleNamespace(
+                    response_metadata={'token_usage': {'total_tokens': invalid}},
+                )), 0)
+
+
 @unittest.skipUnless(
     all(importlib.util.find_spec(name) is not None for name in ('langgraph', 'transformers')),
     'install declared LangGraph and Transformers dependencies for the real graph test',
 )
 class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unexpected_model_field_types_do_not_break_following_turn(self):
+        from auth_config import User
+        from core.session import ChatSessions
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
+        user = User(1, 'First', 'admin')
+        sessions = ChatSessions(pool.connection)
+        self.addAsyncCleanup(sessions.drain)
+        monologue = '[' * 600 + '"nested"' + ']' * 600
+        reply = '{"reply":["回复"],"inner monologue":' + monologue + '}'
+        agents = (
+            FakeAgent(lambda _: '{"intent":{}}'),
+            FakeAgent(lambda _: 'summary'),
+            FakeAgent(lambda _: reply),
+        )
+        with (
+            patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
+            patch('graph_config.nodes.count_tokens', return_value=1),
+        ):
+            first = await sessions.send(user, 'first turn')
+            self.assertTrue((await sessions.send(user, 'second turn'))['saved'])
+        self.assertTrue(first['saved'])
+        self.assertEqual(first['ai_response'], ['回复'])
+        self.assertIsInstance(first['analysis_result']['intent'], str)
+        self.assertEqual(first['ai_monologue'], [])
+
+    async def test_next_turn_follows_committed_history_after_failed_save(self):
+        from auth_config import User
+        from core.session import ChatSessions
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
+        user = User(1, 'First', 'admin')
+        sessions = ChatSessions(pool.connection)
+        self.addAsyncCleanup(sessions.drain)
+        prompts = []
+
+        def analyze(prompt):
+            prompts.append(prompt)
+            return '{"intent":"对话"}'
+
+        agents = (FakeAgent(analyze), FakeAgent(lambda _: 'summary'), FakeAgent(lambda _: '{"reply":["回复"]}'))
+        with (
+            patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
+            patch('graph_config.nodes.count_tokens', return_value=1),
+        ):
+            pool.fail_insert = True
+            self.assertFalse((await sessions.send(user, 'failed insert'))['saved'])
+            pool.fail_insert = False
+            pool.lose_commit_ack = True
+            self.assertFalse((await sessions.send(user, 'committed without acknowledgement'))['saved'])
+            self.assertNotIn('failed insert', prompts[-1])
+            self.assertTrue((await sessions.send(user, 'next turn'))['saved'])
+            self.assertIn('committed without acknowledgement', prompts[-1])
+        self.assertEqual(
+            [(row['conversation_round'], row['user']) for row in load_history(pool.connection, user.id, 0)],
+            [(0, 'committed without acknowledgement'), (1, 'next turn')],
+        )
+
+    async def test_next_turn_recovers_summary_after_lost_commit_acknowledgement(self):
+        from auth_config import User
+        from core.session import ChatSessions
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
+        user = User(1, 'First', 'admin')
+        sessions = ChatSessions(pool.connection)
+        self.addAsyncCleanup(sessions.drain)
+        prompts = []
+
+        def analyze(prompt):
+            prompts.append(prompt)
+            return '{"intent":"对话"}'
+
+        agents = (
+            FakeAgent(analyze),
+            FakeAgent(lambda _: 'committed summary'),
+            FakeAgent(lambda _: '{"reply":["回复"]}'),
+        )
+        with (
+            patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
+            patch('graph_config.nodes.count_tokens', return_value=1),
+        ):
+            await sessions.send(user, 'first turn')
+            await sessions.send(user, 'second turn')
+            pool.lose_commit_ack = True
+            with patch('graph_config.nodes.configer.compress_history_threshold', 1):
+                self.assertTrue((await sessions.send(user, 'compression turn'))['saved'])
+            await sessions.send(user, 'next turn')
+        self.assertIn('committed summary', prompts[-1])
+        self.assertNotIn('first turn', prompts[-1])
+        self.assertIn('second turn', prompts[-1])
+
     async def test_same_account_reuses_graph_and_other_account_remains_isolated(self):
         from core.session import ChatSessions
 

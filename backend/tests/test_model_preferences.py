@@ -32,13 +32,17 @@ class ModelSettingsTests(unittest.TestCase):
         }):
             factory = load_file('tested_factory', 'agent_config/agent_factory.py')
             openai = factory.create_model('deepseek', 'test-placeholder', 'M', 0.1, validation_timeout=8)
-            native = factory.create_model('tongyi', 'test-placeholder', 'M', 0.1, validation_timeout=8)
+            native = factory.create_model('tongyi', 'test-placeholder', 'M', 0.1, max_tokens=10,
+                                          validation_timeout=8, official_only=True)
             custom = factory.create_agents('tongyi', 'test-placeholder', 'Custom-V2', 'https://example.com/v1')
         self.assertEqual(openai['timeout'], 8)
         self.assertEqual(openai['max_retries'], 0)
         self.assertEqual(openai['default_headers']['Accept-Encoding'], 'gzip, deflate')
         self.assertEqual(native['max_retries'], 1)
         self.assertEqual(native['model_kwargs']['request_timeout'], 8)
+        self.assertEqual(native['model_kwargs']['temperature'], 0.1)
+        self.assertEqual(native['model_kwargs']['max_tokens'], 10)
+        self.assertEqual(native['model_kwargs']['base_address'], 'https://dashscope.aliyuncs.com/api/v1')
         self.assertEqual(len(custom), 3)
         for agent in custom:
             self.assertEqual(agent['model']['base_url'], 'https://example.com/v1')

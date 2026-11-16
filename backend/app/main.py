@@ -40,7 +40,10 @@ def build_application(db, profile_store, legacy_root):
     def startup():
         initialize_schema(db)
         admin = accounts.seed_admin(legacy_root / 'admin.json')
-        profile_store.import_legacy_profile(admin.id, legacy_root / 'profile.json')
+        try:
+            profile_store.import_legacy_profile(admin.id, legacy_root / 'profile.json')
+        except (OSError, ValueError):
+            logger.warning('无法导入旧版管理员资料，可在个人资料中重新保存')
         try:
             saved = settings_store.get()
         except (OSError, ValueError):
