@@ -2,16 +2,13 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
-from app.llm.admin_settings import ModelMerchant, ModelSettings
 from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
+from app.llm.admin_settings import ModelSelection, ModelSettings
 
 
-class PersonalModel(BaseModel):
-    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    model_merchant: ModelMerchant
-    model_name: str = Field(min_length=1, max_length=200)
+class PersonalModel(ModelSelection):
     api_key: SecretStr = Field(min_length=1, max_length=1024)
 
     @field_validator('api_key')
@@ -26,7 +23,7 @@ class PersonalModel(BaseModel):
         return ModelSettings(model_merchant=self.model_merchant, model_name=self.model_name)
 
     def create_agents(self):
-        from agent_config import create_agents
+        from app.llm.factory import create_agents
 
         return create_agents(self.model_merchant, self.api_key.get_secret_value(), self.model_name, '',
                              official_only=True)

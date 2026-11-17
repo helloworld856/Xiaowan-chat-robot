@@ -1,9 +1,8 @@
 import pymysql
 from fastapi import APIRouter, HTTPException, Request
 
-import agent_config
 from app.accounts.preferences import Preferences
-from app.llm.admin_settings import AppSettings, settings_store
+from app.llm.admin_settings import AppSettings
 
 router = APIRouter()
 
@@ -21,15 +20,7 @@ def settings_for(request: Request, preferences: Preferences) -> UserSettings:
             personal = None
         return UserSettings(model=personal.public_model() if personal else None,
                             preferences=preferences, model_ready=personal is not None)
-    with agent_config.agent_lock:
-        model = agent_config.active_model
-        ready = model is not None and all(agent is not None for agent in (
-            agent_config.analysis_agent, agent_config.text_agent, agent_config.friend_agent))
-        if model is None:
-            try:
-                model = settings_store.get().model
-            except (OSError, ValueError):
-                model = None
+    model, ready = request.app.state.model_configuration.admin_status()
     return UserSettings(model=model, preferences=preferences, model_ready=ready)
 
 

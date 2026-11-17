@@ -8,11 +8,13 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-from app.accounts.repository import User
 from app.account_logging import logger
+from app.accounts.repository import User
 from app.chat.memory import MemoryManager
-from app.llm.personal_models import PersonalModelStore
 from app.chat.state import AIChatState, create_initial_state
+from app.llm.configuration import AdminModelRuntime
+from app.llm.personal_models import PersonalModelStore
+
 
 class ChatNotStarted(Exception):
     def __init__(self, status_code: int, message: str):
@@ -37,11 +39,13 @@ class AccountChat:
 
 class ChatSessions:
     def __init__(self, connection, *, personal_models: PersonalModelStore | None = None,
+                 admin_model: AdminModelRuntime | None = None,
                  graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
         if max_running < 1 or max_waiting < 0 or not wait_timeout > 0:
             raise ValueError('invalid chat capacity')
         self._connection = connection
         self._personal_models = personal_models
+        self._admin_model = admin_model
         self._graph_factory = graph_factory
         self._users: dict[int, AccountChat] = {}
         self._slots = asyncio.BoundedSemaphore(max_running)
@@ -146,15 +150,11 @@ class ChatSessions:
             self._slots.release()
             entry.lock.release()
 
-    @staticmethod
-    def _snapshot_agents():
-        import agent_config
-
-        with agent_config.agent_lock:
-            agents = (agent_config.analysis_agent, agent_config.text_agent, agent_config.friend_agent)
-        if any(agent is None for agent in agents):
+    def _snapshot_agents(self):
+        snapshot = self._admin_model.snapshot() if self._admin_model is not None else None
+        if snapshot is None:
             raise ChatNotStarted(503, '聊天模型尚未就绪，请稍后重试')
-        return agents
+        return snapshot[1]
 
     def _initialize(self, user_id: int) -> ChatRuntime:
         factory = self._graph_factory

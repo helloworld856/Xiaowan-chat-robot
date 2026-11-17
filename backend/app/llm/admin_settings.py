@@ -16,10 +16,13 @@ from app.json_files import atomic_write_json
 ModelMerchant = Literal['deepseek', 'tongyi']
 
 
-class ModelSettings(BaseModel):
+class ModelSelection(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     model_merchant: ModelMerchant
     model_name: str = Field(min_length=1, max_length=200)
+
+
+class ModelSettings(ModelSelection):
     base_url: str = Field(default='', max_length=2000)
 
     @field_validator('base_url')

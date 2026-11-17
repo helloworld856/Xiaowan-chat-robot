@@ -93,12 +93,11 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
     async def test_migration_account_isolation_concurrent_graphs_and_restart(self):
         import httpx
 
-        import agent_config
+        from app.llm import factory as model_factory
         from app import application as main
         from app.accounts.auth_service import hash_password
         from app.database.mysql import open_pool
         from app.accounts.profile import ProfileStore
-        from app.api import settings as settings_router
         from app.llm.admin_settings import SettingsStore
 
         pool, database, db_options = self.make_database()
@@ -150,12 +149,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                 return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
                         SimpleNamespace(invoke=lambda payload: reply(payload, name)))
 
-            with patch.object(main, 'settings_store', model_settings), patch.object(settings_router, 'settings_store', model_settings), \
+            with patch.object(main, 'settings_store', model_settings), \
                     patch.dict(os.environ, {'DEEPSEEK_API_KEY': admin_key}), \
-                    patch.object(agent_config, 'analysis_agent', None), patch.object(agent_config, 'text_agent', None), \
-                    patch.object(agent_config, 'friend_agent', None), patch.object(agent_config, 'active_model', None), \
-                    patch.object(agent_config, 'create_agents', side_effect=create_agents) as factory, \
-                    patch.object(main.model, 'create_model', return_value=SimpleNamespace(invoke=lambda _: None)) as validator:
+                    patch.object(model_factory, 'create_agents', side_effect=create_agents) as factory, \
+                    patch.object(model_factory, 'create_model', return_value=SimpleNamespace(invoke=lambda _: None)) as validator:
                 app = main.build_application(pool, profiles, folder)
                 async with app.router.lifespan_context(app):
                     with pool.connection() as connection, connection.cursor() as cursor:
