@@ -7,12 +7,47 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app.config import configer
-from app.accounts.files import UserDataPaths, protect_file
+from app.accounts.files import UserDataPaths, protect_file, require_directory, require_file
 
 
 MAX_LOG_BYTES = 2_000_000
 BACKUP_COUNT = 3
 MAX_OPEN_ACCOUNT_LOGS = 32
+
+
+def _truncate_existing_log(path: Path) -> None:
+    try:
+        require_file(path)
+        os.close(os.open(path, os.O_WRONLY | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0)))
+    except FileNotFoundError:
+        pass
+
+
+def reset_active_logs(system_log: Path, paths: UserDataPaths) -> None:
+    """清空本轮启动要使用的日志文件，保留轮转归档。"""
+    try:
+        _truncate_existing_log(system_log)
+    except OSError as error:
+        logger.warning('无法清空系统日志（%s）', type(error).__name__)
+
+    try:
+        require_directory(paths.root)
+        entries = list(paths.root.iterdir())
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning('无法扫描账号日志目录（%s）', type(error).__name__)
+        return
+
+    for entry in entries:
+        name = entry.name
+        if not (name.isascii() and name.isdecimal()) or name.startswith('0'):
+            continue
+        try:
+            require_directory(entry)
+            _truncate_existing_log(paths.log_directory(int(name)) / 'app.log')
+        except OSError as error:
+            logger.warning('无法清空账号 %s 的日志（%s）', name, type(error).__name__)
 
 
 account_log = ContextVar[tuple[UserDataPaths, int] | None]('account_log', default=None)

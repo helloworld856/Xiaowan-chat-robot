@@ -25,7 +25,7 @@
 
 - MySQL 保存账号、密码哈希、聊天历史和摘要。后端进程重启会清空聊天历史与摘要，并让现有登录会话失效。这是当前约定。生成摘要时会按原逻辑压缩部分旧聊天原文。
 - `backend/user_data/<用户ID>/` 下的 `profile.json` 和 `preferences.json` 保存资料与发送快捷键，普通账号另有 `model.json`。目录使用 MySQL 的账号 ID。备份时将 MySQL、用户目录和服务端配置一并保存。
-- 终端显示 Uvicorn 启动进度和监听地址。系统日志写入 `backend/log_config/app.log`，账号运行日志写入该账号目录的 `logs/app.log`。模型 JSON 容错失败时，账号日志会标明「消息分析」或「回复生成」，可用的纯文本作为单条回复发送。
+- 终端显示 Uvicorn 启动进度和监听地址。系统日志写入 `backend/log_config/app.log`，账号运行日志写入该账号目录的 `logs/app.log`。运行 `backend/run_serve.py` 启动时会清空这些当前日志，保留轮转归档。模型 JSON 容错失败时，账号日志会标明「消息分析」或「回复生成」，可用的纯文本作为单条回复发送。
 - `backend/.env`、账号目录、运行日志和 `frontend/dist/` 由运行环境维护。`backend/settings.json` 和 `backend/.env.example` 跟随 Git；实际密钥放在 `.env` 或个人 `model.json`。
 
 ## Ubuntu 服务器

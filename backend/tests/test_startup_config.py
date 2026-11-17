@@ -40,7 +40,7 @@ class StartupConfigTests(unittest.TestCase):
                 for handler in app_logger.handlers:
                     handler.close()
 
-    def test_logger_only_writes_to_file_without_erasing_previous_run(self):
+    def test_get_logger_does_not_clear_an_existing_log(self):
         from app.config import configer
 
         log_path = self.root / 'app.log'
@@ -63,7 +63,7 @@ class StartupConfigTests(unittest.TestCase):
         self.assertIn('current startup', log_path.read_text(encoding='utf-8'))
         self.assertEqual(console.getvalue(), '')
 
-    def test_launcher_shows_startup_and_keeps_runtime_logs_in_files(self):
+    def test_launcher_clears_active_logs_before_writing_new_messages(self):
         script = '''
 import logging
 import runpy
@@ -72,9 +72,11 @@ import warnings
 from pathlib import Path
 
 import uvicorn
+from app.accounts import files
 from app.config import configer
 
 configer.log_save_path = sys.argv[1]
+files.BACKEND_ROOT = Path(sys.argv[1]).parent
 
 def start_server(app, **options):
     uvicorn.Config(app, **options)
@@ -91,21 +93,36 @@ def start_server(app, **options):
     logging.getLogger('uvicorn.access').info('%s - "%s %s HTTP/%s" %d',
                                              '127.0.0.1', 'GET', '/version', '1.1', 200)
     warnings.warn('dependency warning')
-    paths = UserDataPaths(Path(sys.argv[1]).parent / 'users')
+    paths = UserDataPaths()
     with account_log_context(paths, 1):
         logger.info('first account event')
     with account_log_context(paths, 2):
         logger.warning('second account event')
 
 uvicorn.run = start_server
-runpy.run_path('run_serve.py', run_name='__main__')
+launcher = runpy.run_path('run_serve.py')
+assert Path(configer.log_save_path).read_text(encoding='utf-8') == 'previous system run'
+launcher['main']()
 '''
         log_path = self.root / 'app.log'
+        log_path.write_text('previous system run', encoding='utf-8')
+        users = self.root / 'user_data'
+        for user_id in ('1', '2', '3', 'manual'):
+            directory = users / user_id / 'logs'
+            directory.mkdir(parents=True)
+            (directory / 'app.log').write_text('previous account run', encoding='utf-8')
+        archives = (self.root / 'app.log.1', users / '1' / 'logs' / 'app.log.1')
+        for archive in archives:
+            archive.write_text('older archive', encoding='utf-8')
+        profile = users / '1' / 'profile.json'
+        profile.write_text('{"nickname":"旧昵称"}', encoding='utf-8')
+
         result = subprocess.run([sys.executable, '-B', '-c', script, str(log_path)],
                                 cwd=ROOT, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         contents = log_path.read_text(encoding='utf-8')
+        self.assertNotIn('previous system run', contents)
         for message in ('Started server process [123]', 'Waiting for application startup.',
                         'Application startup complete.', 'Uvicorn running on http://127.0.0.1:8000'):
             self.assertIn(message, result.stderr)
@@ -114,10 +131,16 @@ runpy.run_path('run_serve.py', run_name='__main__')
             self.assertIn(message, contents)
             self.assertNotIn(message, result.stderr)
         for user_id, message in ((1, 'first account event'), (2, 'second account event')):
-            account_log = self.root / 'users' / str(user_id) / 'logs' / 'app.log'
-            self.assertIn(message, account_log.read_text(encoding='utf-8'))
+            account_log = (users / str(user_id) / 'logs' / 'app.log').read_text(encoding='utf-8')
+            self.assertIn(message, account_log)
+            self.assertNotIn('previous account run', account_log)
             self.assertNotIn(message, contents)
             self.assertNotIn(message, result.stderr)
+        self.assertEqual((users / '3' / 'logs' / 'app.log').read_bytes(), b'')
+        self.assertEqual((users / 'manual' / 'logs' / 'app.log').read_text(encoding='utf-8'), 'previous account run')
+        for archive in archives:
+            self.assertEqual(archive.read_text(encoding='utf-8'), 'older archive')
+        self.assertEqual(profile.read_text(encoding='utf-8'), '{"nickname":"旧昵称"}')
 
     def test_bundled_tokenizer_counts_text_without_transformers(self):
         from app.llm import token_counter
@@ -149,6 +172,8 @@ runpy.run_path('run_serve.py', run_name='__main__')
             self.assertEqual(persona.Persona().BOT_NAME, '无名氏')
 
     def test_launcher_loads_only_the_backend_environment_and_only_when_started(self):
+        from app import account_logging
+        from app.accounts import files
         from app.config import configer
 
         dotenv = SimpleNamespace(load_dotenv=Mock())
@@ -157,8 +182,11 @@ runpy.run_path('run_serve.py', run_name='__main__')
                 patch('logging.basicConfig'), patch('logging.captureWarnings'), \
                 patch.object(logging.getLogger('uvicorn'), 'setLevel'), \
                 patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
+                patch.object(files, 'BACKEND_ROOT', self.root), \
+                patch.object(configer, 'log_save_path', self.root / 'app.log'), \
                 patch.object(configer, 'listen_host', '127.0.0.1'), patch.object(configer, 'listen_port', 8123):
             launcher = runpy.run_path(str(ROOT / 'run_serve.py'))
+            self.assertIs(launcher['logger'], account_logging.logger)
             dotenv.load_dotenv.assert_not_called()
             launcher['main']()
         dotenv.load_dotenv.assert_called_once_with(ROOT / '.env')
