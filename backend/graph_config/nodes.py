@@ -1,3 +1,4 @@
+import re
 from time import time
 
 from config import configer
@@ -6,6 +7,7 @@ from memory_config import MemoryManager
 from persona_config import persona
 from state_config import AIChatState
 from utils import count_tokens, safe_parse_json
+from utils.json_parser import model_text, parse_model_json
 
 
 def get_last_message(response: dict):
@@ -123,7 +125,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 
         # 提取出回复并转成字典格式（使用容错解析）
         defaults = configer.ANALYSIS_DEFAULT_RESULT
-        ai_response = safe_parse_json(last_message.content, defaults)
+        ai_response = safe_parse_json(last_message.content, defaults, expected_keys=defaults.keys(), stage='消息分析')
 
         state['analysis_result'] = {}
         for field, default in defaults.items():
@@ -177,7 +179,15 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
             {"messages": [{"role": "user", "content": user_prompt}]}
         )
         last_message = get_last_message(response)
-        ai_response = safe_parse_json(last_message.content, configer.GENERATE_DEFAULT_RESULT)
+        text = model_text(last_message.content)
+        ai_response = parse_model_json(text, ('reply',))
+        if ai_response is None:
+            structured_field = re.search(r'''[{,]\s*["'“]?(?:reply|emotion|action|inner monologue)["'”]?\s*[:：]''', text)
+            if text and not text.startswith(('{', '[', '```')) and not structured_field:
+                ai_response = {'reply': [text]}
+            else:
+                logger.warning('回复生成：模型输出无法解析，使用默认回复')
+                ai_response = configer.GENERATE_DEFAULT_RESULT
 
         # 记录回复，情绪、动作
         reply = ai_response.get('reply', [])
@@ -186,6 +196,8 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         elif not isinstance(reply, list):
             reply = []
         messages = [part for part in reply if isinstance(part, str) and part.strip()]
+        if not messages:
+            logger.warning('回复生成：模型输出缺少有效回复，使用默认回复')
         state['ai_response'] = messages or configer.GENERATE_DEFAULT_RESULT['reply'].copy()
 
         monologue = ai_response.get('inner monologue', '')

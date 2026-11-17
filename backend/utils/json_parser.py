@@ -2,6 +2,7 @@ import ast
 import json
 import re
 import tokenize
+from collections.abc import Collection
 from copy import deepcopy
 from io import StringIO
 from typing import Optional
@@ -11,31 +12,21 @@ from log_config import logger
 
 def model_text(content: object) -> str:
     if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
+        text = content
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+                parts.append(block['text'])
+        text = ''.join(parts)
+    else:
         return ''
-    parts = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
-            parts.append(block['text'])
-    return ''.join(parts)
+    return re.sub(r'^\s*(?:<think>.*?(?:</think>|$)\s*)+', '', text, flags=re.IGNORECASE | re.DOTALL).strip()
 
 
-def safe_parse_json(content: object, default_result: Optional[dict] = None) -> dict:
-    """容错解析 JSON，失败时返回默认值。"""
-    if default_result is None:
-        default_result = {
-            "intent": "一般对话",
-            "emotion": "无情感波动",
-            "answer": "情感性回答"
-        }
-
-    text = model_text(content)
-    if not text.strip():
-        return deepcopy(default_result)
-
+def parse_model_json(text: str, expected_keys: Collection[str] = ()) -> dict | None:
     def try_parse(candidate: str):
         try:
             result = json.loads(candidate)
@@ -59,24 +50,56 @@ def safe_parse_json(content: object, default_result: Optional[dict] = None) -> d
             pass
         return None
 
+    def matches(result):
+        return isinstance(result, dict) and (not expected_keys or not result.keys().isdisjoint(expected_keys))
+
     candidates = [text]
-    code_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-    if code_block:
-        candidates.append(code_block.group(1))
+    candidates.extend(re.findall(r'```(?:json)?\s*(.*?)\s*```', text, re.IGNORECASE | re.DOTALL))
+    for candidate in candidates:
+        result = try_parse(candidate)
+        if matches(result):
+            return result
+
+    # raw_decode 只读取当前对象，后面有说明或另一个对象时仍能解析。
+    decoder = json.JSONDecoder()
+    end = 0
+    while (start := text.find('{', end)) != -1:
+        try:
+            result, end = decoder.raw_decode(text, start)
+        except ValueError:
+            end = start + 1
+            continue
+        except RecursionError:
+            break
+        if matches(result):
+            return result
 
     braces = re.search(r'\{[\s\S]*\}', text)
     if braces:
         normalized = braces.group(0)
-        candidates.append(normalized)
-        normalized = normalized.replace('，', ',').replace('：', ':')
-        normalized = normalized.replace('“', '"').replace('”', '"')
-        candidates.extend((normalized, normalized.replace("'", '"')))
+        punctuation = normalized.replace('，', ',').replace('：', ':').replace('“', '"').replace('”', '"')
+        for candidate in (normalized, punctuation, punctuation.replace("'", '"')):
+            result = try_parse(candidate)
+            if matches(result):
+                return result
+    return None
 
-    for candidate in candidates:
-        result = try_parse(candidate)
-        if result is not None:
-            return result
 
-    logger.warning('模型返回的 JSON 无法解析，使用默认值')
+def safe_parse_json(content: object, default_result: Optional[dict] = None, *,
+                    expected_keys: Collection[str] = (), stage: str = '模型输出') -> dict:
+    """容错解析 JSON，失败时返回默认值。"""
+    if default_result is None:
+        default_result = {
+            "intent": "一般对话",
+            "emotion": "无情感波动",
+            "answer": "情感性回答"
+        }
+
+    text = model_text(content)
+    result = parse_model_json(text, expected_keys) if text else None
+    if result is not None:
+        return result
+
+    logger.warning('%s：未收到可用的 JSON，使用默认值', stage)
     return deepcopy(default_result)
 
