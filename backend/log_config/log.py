@@ -101,10 +101,10 @@ def get_logger():
     logger.propagate = False
     formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    for handler in (AccountFileHandler(Path(configer.log_save_path)), logging.StreamHandler()):
-        handler.setFormatter(formatter)
-        handler.addFilter(AccountLabel())
-        logger.addHandler(handler)
+    handler = AccountFileHandler(Path(configer.log_save_path))
+    handler.setFormatter(formatter)
+    handler.addFilter(AccountLabel())
+    logger.addHandler(handler)
     return logger
 
 

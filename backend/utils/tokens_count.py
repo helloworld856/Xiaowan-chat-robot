@@ -1,28 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config import configer
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizerBase
+    from tokenizers import Tokenizer
 
 
-_TOKENIZER_CACHE: PreTrainedTokenizerBase | None = None
+_TOKENIZER_CACHE: Tokenizer | None = None
 
 
-def _get_tokenizer() -> PreTrainedTokenizerBase:
+def _get_tokenizer() -> Tokenizer:
     """模块级缓存 tokenizer，避免每次 count_tokens 都重复加载。"""
     global _TOKENIZER_CACHE
 
     if _TOKENIZER_CACHE is None:
-        from transformers import AutoTokenizer
+        from tokenizers import Tokenizer
 
-        _TOKENIZER_CACHE = AutoTokenizer.from_pretrained(
-            configer.tokenizer_path,
-            trust_remote_code=True,
-            use_fast=True,
-        )
+        _TOKENIZER_CACHE = Tokenizer.from_file(str(Path(configer.tokenizer_path) / 'tokenizer.json'))
     return _TOKENIZER_CACHE
 
 
@@ -37,4 +34,4 @@ def count_tokens(text: str) -> int:
         token数量
     """
     tokenizer = _get_tokenizer()
-    return len(tokenizer.encode(text, add_special_tokens=False))
+    return len(tokenizer.encode(text, add_special_tokens=False).ids)

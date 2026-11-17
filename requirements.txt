@@ -20,4 +20,4 @@ python-dotenv>=1.0.0
 PyMySQL[rsa]>=1.1.0
 
 # ========== Token 计数 ==========
-transformers>=4.30.0
+tokenizers>=0.22.0

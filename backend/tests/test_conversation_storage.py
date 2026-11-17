@@ -180,7 +180,7 @@ class GraphOutputTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    all(importlib.util.find_spec(name) is not None for name in ('langgraph', 'transformers')),
+    all(importlib.util.find_spec(name) is not None for name in ('langgraph', 'tokenizers')),
     'install declared LangGraph and Transformers dependencies for the real graph test',
 )
 class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
