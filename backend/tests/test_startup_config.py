@@ -21,6 +21,24 @@ class StartupConfigTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
 
+    def test_system_log_is_created_on_a_clean_checkout(self):
+        from app.account_logging import get_logger
+        from app.config import configer
+
+        log_path = self.root / 'log_config' / 'app.log'
+        app_logger = logging.getLogger('xiaowan')
+        with (patch.object(configer, 'log_save_path', log_path),
+              patch.object(app_logger, 'handlers', []),
+              patch.object(app_logger, 'level', app_logger.level),
+              redirect_stderr(io.StringIO())):
+            try:
+                get_logger().warning('first startup')
+                self.assertTrue(log_path.is_file())
+                self.assertIn('first startup', log_path.read_text(encoding='utf-8'))
+            finally:
+                for handler in app_logger.handlers:
+                    handler.close()
+
     def test_logger_only_writes_to_file_without_erasing_previous_run(self):
         from app.config import configer
 

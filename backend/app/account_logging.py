@@ -114,7 +114,9 @@ def get_logger():
     logger.propagate = False
     formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    handler = AccountFileHandler(Path(configer.log_save_path))
+    log_path = Path(configer.log_save_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = AccountFileHandler(log_path)
     handler.setFormatter(formatter)
     handler.addFilter(AccountLabel())
     logger.addHandler(handler)
