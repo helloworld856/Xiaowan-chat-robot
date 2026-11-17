@@ -11,7 +11,6 @@ from auth_config import SQLAccountStore, User
 from database_config import open_pool
 from profile_config import ProfileStore
 from settings_config import Preferences, UserPreferencesStore, settings_store
-from user_data_config import require_directory
 from user_directory_store import UserDirectoryStore
 
 
@@ -21,23 +20,6 @@ class MigrationReport:
     pending: int = 0
     updated: int = 0
     errors: list[tuple[int, str]] = field(default_factory=list)
-
-
-def missing_files(user: User, directories: UserDirectoryStore) -> set[Path]:
-    missing = set()
-    checks = [
-        (directories.profiles.read_file, directories.profiles.path_for(user.id)),
-        (directories.preferences.read_file, directories.preferences.path_for(user.id)),
-        (require_directory, directories.paths.log_directory(user.id)),
-    ]
-    if user.role == 'user':
-        checks.append((directories.models.read_file, directories.models.path_for(user.id)))
-    for read, path in checks:
-        try:
-            read(path)
-        except FileNotFoundError:
-            missing.add(path)
-    return missing
 
 
 def migrate_accounts(accounts: SQLAccountStore, directories: UserDirectoryStore, *, apply=False, rollback=False,
@@ -58,7 +40,7 @@ def migrate_accounts(accounts: SQLAccountStore, directories: UserDirectoryStore,
                 report.updated += 1
                 continue
 
-            missing = missing_files(user, directories)
+            missing = directories.inspect_missing(user)
             report.pending += int(bool(missing))
             defaults = None
             if directories.preferences.path_for(user.id) in missing:

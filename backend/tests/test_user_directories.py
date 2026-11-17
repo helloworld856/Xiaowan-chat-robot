@@ -82,6 +82,12 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertEqual(result.errors, [(self.member.id, 'ValidationError')])
         self.assertEqual(path.read_bytes(), contents)
 
+    def test_directory_inspection_is_read_only_and_role_specific(self):
+        required = {'profile.json', 'preferences.json', 'logs'}
+        self.assertEqual({path.name for path in self.store.inspect_missing(self.admin)}, required)
+        self.assertEqual({path.name for path in self.store.inspect_missing(self.member)}, required | {'model.json'})
+        self.assertFalse(self.store.paths.root.exists())
+
     def test_legacy_lookup_does_not_block_or_overwrite_a_concurrent_save(self):
         updated = Preferences(send_shortcut='ctrl_enter')
         with ThreadPoolExecutor(max_workers=1) as worker:
