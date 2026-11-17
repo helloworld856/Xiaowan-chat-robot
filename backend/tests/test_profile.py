@@ -15,7 +15,7 @@ from test_auth import ROOT, auth_module, request
 class ProfileHTTPTests(unittest.TestCase):
     def setUp(self):
         self.auth = auth_module()
-        from core.app import create_app
+        from app.application import create_app
         from profile_config import ProfileStore
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
@@ -173,7 +173,7 @@ class ProfileHTTPTests(unittest.TestCase):
         self.profile_path.write_text(json.dumps({'nickname': '晚风', 'avatar_id': 'penguin'}), encoding='utf-8')
         persona = types.SimpleNamespace(BOT_AVATAR='bot.png', BOT_NAME='小晚',
                                         BOT_BIRTHDAY='2000年1月1日', BOT_BIRTHPLACE='杭州')
-        spec = importlib.util.spec_from_file_location('tested_profile_persona', ROOT / 'app' / 'routers' / 'persona.py')
+        spec = importlib.util.spec_from_file_location('tested_profile_persona', ROOT / 'app' / 'api' / 'persona.py')
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {'persona_config': types.SimpleNamespace(persona=persona)}):
             spec.loader.exec_module(module)

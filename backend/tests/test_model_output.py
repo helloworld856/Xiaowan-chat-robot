@@ -1,13 +1,10 @@
 import importlib.util
 import json
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-BACKEND = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BACKEND))
+from _imports import BACKEND_ROOT as BACKEND
 spec = importlib.util.spec_from_file_location('tested_json_parser', BACKEND / 'utils' / 'json_parser.py')
 parser = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(parser)
@@ -76,13 +73,13 @@ class ModelOutputTests(unittest.TestCase):
     def test_reply_generation_logs_stage_when_json_is_incomplete(self):
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, _ = self.generate('结果：{"reply":["私密回复"')
-        from config import configer
+        from app.config import configer
         self.assertEqual(result['ai_response'], configer.GENERATE_DEFAULT_RESULT['reply'])
         self.assertIn('回复生成', logs.output[0])
         self.assertNotIn('私密回复', logs.output[0])
 
     def test_reply_generation_drops_unclosed_reasoning(self):
-        from config import configer
+        from app.config import configer
 
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, _ = self.generate('<think>未结束的推理')

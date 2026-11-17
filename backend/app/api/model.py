@@ -10,9 +10,21 @@ import agent_config
 from agent_config.agent_factory import create_model
 from log_config import logger
 from personal_model_config import PersonalModel
-from routers.auth import CredentialRoute
-from schemas.model import ModelConfigRequest, ModelConfigResponse
+from app.api.credential_route import CredentialRoute
 from settings_config import settings_store
+
+from pydantic import BaseModel
+from settings_config import ModelSettings
+
+
+class ModelConfigRequest(ModelSettings):
+    pass
+
+
+class ModelConfigResponse(BaseModel):
+    status: bool  # 是否验证成功
+    info: str     # 提示信息
+
 
 router = APIRouter(route_class=CredentialRoute)
 MODEL_VALIDATION_CAPACITY = 2

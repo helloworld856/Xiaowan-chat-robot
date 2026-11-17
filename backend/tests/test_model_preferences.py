@@ -2,11 +2,9 @@ import importlib.util
 import sys
 import types
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from _imports import BACKEND_ROOT as ROOT
 
 
 def load_file(name, relative_path):

@@ -1,9 +1,7 @@
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import Mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _imports import BACKEND_ROOT as _BACKEND_ROOT
 
 
 class ConnectionPoolTests(unittest.TestCase):

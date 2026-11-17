@@ -86,7 +86,7 @@ class AccountStoreTests(unittest.TestCase):
         store = SQLAccountStore(self.pool)
         admin = store.seed_admin(self.legacy_file)
         service = AuthService(account_store=store)
-        from core.app import create_app
+        from app.application import create_app
         app = create_app('test', auth_service=service)
         status, headers, body = request(app, '/auth/login', 'POST', {'username': 'admin', 'password': old_password})
         self.assertEqual(status, 200)
@@ -127,7 +127,7 @@ class AccountStoreTests(unittest.TestCase):
             self.assertEqual(cursor.fetchone(), (1,))
 
     def test_registration_reserves_admin_even_before_admin_is_seeded(self):
-        from core.app import create_app
+        from app.application import create_app
 
         store = SQLAccountStore(self.pool)
         app = create_app('test', auth_service=AuthService(account_store=store))
@@ -171,7 +171,7 @@ class AccountStoreTests(unittest.TestCase):
                          {'profile.json', 'model.json', 'preferences.json', 'logs'})
 
     def test_lost_commit_response_requires_relogin_and_revokes_only_target_account(self):
-        from core.app import create_app
+        from app.application import create_app
 
         store = SQLAccountStore(self.pool)
         admin = store.seed_admin(self.legacy_file)
@@ -199,7 +199,7 @@ class AccountStoreTests(unittest.TestCase):
         self.assertEqual(service.login('admin', new_password, 'cli')[1], admin)
 
     def test_update_rejected_before_commit_preserves_target_sessions(self):
-        from core.app import create_app
+        from app.application import create_app
 
         store = SQLAccountStore(self.pool)
         admin = store.seed_admin(self.legacy_file)

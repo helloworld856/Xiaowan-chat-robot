@@ -1,7 +1,6 @@
 import asyncio
 import importlib.util
 import sqlite3
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,9 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'app'))
+from _imports import BACKEND_ROOT as ROOT
 
 from memory_config import MemoryManager, load_history
 
@@ -186,7 +183,7 @@ class GraphOutputTests(unittest.TestCase):
 class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_unexpected_model_field_types_do_not_break_following_turn(self):
         from auth_config import User
-        from core.session import ChatSessions
+        from app.core.session import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -214,7 +211,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_next_turn_follows_committed_history_after_failed_save(self):
         from auth_config import User
-        from core.session import ChatSessions
+        from app.core.session import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -248,7 +245,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_next_turn_recovers_summary_after_lost_commit_acknowledgement(self):
         from auth_config import User
-        from core.session import ChatSessions
+        from app.core.session import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -282,7 +279,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('second turn', prompts[-1])
 
     async def test_same_account_reuses_graph_and_other_account_remains_isolated(self):
-        from core.session import ChatSessions
+        from app.core.session import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)

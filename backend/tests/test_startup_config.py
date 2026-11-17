@@ -12,8 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from _imports import BACKEND_ROOT as ROOT
 
 
 class StartupConfigTests(unittest.TestCase):
@@ -23,7 +22,7 @@ class StartupConfigTests(unittest.TestCase):
         self.root = Path(directory.name)
 
     def test_logger_only_writes_to_file_without_erasing_previous_run(self):
-        from config import configer
+        from app.config import configer
 
         log_path = self.root / 'app.log'
         log_path.write_text('previous startup\n', encoding='utf-8')
@@ -52,7 +51,7 @@ import warnings
 from pathlib import Path
 
 import uvicorn
-from config import configer
+from app.config import configer
 
 configer.log_save_path = sys.argv[1]
 
@@ -110,7 +109,7 @@ runpy.run_path('run_serve.py', run_name='__main__')
             self.assertEqual(tokens_count.count_tokens('多条回复\n123 😀'), 11)
 
     def test_persona_requires_string_fields_and_does_not_log_its_prompt(self):
-        from config import configer
+        from app.config import configer
 
         mock_logger = Mock()
         source = {'name': '小晚', 'avatar': 'xiaowan.png', 'birthday': '2004-10-13',
@@ -129,7 +128,7 @@ runpy.run_path('run_serve.py', run_name='__main__')
             self.assertEqual(persona().BOT_NAME, '无名氏')
 
     def test_launcher_loads_only_the_backend_environment_and_only_when_started(self):
-        from config import configer
+        from app.config import configer
 
         dotenv = SimpleNamespace(load_dotenv=Mock())
         uvicorn = SimpleNamespace(run=Mock())

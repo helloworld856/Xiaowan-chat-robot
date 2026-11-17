@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import stat
-import sys
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -11,8 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from _imports import BACKEND_ROOT as ROOT
 
 from auth_config import User
 from log_config.account_context import account_log_context

@@ -1,8 +1,20 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from core.session import ChatNotStarted
+from app.core.session import ChatNotStarted
 from log_config import logger
-from schemas.chat import ChatRequest, ChatResponse
+
+from pydantic import BaseModel
+from typing import List, Optional
+
+
+class ChatRequest(BaseModel):
+    user_input: str
+
+class ChatResponse(BaseModel):
+    response: List
+    conversation_round: Optional[int]
+    saved: bool
+
 
 router = APIRouter()
 MAX_MESSAGE_LENGTH = 8000

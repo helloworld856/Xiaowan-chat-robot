@@ -1,14 +1,10 @@
 import importlib
 import json
-import sys
 import unittest
 from http.cookies import SimpleCookie
-from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'app'))
+from _imports import BACKEND_ROOT as ROOT
 
 
 def auth_module():
@@ -93,7 +89,7 @@ class AuthTests(unittest.TestCase):
 class AuthHTTPTests(unittest.TestCase):
     def setUp(self):
         self.auth = auth_module()
-        from core.app import create_app
+        from app.application import create_app
         self.now = 100.0
         self.service = self.auth.AuthService(clock=lambda: self.now)
         self.app = create_app('test', auth_service=self.service)

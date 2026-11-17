@@ -1,18 +1,24 @@
-from os.path import abspath, dirname, join
+from pathlib import Path
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
+SOFTWARE_NAME = "小晚 AI 角色对话软件"
+VERSION = "1.0.0"
 
 
 class Config:
     # 配置根目录的绝对路径
-    root_dir_path = dirname(dirname(abspath(__file__)))
+    root_dir_path = str(BACKEND_ROOT)
 
     # 日志配置
-    log_save_path = join(root_dir_path, 'log_config/app.log')
+    log_save_path = str(BACKEND_ROOT / 'log_config' / 'app.log')
 
     # 压缩对话阈值，输入总token数大于这个阈值就压缩历史对话
     compress_history_threshold = 100000
 
     # tokenizer配置
-    tokenizer_path = join(root_dir_path, 'utils/deepseek_tokenizer')
+    tokenizer_path = str(BACKEND_ROOT / 'utils' / 'deepseek_tokenizer')
 
     # 回复配置
     ANALYSIS_DEFAULT_RESULT = {  # 未分析出结果时的默认分析结果
@@ -42,4 +48,3 @@ class Config:
 
 
 configer = Config()
-

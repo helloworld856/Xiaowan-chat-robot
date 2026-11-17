@@ -10,16 +10,14 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'app'))
+from _imports import BACKEND_ROOT as ROOT
 
-from core.app import create_app
+from app.application import create_app
 from test_auth import request
 
 
 def load_route(name, filename):
-    spec = importlib.util.spec_from_file_location(name, ROOT / 'app' / 'routers' / filename)
+    spec = importlib.util.spec_from_file_location(name, ROOT / 'app' / 'api' / filename)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

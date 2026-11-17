@@ -1,9 +1,19 @@
-from fastapi.responses import JSONResponse
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+
+from app.config import VERSION
 
 router = APIRouter()
 
-# 处理chrome的DevTools请求
+
+# 获取版本等信息
+@router.get("/version")
+async def version():
+    return {
+        "version": VERSION,
+    }
+
+
 @router.get("/.well-known/appspecific/com.chrome.devtools.json")
 async def chrome_devtools_probe():
     """

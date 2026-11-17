@@ -1,9 +1,7 @@
 from dataclasses import asdict
 
 from fastapi import APIRouter, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from auth_config import (COOKIE_NAME, SESSION_TTL_SECONDS, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH,
@@ -12,23 +10,7 @@ from auth_config import (COOKIE_NAME, SESSION_TTL_SECONDS, MIN_PASSWORD_LENGTH, 
                          ReservedUsername)
 
 
-class CredentialRoute(APIRoute):
-    def get_route_handler(self):
-        handler = super().get_route_handler()
-
-        async def handle(request: Request):
-            try:
-                return await handler(request)
-            except RequestValidationError as error:
-                # Validation inputs can contain the password or the entire credential object.
-                details = [
-                    {'type': item['type'], 'msg': item['msg'],
-                     'loc': ['body'] if item['type'] == 'extra_forbidden' else item['loc']}
-                    for item in error.errors()
-                ]
-                return JSONResponse({'detail': details}, status_code=422)
-
-        return handle
+from .credential_route import CredentialRoute
 
 
 router = APIRouter(prefix='/auth', tags=['auth'], route_class=CredentialRoute)

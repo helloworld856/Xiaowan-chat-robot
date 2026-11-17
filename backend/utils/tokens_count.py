@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from config import configer
+from app.config import configer
 
 if TYPE_CHECKING:
     from tokenizers import Tokenizer

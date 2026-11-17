@@ -4,7 +4,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 
-from config import configer
+from app.config import configer
 from log_config import logger
 
 

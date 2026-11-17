@@ -1,7 +1,7 @@
 import re
 from time import time
 
-from config import configer
+from app.config import configer
 from log_config import logger
 from memory_config import MemoryManager
 from persona_config import persona

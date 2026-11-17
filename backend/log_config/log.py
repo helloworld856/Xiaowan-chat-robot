@@ -4,7 +4,7 @@ from collections import OrderedDict
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from config import configer
+from app.config import configer
 from log_config.account_context import account_log
 from user_data_config import UserDataPaths, protect_file
 

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from log_config import logger
-from config import configer
+from app.config import configer
 
 # 初始化人格类，并返回人格
 class Persona:
@@ -31,8 +31,3 @@ class Persona:
             self.BOT_BIRTHPLACE: str = "中国-北京"
             self.FRIEND_PERSONA = "你是一个智能助手。"
             logger.warning('无法读取有效的人格配置，使用默认人格')
-
-
-
-
-

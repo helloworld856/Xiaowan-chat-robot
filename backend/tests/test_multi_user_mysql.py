@@ -2,7 +2,6 @@
 import asyncio
 import json
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,8 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from _imports import BACKEND_ROOT as ROOT
 
 
 @unittest.skipUnless(os.getenv('XIAOWAN_TEST_MYSQL_PORT'), 'requires an isolated MySQL instance')
@@ -38,7 +36,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
     async def test_corrupt_legacy_profile_does_not_prevent_startup(self):
         import httpx
 
-        from app import main
+        from app import application as main
         from auth_config import hash_password
         from profile_config import ProfileStore
         from settings_config import SettingsStore
@@ -95,11 +93,11 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         import httpx
 
         import agent_config
-        from app import main
+        from app import application as main
         from auth_config import hash_password
         from database_config import open_pool
         from profile_config import ProfileStore
-        from routers import settings as settings_router
+        from app.api import settings as settings_router
         from settings_config import SettingsStore
 
         pool, database, db_options = self.make_database()
