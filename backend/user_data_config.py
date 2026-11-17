@@ -1,12 +1,12 @@
 """Paths, permissions, and atomic writes for account-owned files."""
 
-import json
 import os
 import stat
-import tempfile
 from pathlib import Path
 from threading import RLock
 from typing import Literal
+
+from app.json_files import atomic_write_json
 
 
 FileName = Literal['profile.json', 'model.json', 'preferences.json']
@@ -51,19 +51,7 @@ def read_text(path: Path) -> str:
 
 def replace_json(path: Path, value) -> None:
     require_directory(path.parent)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                         prefix=f'.{path.stem}-', suffix='.tmp', delete=False) as file:
-            temporary = Path(file.name)
-            json.dump(value, file, ensure_ascii=False, indent=2)
-            file.write('\n')
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    atomic_write_json(path, value)
 
 
 class UserDataPaths:

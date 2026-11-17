@@ -1,7 +1,5 @@
 """全站模型设置及用户输入习惯的存储。"""
 import json
-import os
-import tempfile
 from pathlib import Path
 from threading import RLock
 from typing import Literal
@@ -9,6 +7,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.json_files import atomic_write_json
 from log_config import logger
 from user_data_config import UserDataPaths, protect_file, read_text, replace_json
 
@@ -145,19 +144,7 @@ class SettingsStore:
 
     def _save(self, settings: AppSettings):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
-                                             prefix='.settings-', suffix='.tmp', delete=False) as file:
-                temporary = Path(file.name)
-                json.dump(settings.model_dump(include={'model'}), file, ensure_ascii=False, indent=2)
-                file.write('\n')
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, self.path)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        atomic_write_json(self.path, settings.model_dump(include={'model'}))
 
     def update_model(self, model: ModelSettings):
         with self.lock:

@@ -1,14 +1,14 @@
 """Persistent account records and import of the legacy administrator."""
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import RLock
 from typing import Callable, Literal, Protocol
 
 import pymysql
+
+from app.json_files import atomic_write_json
 
 HASH_ITERATIONS = 600_000
 LEGACY_ADMIN_PATH = Path(__file__).with_name('admin.json')
@@ -182,19 +182,7 @@ class LocalAccountStore:
             self.accounts[key] = replace(account, password_hash=password_hash)
 
     def _write_legacy_password(self, password_hash: str) -> None:
-        path = self.credentials_path
-        temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                             prefix='.admin-', suffix='.tmp', delete=False) as file:
-                temporary = Path(file.name)
-                json.dump({'username': 'admin', 'password_hash': password_hash}, file, indent=2)
-                file.write('\n')
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, path)
+            atomic_write_json(self.credentials_path, {'username': 'admin', 'password_hash': password_hash})
         except OSError:
             raise AccountStorageError() from None
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)

@@ -38,7 +38,7 @@ class SettingsTests(unittest.TestCase):
         from settings_config import ModelSettings
         self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'))
         original = self.path.read_bytes()
-        with patch('settings_config.os.replace', side_effect=OSError('write failed')):
+        with patch('app.json_files.os.replace', side_effect=OSError('write failed')):
             with self.assertRaises(OSError):
                 self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Replacement'))
         self.assertEqual(self.path.read_bytes(), original)
