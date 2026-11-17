@@ -9,13 +9,15 @@ from auth_config import AuthService
 from profile_config import ProfileStore
 from routers.auth import router as auth_router
 from routers.profile import router as profile_router
+from user_data_config import UserDataPaths
 
 def create_app(version: str, auth_service: AuthService | None = None,
-               profile_store: ProfileStore | None = None, lifespan=None) -> FastAPI:
+               profile_store: ProfileStore | None = None, lifespan=None,
+               *, user_data_paths: UserDataPaths | None = None) -> FastAPI:
     app = FastAPI(title=SOFTWARE_NAME, version=version, lifespan=lifespan)
     app.state.auth = auth_service or AuthService()
     app.state.profile = profile_store if profile_store is not None else ProfileStore()
-    app.add_middleware(AuthenticationMiddleware, service=app.state.auth)
+    app.add_middleware(AuthenticationMiddleware, service=app.state.auth, user_data_paths=user_data_paths)
     app.include_router(auth_router)
     app.include_router(profile_router)
     return app

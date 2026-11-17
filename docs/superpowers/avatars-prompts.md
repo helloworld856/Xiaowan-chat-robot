@@ -1,6 +1,6 @@
 # System avatar image generation
 
-Created with the built-in image_gen tool; six separate generation calls. The cat is the default system avatar. Original generated PNG outputs were copied unchanged into `frontend/public/avatars/system/`. Existing user_avatar.png was not changed.
+The six system avatars were generated separately with the built-in image generation tool and saved to `frontend/public/avatars/system/`. The cat is the default avatar.
 
 ## cat.png
 

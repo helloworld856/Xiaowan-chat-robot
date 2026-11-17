@@ -1,9 +1,11 @@
+import io
 import json
 import logging
 import runpy
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -19,23 +21,26 @@ class StartupConfigTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
 
-    def test_configuring_the_logger_preserves_the_previous_run(self):
+    def test_logger_writes_to_console_without_erasing_previous_run(self):
         from config import configer
 
         log_path = self.root / 'app.log'
         log_path.write_text('previous startup\n', encoding='utf-8')
-        root_logger = logging.getLogger()
-        original_level = root_logger.level
-        with patch.object(configer, 'log_save_path', log_path), patch.object(root_logger, 'handlers', []):
+        app_logger = logging.getLogger('xiaowan')
+        original_level = app_logger.level
+        console = io.StringIO()
+        with (patch.object(configer, 'log_save_path', log_path), patch.object(app_logger, 'handlers', []),
+              redirect_stderr(console)):
             try:
                 logger = runpy.run_path(str(ROOT / 'log_config' / 'log.py'))['logger']
                 logger.warning('current startup')
             finally:
-                for handler in root_logger.handlers:
+                for handler in app_logger.handlers:
                     handler.close()
-                root_logger.setLevel(original_level)
+                app_logger.setLevel(original_level)
         self.assertIn('previous startup', log_path.read_text(encoding='utf-8'))
         self.assertIn('current startup', log_path.read_text(encoding='utf-8'))
+        self.assertIn('current startup', console.getvalue())
 
     def test_persona_requires_string_fields_and_does_not_log_its_prompt(self):
         from config import configer

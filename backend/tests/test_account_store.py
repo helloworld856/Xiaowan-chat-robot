@@ -147,6 +147,28 @@ class AccountStoreTests(unittest.TestCase):
         with self.assertRaises(AccountStorageError):
             store.register('member', 'test credential hash')
         self.assertIsNone(store.find('member'))
+        restored = SQLAccountStore(self.pool)
+        self.assertEqual(restored.register('member', 'test credential hash').username, 'member')
+
+    def test_registration_keeps_directory_when_commit_succeeded_without_ack(self):
+        from profile_config import ProfileStore
+        from settings_config import UserPreferencesStore
+        from user_directory_store import UserDirectoryStore
+
+        directories = UserDirectoryStore(ProfileStore(self.legacy_file.parent / 'users'), UserPreferencesStore(self.pool))
+        store = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)
+        commit = _Connection.commit
+
+        def lose_commit_ack(connection):
+            commit(connection)
+            raise pymysql.OperationalError(2013, 'synthetic commit acknowledgement loss')
+
+        with patch.object(_Connection, 'commit', lose_commit_ack):
+            with self.assertRaises(AccountStorageError):
+                store.register('member', 'test credential hash')
+        user = store.find('member').user
+        self.assertEqual(set(entry.name for entry in directories.paths.directory(user.id).iterdir()),
+                         {'profile.json', 'model.json', 'preferences.json', 'logs'})
 
     def test_lost_commit_response_requires_relogin_and_revokes_only_target_account(self):
         from core.app import create_app

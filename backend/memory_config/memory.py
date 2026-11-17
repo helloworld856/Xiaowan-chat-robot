@@ -1,7 +1,6 @@
 import json
-import logging
+from log_config import logger
 
-logger = logging.getLogger(__name__)
 
 
 def load_history(connection, user_id: int, k: int, front: bool = True):

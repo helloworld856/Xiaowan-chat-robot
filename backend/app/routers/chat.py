@@ -1,12 +1,10 @@
-import logging
-
 from fastapi import APIRouter, HTTPException, Request
 
 from core.session import ChatNotStarted
+from log_config import logger
 from schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 MAX_MESSAGE_LENGTH = 8000
 
 

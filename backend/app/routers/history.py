@@ -1,11 +1,9 @@
-import logging
-
 from fastapi import APIRouter, HTTPException, Request
 from memory_config import load_history
+from log_config import logger
 from schemas.history import HistoryRequest, HistoryResponse
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 
 @router.post("/history", response_model=HistoryResponse)

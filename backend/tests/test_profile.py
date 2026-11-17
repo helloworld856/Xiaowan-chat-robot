@@ -88,7 +88,8 @@ class ProfileHTTPTests(unittest.TestCase):
         second_cookie = f'{self.auth.COOKIE_NAME}={token}'
         admin_cookie = self.login()
         self.assertEqual(json.loads(request(self.app, '/profile', cookie=second_cookie)[2])['nickname'], username)
-        self.assertFalse(self.profile.path_for(second_id).exists())
+        self.assertEqual(json.loads(self.profile.path_for(second_id).read_text(encoding='utf-8')),
+                         {'nickname': username, 'avatar_id': 'cat'})
         self.assertEqual(request(self.app, '/profile', 'POST', {'nickname': '晚风', 'avatar_id': 'bear'}, cookie=second_cookie)[0], 200)
         self.assertEqual(request(self.app, '/profile', 'POST', {'nickname': '管理', 'avatar_id': 'fox'}, cookie=admin_cookie)[0], 200)
         self.assertEqual(json.loads(self.profile.path_for(second_id).read_text(encoding='utf-8')), {'nickname': '晚风', 'avatar_id': 'bear'})
@@ -288,7 +289,7 @@ class ProfileHTTPTests(unittest.TestCase):
             self.assertEqual(request(self.app, '/profile', cookie=saved_cookie)[0], 200)
         self.assertEqual(request(self.app, '/profile', cookie=self.login())[0], 200)
         self.assertEqual(request(self.app, '/auth/login', 'POST', {'username': 'admin', 'password': 'new-password-26'})[0], 401)
-        self.assertEqual({path.name for path in self.credentials_path.parent.iterdir()}, {'admin.json'})
+        self.assertEqual({path.name for path in self.credentials_path.parent.iterdir()}, {'admin.json', 'user_data'})
 
     def test_password_write_rejects_cross_origin(self):
         cookie = self.login()

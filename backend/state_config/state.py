@@ -17,7 +17,7 @@ class AIChatState(TypedDict):
     ai_emotion: Optional[str]
     # 动作
     ai_action: Optional[str]
-    # 总tokens用量
+    # 本轮分析与回复的 Token 用量
     total_tokens: int
 
     # 记录每轮对话

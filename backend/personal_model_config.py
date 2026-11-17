@@ -1,14 +1,11 @@
 """Store personal model credentials separately from administrator configuration."""
 
-import json
-import os
-import tempfile
 from pathlib import Path
-from threading import Lock
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from settings_config import ModelMerchant, ModelSettings
+from user_data_config import UserDataPaths, protect_file, read_text, replace_json
 
 
 class PersonalModel(BaseModel):
@@ -40,68 +37,57 @@ class _PersonalSettings(BaseModel):
 
 
 class PersonalModelStore:
-    def __init__(self, root: Path):
-        self.root = root
-        self._locks = tuple(Lock() for _ in range(64))
+    def __init__(self, root: Path | UserDataPaths):
+        self.paths = root if isinstance(root, UserDataPaths) else UserDataPaths(root)
         self._agents = {}
 
-    def _path(self, user_id: int) -> Path:
-        if type(user_id) is not int or user_id < 1:
-            raise ValueError('账号 ID 无效')
-        return self.root / str(user_id) / 'model.json'
+    def path_for(self, user_id: int) -> Path:
+        return self.paths.file(user_id, 'model.json')
 
     @staticmethod
     def _write(path: Path, model: PersonalModel | None):
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         data = None
         if model is not None:
             data = model.model_dump()
             data['api_key'] = model.api_key.get_secret_value()
-        temporary = None
-        try:
-            # NamedTemporaryFile creates the file with permissions limited to its owner on POSIX.
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                             prefix='.model-', suffix='.tmp', delete=False) as file:
-                temporary = Path(file.name)
-                json.dump({'model': data}, file, ensure_ascii=False, indent=2)
-                file.write('\n')
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, path)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        replace_json(path, {'model': data})
 
     def ensure(self, user_id: int):
-        path = self._path(user_id)
-        with self._locks[user_id % len(self._locks)]:
-            if not path.exists():
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            self.paths.ensure_directory(user_id)
+            if not protect_file(path):
                 self._write(path, None)
 
-    def _read(self, path: Path) -> PersonalModel | None:
+    @staticmethod
+    def read_file(path: Path) -> PersonalModel | None:
+        return _PersonalSettings.model_validate_json(read_text(path)).model
+
+    def _read(self, user_id: int, path: Path) -> PersonalModel | None:
         try:
-            payload = path.read_text(encoding='utf-8')
+            return self.read_file(path)
         except FileNotFoundError:
             # Existing users get the same empty configuration on first access.
+            self.paths.ensure_directory(user_id)
             self._write(path, None)
             return None
-        return _PersonalSettings.model_validate_json(payload).model
 
     def get(self, user_id: int) -> PersonalModel | None:
-        path = self._path(user_id)
-        with self._locks[user_id % len(self._locks)]:
-            return self._read(path)
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            return self._read(user_id, path)
 
     def update(self, user_id: int, model: PersonalModel, agents):
-        path = self._path(user_id)
-        with self._locks[user_id % len(self._locks)]:
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            self.paths.ensure_directory(user_id)
             self._write(path, model)
             self._agents[user_id] = (model, agents)
 
     def agents_for(self, user_id: int):
-        path = self._path(user_id)
-        with self._locks[user_id % len(self._locks)]:
-            model = self._read(path)
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            model = self._read(user_id, path)
             if model is None:
                 self._agents.pop(user_id, None)
                 return None

@@ -58,12 +58,16 @@ export async function addAssistantMessage(messages: string[], isCurrent: () => b
     for (const [index, text] of messages.entries()) {
         if (!isCurrent()) return;
         chatBox.appendChild(createAssistantMessage(text));
-        if (index === 0) onFirstReply?.();
+        if (index === 0) {
+            console.log(`收到 ${messages.length} 条助手回复`);
+            onFirstReply?.();
+        }
 
         if (shouldScrollToBottom) scrollToBottom();
 
         const delay = Math.min(baseSendInterval + 100 * text.length, 5000);
         if (index !== messages.length - 1){
+            console.log(`下一条助手消息将在 ${delay} ms 后显示`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }

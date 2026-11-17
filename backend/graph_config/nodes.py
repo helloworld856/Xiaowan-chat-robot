@@ -36,6 +36,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents) -> AIChatSta
         # 清空上轮的回复
         state['ai_response'] = []
         state['saved'] = False
+        state['total_tokens'] = 0
         memorier.refresh_if_needed()
         state['message']['conversation_round'] = memorier.next_round
 
@@ -69,9 +70,10 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
     # 保存失败时仍返回回复，由接口明确告知前端。
     state['saved'] = memorier.record_message(state['message'])
 
-    logger.info(f'总token使用:{state["total_tokens"]}')
-    logger.info(f'执行总用时:{time()-state["start_time"]:.2f}s')
-    logger.info('结点"end_node"执行完成！\n' + '-'*65)
+    logger.info('本轮对话 %d：回复 %d 条，分析与回复 Token %s，耗时 %.2f 秒，保存%s',
+                state['message']['conversation_round'] + 1, len(state['ai_response']),
+                state['total_tokens'] or '未返回', time() - state['start_time'],
+                '成功' if state['saved'] else '失败')
 
     state['message']['conversation_round'] += 1  # 轮次加1
     return state
@@ -159,16 +161,16 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 
 情绪分析和建议回复可能不准确，以用户原话和最近的对话为准，不必把情绪标签说出来。
 以你的人设回应用户当前说的事，不必为了符合分析结果而强行安慰、提问或转移话题。
-通常回复一条消息；有自然停顿时可以分成两条，不为凑条数拆句。用户认真提问时，按内容需要展开。
+像发聊天消息一样，自然地回复 1 至 5 条。简短回应一条即可；有几个可以独立发送的意思时，按顺序分成多条。用户认真提问时，按内容需要展开。
 请直接返回标准 JSON，所有键名和字符串都使用双引号，不要用代码块包裹，也不要输出额外文字。
 回答维度:
-1、"reply":你要回复给用户的话（非空字符串列表，每个元素是一条完整消息）。
+1、"reply":你要回复给用户的话（非空字符串列表）。每个元素会显示为一个气泡，有自然停顿时用单独的元素。
 2、"inner monologue":保留列表字段，默认返回空列表，不需要编写内心独白。
 3、"emotion":简短的情绪描述（字符串），没有明显变化时可写“平静”，不必刻意制造情绪。
 4、"action":保留字符串字段，默认返回空字符串，不需要编写动作。
 优先保证 reply 自然、连贯，不要为了补充其他字段而表演情绪或编造情节。
 回复格式:
-{{"reply":["这里填写对用户的实际回复"],"inner monologue":[],"emotion":"平静","action":""}}"""
+{{"reply":["我也会先把最麻烦的那件事做了。","剩下的就慢慢来。"],"inner monologue":[],"emotion":"平静","action":""}}"""
 
         _, _, reply_agent = agents
         response = reply_agent.invoke(
@@ -181,11 +183,10 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         reply = ai_response.get('reply', [])
         if isinstance(reply, str):
             reply = [reply]
-        if not isinstance(reply, list) or not reply or any(
-            not isinstance(part, str) or not part.strip() for part in reply
-        ):
-            reply = configer.GENERATE_DEFAULT_RESULT["reply"].copy()
-        state['ai_response'] = reply
+        elif not isinstance(reply, list):
+            reply = []
+        messages = [part for part in reply if isinstance(part, str) and part.strip()]
+        state['ai_response'] = messages or configer.GENERATE_DEFAULT_RESULT['reply'].copy()
 
         monologue = ai_response.get('inner monologue', '')
         if not isinstance(monologue, str) and (

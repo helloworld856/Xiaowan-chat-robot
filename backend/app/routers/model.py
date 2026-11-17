@@ -1,5 +1,6 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from contextvars import copy_context
 from threading import BoundedSemaphore
 from time import monotonic
 
@@ -60,8 +61,14 @@ def validate_connection(llm):
     # 前端 30 秒超时前返回；后台验证即使稍后结束也不会继续切换模型。
     if not validation_slots.acquire(blocking=False):
         raise ModelValidationBusy
+
+    def invoke():
+        logger.info('模型连接测试开始')
+        llm.invoke('hi')
+        logger.info('模型连接测试完成')
+
     try:
-        future = validation_pool.submit(llm.invoke, 'hi')
+        future = validation_pool.submit(copy_context().run, invoke)
     except Exception:
         validation_slots.release()
         raise
@@ -103,7 +110,8 @@ def configure_personal_model(model: PersonalModel, request: Request, activate: b
         agents = model.create_agents()
         try:
             request.app.state.personal_models.update(request.state.user.id, model, agents)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            logger.warning(f'个人模型保存失败: {type(error).__name__}')
             return ModelConfigResponse(status=False, info='个人模型保存失败，请稍后重试')
         return ModelConfigResponse(status=True, info='个人模型已保存')
     except Exception as error:
@@ -142,7 +150,8 @@ def configure_model(request: ModelConfigRequest, activate: bool):
         try:
             try:
                 settings_store.update_model(request)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as error:
+                logger.warning(f'管理员模型保存失败: {type(error).__name__}')
                 return ModelConfigResponse(status=False, info='配置保存失败，原有模型仍在使用')
             use_agents(request, agents)
         finally:
@@ -156,12 +165,12 @@ def configure_model(request: ModelConfigRequest, activate: bool):
 
 
 def connection_failure(error: Exception):
+    logger.warning(f'模型配置失败: {type(error).__name__}')
     if isinstance(error, ModelValidationBusy):
         return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
     if isinstance(error, TimeoutError):
         return ModelConfigResponse(status=False, info='请求超时，请检查网络')
     normalized_error = str(error).lower()
-    logger.warning(f'模型配置失败: {type(error).__name__}')
     if any(marker in normalized_error for marker in ('401', 'unauthorized', 'invalid_api_key', 'invalid api key')):
         return ModelConfigResponse(status=False, info='API Key 无效或已过期')
     if '404' in normalized_error or 'not found' in normalized_error:

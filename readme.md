@@ -51,7 +51,7 @@ PASSWORD=your-mysql-password
 
 管理员的模型配置保存在 `backend/settings.json`，启动时加载。普通账号注册时会创建 `backend/user_data/<user_id>/model.json`，已有账号在首次读取设置或尝试聊天时补建。普通用户在“设置 → 配置个人模型”填写自己的厂商、模型名和 API Key，连接厂商官方地址，保存后即可聊天。个人配置文件含可调用厂商 API 的密钥，应和 `.env` 一样限制文件访问并妥善备份。
 
-每个账号的发送快捷键保存在 MySQL，点击“保存输入设置”后，刷新和重启都能恢复。
+每个账号的发送快捷键保存在自己的 `backend/user_data/<user_id>/preferences.json`，点击“保存输入设置”后，刷新和重启都能恢复。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 
@@ -67,7 +67,9 @@ PASSWORD=your-mysql-password
 
 登录 Cookie 有效期为 8 小时，刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
 
-菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。资料首次保存时写入 `backend/user_data/<user_id>/profile.json`，刷新和重启后保留。头像素材位于 `frontend/public/avatars/system/`，制作提示词见 `docs/superpowers/avatars-prompts.md`。
+菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`，制作提示词见 `docs/superpowers/avatars-prompts.md`。
+
+已认证账号的运行诊断写入各自目录中的 `logs/app.log`，同时在终端标记账号 ID。日志记录请求结果、回复条数、Token 和耗时。每个文件约 2 MB 时轮转并保留三份归档。启动和匿名请求等系统日志继续写入 `backend/log_config/app.log`。
 
 聊天、历史、人设、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
 
@@ -104,3 +106,24 @@ python run_serve.py
 后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`.env` 里的 `XIAOWAN_CHAT_CONCURRENCY`、`XIAOWAN_CHAT_QUEUE_SIZE` 和 `XIAOWAN_CHAT_QUEUE_TIMEOUT` 控制最多同时执行数、等待名额和排队秒数，默认 4、8、2。排队失败时可以从原消息重试。
 
 使用Vite开发时，前端修改会自动刷新；访问 `8000` 时，修改前端后需重新执行 `npm --prefix frontend run build`（在项目根目录）。修改后端后需重启后端服务。
+
+## 升级已有账号的独立目录
+
+升级已有服务器时，一并备份 MySQL、`backend/user_data/` 和服务端配置。保留 MySQL 中的账号 ID 与目录名的对应关系。
+
+停掉旧版小晚，保留 MySQL 服务运行。用平时启动小晚的 Linux 用户，在项目根目录的后端 Python 环境执行：
+
+```bash
+python backend/migrate_user_data.py --dry-run
+```
+
+预览结果正常后，执行迁移并启动新版：
+
+```bash
+python backend/migrate_user_data.py --apply && python backend/run_serve.py
+```
+
+迁移补齐缺失文件，把原有发送快捷键导入各自的 `preferences.json`。资料和模型配置沿用原来的内容。异常会列出账号 ID，修复对应文件或权限后可再次执行。
+
+回退前请用当前版本运行 `python backend/migrate_user_data.py --rollback-preferences`，将个人文件中的偏好回填到 MySQL，再启动旧版。
+如果运行旧版期间修改了快捷键，下一次升级前先将对应的 `preferences.json` 移到备份位置，再执行迁移，读取旧版 MySQL 中的最新值。

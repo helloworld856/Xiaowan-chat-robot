@@ -75,7 +75,7 @@ def read_legacy_admin(path: Path) -> str:
 
 
 class SQLAccountStore:
-    def __init__(self, pool, *, prepare_user: Callable[[int], None] | None = None):
+    def __init__(self, pool, *, prepare_user: Callable[[User], None] | None = None):
         self.pool = pool
         self.prepare_user = prepare_user
 
@@ -94,14 +94,19 @@ class SQLAccountStore:
             raise AccountStorageError()
         return Account(User(user_id, username, role), password_hash)
 
+    def list_users(self) -> list[User]:
+        with self.pool.connection() as db, db.cursor() as cursor:
+            cursor.execute('SELECT id, username, role FROM users ORDER BY id')
+            return [User(*row) for row in cursor.fetchall()]
+
     def _insert(self, username: str, password_hash: str, role: Role) -> User:
         try:
             with self.pool.connection() as db, db.cursor() as cursor:
                 cursor.execute('INSERT INTO users (username, username_key, password_hash, role) VALUES (%s, %s, %s, %s)',
                                (username, username.lower(), password_hash, role))
-                user_id = cursor.lastrowid
+                user = User(cursor.lastrowid, username, role)
                 if role == 'user' and self.prepare_user is not None:
-                    self.prepare_user(user_id)
+                    self.prepare_user(user)
                 db.commit()
         except pymysql.IntegrityError as error:
             if error.args and error.args[0] == 1062:
@@ -109,7 +114,7 @@ class SQLAccountStore:
             raise AccountStorageError() from None
         except (OSError, pymysql.MySQLError):
             raise AccountStorageError() from None
-        return User(user_id, username, role)
+        return user
 
     def register(self, username: str, password_hash: str) -> User:
         return self._insert(username, password_hash, 'user')

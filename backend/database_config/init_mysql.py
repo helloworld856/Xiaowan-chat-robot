@@ -8,7 +8,7 @@ from config import configer
 from .pool import ConnectionPool
 
 
-def open_pool(database='XiaoWan', **overrides):
+def open_pool(database='XiaoWan', *, create_if_missing=True, **overrides):
     if not re.fullmatch(r'[A-Za-z0-9_]+', database):
         raise ValueError('数据库名称无效')
     options = {
@@ -26,7 +26,7 @@ def open_pool(database='XiaoWan', **overrides):
         try:
             return pymysql.connect(database=database, **options)
         except pymysql.OperationalError as error:
-            if error.args[0] != 1049:
+            if error.args[0] != 1049 or not create_if_missing:
                 raise
         connection = pymysql.connect(**options)
         try:

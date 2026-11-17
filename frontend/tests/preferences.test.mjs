@@ -39,6 +39,7 @@ test('message rendering recalculates delay for each reply and never waits after 
     const exports = {};
     const delays = [];
     const rendered = [];
+    const diagnostics = [];
     const element = () => ({append() {}, appendChild() {}});
     runInNewContext(compiled, {
         exports,
@@ -46,13 +47,20 @@ test('message rendering recalculates delay for each reply and never waits after 
             ? {chatBox: {scrollTop: 0, clientHeight: 0, scrollHeight: 0, appendChild: row => rendered.push(row)}, scrollToBottom() {}}
             : (() => { throw new Error('Unexpected dependency: ' + name); })(),
         window: {USER_AVATAR: '', BOT_AVATAR: ''}, document: {createElement: element},
-        console: {log() {}}, setTimeout: (resolve, milliseconds) => { delays.push(milliseconds); resolve(); }
+        console: {log: message => diagnostics.push(message)},
+        setTimeout: (resolve, milliseconds) => { delays.push(milliseconds); resolve(); }
     });
     const firstReply = [];
     await exports.addAssistantMessage(['hello', 'a'.repeat(20), 'b'.repeat(100), 'last'], undefined,
         () => firstReply.push({rows: rendered.length, delays: delays.length}));
     assert.deepEqual(firstReply, [{rows: 1, delays: 0}]);
     assert.deepEqual(delays, [1500, 3000, 5000]);
+    assert.deepEqual(diagnostics, [
+        '收到 4 条助手回复',
+        '下一条助手消息将在 1500 ms 后显示',
+        '下一条助手消息将在 3000 ms 后显示',
+        '下一条助手消息将在 5000 ms 后显示'
+    ]);
     assert.equal(rendered.length, 4);
     delays.length = 0;
     await exports.addAssistantMessage(['only one reply']);

@@ -60,6 +60,37 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(login.status_code, 200)
                         self.assertEqual((await client.get('/profile')).json()['nickname'], 'admin')
 
+    def test_existing_account_preferences_migrate_and_can_be_rolled_back(self):
+        from auth_config import SQLAccountStore, hash_password
+        from database_config import initialize_schema
+        from migrate_user_data import migrate_accounts
+        from profile_config import Profile, ProfileStore
+        from settings_config import Preferences, UserPreferencesStore
+        from user_directory_store import UserDirectoryStore
+
+        pool, _, _ = self.make_database()
+        initialize_schema(pool)
+        accounts = SQLAccountStore(pool)
+        user = accounts.register('Legacy_User', hash_password('test only'))
+        legacy = UserPreferencesStore(pool)
+        legacy.update(user.id, Preferences(send_shortcut='ctrl_enter'))
+        with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
+            profiles = ProfileStore(Path(directory) / 'profiles')
+            data = UserDirectoryStore(profiles, legacy)
+            profiles.update(user.id, Profile(nickname='旧资料', avatar_id='fox'))
+            before = profiles.path_for(user.id).read_bytes()
+            self.assertEqual(migrate_accounts(accounts, data).pending, 1)
+            self.assertFalse(data.preferences.path_for(user.id).exists())
+
+            self.assertEqual(migrate_accounts(accounts, data, apply=True).updated, 1)
+            self.assertEqual(profiles.path_for(user.id).read_bytes(), before)
+            self.assertEqual(data.preferences.get(user.id).send_shortcut, 'ctrl_enter')
+            data.preferences.update(user.id, Preferences())
+            self.assertEqual(migrate_accounts(accounts, data, apply=True).updated, 0)
+            self.assertEqual(legacy.find(user.id).send_shortcut, 'ctrl_enter')
+            self.assertEqual(migrate_accounts(accounts, data, rollback=True).updated, 1)
+            self.assertEqual(legacy.find(user.id).send_shortcut, 'enter')
+
     async def test_migration_account_isolation_concurrent_graphs_and_restart(self):
         import httpx
 
@@ -108,7 +139,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                 prompt = payload['messages'][0]['content']
                 if 'message B' in prompt:
                     self.assertNotIn('wait for B', prompt)
-                return response(json.dumps({'reply': [f'{label}|||标记']}, ensure_ascii=False))
+                return response(json.dumps({'reply': [f'{label}|||标记', '第二条回复']}, ensure_ascii=False))
 
             admin_key = 'admin-only-placeholder'
             personal_key = 'personal-placeholder'
@@ -147,6 +178,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         first, second = await asyncio.gather(b.post('/auth/register', json=registration),
                             b.post('/auth/register', json={**registration, 'username': 'second_user'}))
                         self.assertEqual(sorted([first.status_code, second.status_code]), [201, 409])
+                        winner = first if first.status_code == 201 else second
+                        personal_folder = profiles.root / str(winner.json()['user']['id'])
+                        self.assertEqual({path.name for path in personal_folder.iterdir()},
+                                         {'model.json', 'profile.json', 'preferences.json', 'logs'})
                         login_b = await b.post('/auth/login', json={'username': 'second_user', 'password': user_credential})
                         self.assertEqual(login_b.status_code, 200, login_b.text)
                         self.assertEqual(login_b.json()['user']['role'], 'user')
@@ -170,6 +205,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn(personal_key, invalid.text)
                         test = await b.post('/model/personal/test', json=personal)
                         self.assertTrue(test.json()['status'], test.text)
+                        self.assertTrue((await a.post('/model/test', json={**options, 'model_name': 'test-model'})).json()['status'])
                         self.assertEqual(json.loads(personal_file.read_text(encoding='utf-8')), {'model': None})
                         self.assertTrue((await b.post('/model/personal', json=personal)).json()['status'])
                         self.assertEqual(validator.call_args.args[1], personal_key)
@@ -203,10 +239,12 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(reply_a.status_code, 200, reply_a.text)
                         self.assertTrue(reply_a.json()['saved'] and reply_b.json()['saved'])
                         self.assertEqual(reply_a.json()['conversation_round'], reply_b.json()['conversation_round'])
-                        for client, message in ((a, 'wait for B'), (b, 'message B')):
+                        for client, http_reply, message in ((a, reply_a, 'wait for B'), (b, reply_b, 'message B')):
                             rows = (await client.post('/history', json={'num': 0, 'front': True})).json()['history_messages']
                             label = 'test-model' if client is a else 'my-model'
-                            self.assertEqual([(row['user'], row['assistant']) for row in rows], [(message, [f'{label}|||标记'])])
+                            expected = [f'{label}|||标记', '第二条回复']
+                            self.assertEqual(http_reply.json()['response'], expected)
+                            self.assertEqual([(row['user'], row['assistant']) for row in rows], [(message, expected)])
                         new_admin_password = 'NewAdmin!2026'
                         changed = await a.post('/auth/password', json={
                             'current_password': credential, 'new_password': new_admin_password,
@@ -215,6 +253,21 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(changed.status_code, 200, changed.text)
                         self.assertIsNone((await a.get('/auth/session')).json()['user'])
                         self.assertEqual((await b.get('/auth/session')).json()['user']['id'], login_b.json()['user']['id'])
+
+                admin_log = (profiles.root / str(admin_info['id']) / 'logs' / 'app.log').read_text(encoding='utf-8')
+                personal_log = (personal_folder / 'logs' / 'app.log').read_text(encoding='utf-8')
+                self.assertIn('POST /model/test 返回 200', admin_log)
+                self.assertIn('POST /model/personal/test 返回 200', personal_log)
+                self.assertNotIn('POST /model/personal/test', admin_log)
+                self.assertNotIn('POST /model/test 返回 200', personal_log)
+                self.assertIn('POST /model/test 返回 403', personal_log)
+                self.assertEqual(admin_log.count('模型连接测试完成'), 1)
+                self.assertEqual(personal_log.count('模型连接测试完成'), 2)
+                for contents in (admin_log, personal_log):
+                    self.assertIn('模型连接测试完成', contents)
+                    self.assertIn('回复 2 条', contents)
+                    for secret in (admin_key, personal_key, 'wait for B', 'message B'):
+                        self.assertNotIn(secret, contents)
 
                 resumed_pool = open_pool(database, **db_options)
                 self.addCleanup(resumed_pool.close)

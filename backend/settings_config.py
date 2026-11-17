@@ -9,6 +9,9 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from log_config import logger
+from user_data_config import UserDataPaths, protect_file, read_text, replace_json
+
 
 ModelMerchant = Literal['deepseek', 'tongyi']
 
@@ -57,11 +60,11 @@ class UserPreferencesStore:
     def __init__(self, pool):
         self._pool = pool
 
-    def get(self, user_id: int) -> Preferences:
+    def find(self, user_id: int) -> Preferences | None:
         with self._pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute('SELECT send_shortcut FROM user_preferences WHERE user_id=%s', (user_id,))
             row = cursor.fetchone()
-        return Preferences(send_shortcut=row[0]) if row else Preferences()
+        return Preferences(send_shortcut=row[0]) if row else None
 
     def update(self, user_id: int, preferences: Preferences):
         with self._pool.connection() as connection, connection.cursor() as cursor:
@@ -76,6 +79,52 @@ class UserPreferencesStore:
                               ON DUPLICATE KEY UPDATE user_id=%s''',
                            (user_id, preferences.send_shortcut, user_id))
             connection.commit()
+
+
+class FilePreferencesStore:
+    def __init__(self, paths: UserDataPaths, legacy: UserPreferencesStore):
+        self.paths = paths
+        self.legacy = legacy
+
+    def path_for(self, user_id: int) -> Path:
+        return self.paths.file(user_id, 'preferences.json')
+
+    @staticmethod
+    def read_file(path: Path) -> Preferences:
+        return Preferences.model_validate_json(read_text(path))
+
+    def ensure(self, user_id: int, defaults: Preferences | None = None) -> None:
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            self.paths.ensure_directory(user_id)
+            if protect_file(path):
+                return
+        # Registration holds a database connection while creating files. Never query
+        # the old preferences table while holding a file lock.
+        initial = defaults or self.legacy.find(user_id) or Preferences()
+        with self.paths.lock(user_id):
+            if not protect_file(path):
+                self.update(user_id, initial)
+
+    def get(self, user_id: int) -> Preferences:
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            try:
+                return self.read_file(path)
+            except FileNotFoundError:
+                pass
+            except ValueError:
+                logger.warning('个人输入偏好文件格式无效，暂时使用默认设置')
+                return Preferences()
+        self.ensure(user_id)
+        with self.paths.lock(user_id):
+            return self.read_file(path)
+
+    def update(self, user_id: int, preferences: Preferences) -> None:
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            self.paths.ensure_directory(user_id)
+            replace_json(path, preferences.model_dump())
 
 
 class SettingsStore:

@@ -19,9 +19,10 @@ from auth_config import AuthService, SQLAccountStore
 from database_config import initialize_schema, open_pool, reset_chat_history
 from graph_config import create_graph
 from log_config import logger
-from personal_model_config import PersonalModelStore
+from log_config.log import close_account_logs
 from profile_config import ProfileStore
 from settings_config import UserPreferencesStore, settings_store
+from user_directory_store import UserDirectoryStore
 
 
 
@@ -33,9 +34,9 @@ def positive_setting(name, default):
 
 
 def build_application(db, profile_store, legacy_root):
-    personal_models = PersonalModelStore(profile_store.root)
-    accounts = SQLAccountStore(db, prepare_user=personal_models.ensure)
-    preferences = UserPreferencesStore(db)
+    legacy_preferences = UserPreferencesStore(db)
+    directories = UserDirectoryStore(profile_store, legacy_preferences)
+    accounts = SQLAccountStore(db, prepare_user=directories.prepare_new)
 
     def startup():
         initialize_schema(db)
@@ -50,7 +51,11 @@ def build_application(db, profile_store, legacy_root):
             saved = None
             logger.warning('无法加载模型设置，请在管理界面重新配置')
         if saved is not None:
-            preferences.import_legacy(admin.id, saved.preferences)
+            legacy_preferences.import_legacy(admin.id, saved.preferences)
+        try:
+            directories.ensure(admin)
+        except (OSError, ValueError):
+            logger.warning('无法初始化管理员的个人目录，请检查文件权限与格式')
         reset_chat_history(db)
         model.activate_saved_model(saved.model if saved else None)
 
@@ -60,16 +65,22 @@ def build_application(db, profile_store, legacy_root):
             await run_in_threadpool(startup)
             yield
         finally:
-            await application.state.chat.drain()
-            await run_in_threadpool(db.close)
+            try:
+                await application.state.chat.drain()
+            finally:
+                try:
+                    await run_in_threadpool(db.close)
+                finally:
+                    close_account_logs(directories.paths)
 
-    application = create_app(VERSION, AuthService(account_store=accounts), profile_store, lifespan=lifespan)
+    application = create_app(VERSION, AuthService(account_store=accounts), profile_store, lifespan=lifespan,
+                             user_data_paths=directories.paths)
     application.state.db = db
-    application.state.preferences = preferences
-    application.state.personal_models = personal_models
+    application.state.preferences = directories.preferences
+    application.state.personal_models = directories.models
     application.state.chat = ChatSessions(
         db.connection,
-        personal_models=personal_models,
+        personal_models=directories.models,
         graph_factory=create_graph,
         max_running=positive_setting('XIAOWAN_CHAT_CONCURRENCY', 4),
         max_waiting=positive_setting('XIAOWAN_CHAT_QUEUE_SIZE', 8),

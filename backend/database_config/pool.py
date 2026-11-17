@@ -4,6 +4,7 @@ from threading import BoundedSemaphore, Lock
 import pymysql
 
 from log_config import logger
+from log_config.account_context import account_log_context
 
 
 class ConnectionPool:
@@ -22,7 +23,8 @@ class ConnectionPool:
         try:
             connection.close()
         except (OSError, pymysql.MySQLError):
-            logger.warning('关闭数据库连接失败')
+            with account_log_context(None, None):
+                logger.warning('关闭数据库连接失败')
 
     @contextmanager
     def connection(self):

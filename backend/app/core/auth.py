@@ -5,6 +5,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from auth_config import AuthService, COOKIE_NAME
+from log_config import logger
+from log_config.account_context import account_log_context
+from user_data_config import UserDataPaths
 
 
 def origin_key(value: str):
@@ -15,9 +18,10 @@ def origin_key(value: str):
 
 
 class AuthenticationMiddleware:
-    def __init__(self, app, service: AuthService):
+    def __init__(self, app, service: AuthService, user_data_paths: UserDataPaths | None = None):
         self.app = app
         self.service = service
+        self.user_data_paths = user_data_paths
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -51,9 +55,20 @@ class AuthenticationMiddleware:
         state = scope.setdefault('state', {})
         state['user'] = user
         state['username'] = user.username if user is not None else None
+        tracked_user = user if user is not None and path not in ('/auth/login', '/auth/register') and not public_static else None
 
         async def send_private(message):
             if message['type'] == 'http.response.start' and not public_static:
                 MutableHeaders(scope=message)['Cache-Control'] = 'no-store'
+                # Log only a route template, never the raw URL or a submitted body.
+                route = getattr(scope.get('route'), 'path', None)
+                if self.user_data_paths is not None and route is not None:
+                    logger.info('请求 %s %s 返回 %d', method, route, message['status'])
             await send(message)
-        await self.app(scope, receive, send_private)
+
+        with account_log_context(self.user_data_paths, tracked_user.id if tracked_user else None):
+            try:
+                await self.app(scope, receive, send_private)
+            except Exception as error:
+                logger.warning('请求处理异常（%s）', type(error).__name__)
+                raise

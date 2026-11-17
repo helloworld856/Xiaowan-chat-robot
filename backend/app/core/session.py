@@ -1,20 +1,18 @@
 """Single-process chat scheduling and lazily initialized account state."""
 
 import asyncio
-import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
 from auth_config import User
+from log_config import logger
 from memory_config import MemoryManager
 from personal_model_config import PersonalModelStore
 from state_config import AIChatState, create_initial_state
-
-logger = logging.getLogger(__name__)
-
 
 class ChatNotStarted(Exception):
     def __init__(self, status_code: int, message: str):
@@ -142,7 +140,7 @@ class ChatSessions:
     async def _execute(self, entry: AccountChat, user: User, text: str):
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, self._run, entry, user, text)
+            return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
         finally:
             entry.worker = None
             self._slots.release()
