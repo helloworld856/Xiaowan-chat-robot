@@ -43,12 +43,13 @@ class StartupConfigTests(unittest.TestCase):
         self.assertIn('current startup', log_path.read_text(encoding='utf-8'))
         self.assertEqual(console.getvalue(), '')
 
-    def test_launcher_writes_server_logs_and_warnings_to_file(self):
+    def test_launcher_shows_startup_and_keeps_runtime_logs_in_files(self):
         script = '''
 import logging
 import runpy
 import sys
 import warnings
+from pathlib import Path
 
 import uvicorn
 from config import configer
@@ -57,10 +58,24 @@ configer.log_save_path = sys.argv[1]
 
 def start_server(app, **options):
     uvicorn.Config(app, **options)
-    logging.getLogger('uvicorn.error').info('server startup')
+    from log_config import logger
+    from log_config.account_context import account_log_context
+    from user_data_config import UserDataPaths
+
+    server = logging.getLogger('uvicorn.error')
+    server.info('Started server process [%d]', 123)
+    server.info('Waiting for application startup.')
+    server.info('Application startup complete.')
+    server.info('Uvicorn running on %s://%s:%d (Press CTRL+C to quit)', 'http', '127.0.0.1', 8000)
+    server.error('runtime server error')
     logging.getLogger('uvicorn.access').info('%s - "%s %s HTTP/%s" %d',
                                              '127.0.0.1', 'GET', '/version', '1.1', 200)
     warnings.warn('dependency warning')
+    paths = UserDataPaths(Path(sys.argv[1]).parent / 'users')
+    with account_log_context(paths, 1):
+        logger.info('first account event')
+    with account_log_context(paths, 2):
+        logger.warning('second account event')
 
 uvicorn.run = start_server
 runpy.run_path('run_serve.py', run_name='__main__')
@@ -70,11 +85,19 @@ runpy.run_path('run_serve.py', run_name='__main__')
                                 cwd=ROOT, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
-        self.assertEqual(result.stderr, '')
         contents = log_path.read_text(encoding='utf-8')
-        self.assertIn('server startup', contents)
-        self.assertIn('GET /version HTTP/1.1', contents)
-        self.assertIn('dependency warning', contents)
+        for message in ('Started server process [123]', 'Waiting for application startup.',
+                        'Application startup complete.', 'Uvicorn running on http://127.0.0.1:8000'):
+            self.assertIn(message, result.stderr)
+            self.assertIn(message, contents)
+        for message in ('runtime server error', 'GET /version HTTP/1.1', 'dependency warning'):
+            self.assertIn(message, contents)
+            self.assertNotIn(message, result.stderr)
+        for user_id, message in ((1, 'first account event'), (2, 'second account event')):
+            account_log = self.root / 'users' / str(user_id) / 'logs' / 'app.log'
+            self.assertIn(message, account_log.read_text(encoding='utf-8'))
+            self.assertNotIn(message, contents)
+            self.assertNotIn(message, result.stderr)
 
     def test_bundled_tokenizer_counts_text_without_transformers(self):
         from utils import tokens_count
@@ -113,6 +136,7 @@ runpy.run_path('run_serve.py', run_name='__main__')
         with patch.dict(sys.modules, {'dotenv': dotenv, 'uvicorn': uvicorn}), \
                 patch('logging.basicConfig'), patch('logging.captureWarnings'), \
                 patch.object(logging.getLogger('uvicorn'), 'setLevel'), \
+                patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
                 patch.object(configer, 'listen_host', '127.0.0.1'), patch.object(configer, 'listen_port', 8123):
             launcher = runpy.run_path(str(ROOT / 'run_serve.py'))
             dotenv.load_dotenv.assert_not_called()
