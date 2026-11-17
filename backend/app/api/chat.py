@@ -27,6 +27,7 @@ async def chat(req: ChatRequest, request: Request):
             raise ChatNotStarted(422, f'消息最多可输入 {MAX_MESSAGE_LENGTH} 个字符')
         if not req.user_input.strip():
             raise ChatNotStarted(422, '请输入消息内容')
+        # 调度使用认证后的账号，消息体只提供聊天内容。
         result = await request.app.state.chat.send(request.state.user, req.user_input)
     except ChatNotStarted as error:
         raise HTTPException(

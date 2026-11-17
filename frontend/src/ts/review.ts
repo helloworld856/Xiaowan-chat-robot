@@ -26,6 +26,7 @@ export function initChatReview() {
 
     function render() {
         const entries: ReviewEntry[] = [];
+        // 把一条用户消息后的多条回复归为同一轮，跳过输入中占位。
         for (const row of chatBox.children) {
             const user = row.querySelector<HTMLElement>('.user_bubble');
             if (user) {
@@ -85,6 +86,7 @@ export function initChatReview() {
             empty.textContent = query ? '没有找到相关对话，试试其他关键词。' : '还没有对话，聊几句后再来看看吧。';
             fragment.appendChild(empty);
         }
+        // 重建列表时保留键盘焦点位置，避免气泡追加后焦点丢失。
         const focusedIndex = Array.from(list.children).indexOf(document.activeElement as Element);
         list.replaceChildren(fragment);
         if (focusedIndex >= 0) (list.children[focusedIndex] as HTMLElement | undefined)?.focus({preventScroll: true});

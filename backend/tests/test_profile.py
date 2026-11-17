@@ -93,6 +93,7 @@ class ProfileHTTPTests(unittest.TestCase):
         self.assertEqual(json.loads(self.profile.path_for(second_id).read_text(encoding='utf-8')), {'nickname': '晚风', 'avatar_id': 'bear'})
         self.assertEqual(json.loads(self.profile_path.read_text(encoding='utf-8')), {'nickname': '管理', 'avatar_id': 'fox'})
 
+    # 迁移遇到已有账号文件时应保留用户最新保存的资料。
     def test_migration_preserves_newer_profile(self):
         from app.accounts.profile import Profile
         legacy = Path(self.directory.name) / 'profile.json'

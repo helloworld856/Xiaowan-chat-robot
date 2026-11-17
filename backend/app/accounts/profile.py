@@ -60,6 +60,7 @@ class ProfileStore:
                 logger.warning('个人资料文件格式无效，暂时使用默认资料')
             return Profile(nickname=username)
 
+    # 旧资料只用于首次补齐，已有的个人资料优先。
     def import_legacy_profile(self, user_id: int, legacy_path: Path):
         path = self.path_for(user_id)
         with self.paths.lock(user_id):

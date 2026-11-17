@@ -30,6 +30,7 @@
 #profile-avatars { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 .avatar-choice { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; padding: 5px 2px; border: 1px solid transparent; border-radius: 8px; font-size: 11px; cursor: pointer; }
 .avatar-choice img { width: min(40px, 100%); height: auto; aspect-ratio: 1; border-radius: 50%; object-fit: cover; }
+/* 保留原生单选行为，使用外层头像卡片展示选中和焦点状态。 */
 .avatar-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .avatar-choice:has(input:checked) { border-color: #18181b; background: #fafafa; }
 .avatar-choice:focus-within { outline: 2px solid #71717a; outline-offset: 2px; }

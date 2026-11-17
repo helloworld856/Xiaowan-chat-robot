@@ -118,6 +118,7 @@ def _validate_new_password(password: str) -> None:
         raise InvalidPassword('密码包含无效字符') from None
 
 
+# 会话表只存令牌摘要，原令牌用于 Cookie。
 def _token_digest(token: str | None) -> str | None:
     if not token or not TOKEN_PATTERN.fullmatch(token):
         return None
@@ -179,6 +180,7 @@ class AuthService:
                 with self._session_lock:
                     now = self.clock()
                     self._prune_sessions(now)
+                    # 重新登录成功后撤销浏览器此前的会话，防止旧令牌继续使用。
                     if previous_digest is not None:
                         self._sessions.pop(previous_digest, None)
                     self._sessions[token_hash] = _Session(account.user, now + SESSION_TTL_SECONDS)
@@ -194,6 +196,7 @@ class AuthService:
         attempt = self._login_attempts.reserve(client)
         try:
             with self._account_lock(username_key):
+                # 等待账号锁期间会话可能已失效，拿到锁后再次核对。
                 if self.get_user(token) != user:
                     raise InvalidSession()
                 account = self.account_store.find(username_key)

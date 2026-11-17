@@ -10,6 +10,7 @@ from .nodes import start_node, end_node, analysis, generate
 
 
 def create_graph(memorier: MemoryManager):
+    # 节点共享本账号的记忆管理器，每轮使用调度器传入的代理。
     def bind_node(name, node):
         def run(state: AIChatState, config: RunnableConfig) -> AIChatState:
             start = perf_counter()

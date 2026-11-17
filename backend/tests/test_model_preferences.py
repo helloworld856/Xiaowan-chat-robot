@@ -19,6 +19,7 @@ class ModelSettingsTests(unittest.TestCase):
         first_agents = (object(), object(), object())
         next_agents = (object(), object(), object())
         active.publish(previous, first_agents)
+        # 模拟聊天在模型切换前已经拿到一组代理。
         in_flight = active.snapshot()
 
         active.publish(replacement, next_agents)

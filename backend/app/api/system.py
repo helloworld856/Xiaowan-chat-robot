@@ -14,6 +14,7 @@ async def version():
     }
 
 
+# 保留 Chrome DevTools 的探测地址，方便本地调试。
 @router.get("/.well-known/appspecific/com.chrome.devtools.json")
 async def chrome_devtools_probe():
     """

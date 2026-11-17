@@ -3,6 +3,7 @@
     width: 100%;
     height: 100%;
 }
+/* 显式覆盖 flex 布局，使登录与聊天区的 hidden 状态生效。 */
 #login-screen[hidden], #app-shell[hidden], .login-card[hidden] { display: none; }
 #login-screen {
     display: flex;

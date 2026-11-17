@@ -148,6 +148,7 @@
     line-height: 1.5;
 }
 
+/* 失败标记附在原消息上，方便用户找到可重试的内容。 */
 .chat-send-failed {
     display: grid;
     place-items: center;

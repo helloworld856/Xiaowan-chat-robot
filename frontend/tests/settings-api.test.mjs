@@ -51,6 +51,7 @@ test('private 401 requests return to login; wrong login passwords do not fire a 
     assert.deepEqual(events, []);
 });
 
+// 模拟 fetch 在退出后才完成，验证会话代数校验仍会丢弃响应。
 test('responses arriving after logout cannot be used by the previous authenticated page', async t => {
     assert.equal(typeof api.invalidateRequests, 'function', 'request invalidation is missing');
     let resolve;

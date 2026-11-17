@@ -25,6 +25,7 @@ def main():
     console.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
     console.addFilter(lambda record: record.getMessage().startswith(STARTUP_MESSAGES))
     logging.getLogger('uvicorn.error').addHandler(console)
+    # 先加载后端环境，再让 Uvicorn 导入应用。
     load_dotenv(Path(__file__).resolve().with_name('.env'))
     uvicorn.run('app.main:app', host=configer.listen_host, port=configer.listen_port, workers=1, log_config=None)
 

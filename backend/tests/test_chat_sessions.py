@@ -42,6 +42,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                 self.release.set()
                 await first
 
+    # 测试调用方取消后，实际处理线程仍保有账号执行权。
     async def test_cancellation_keeps_account_busy_until_worker_finishes(self):
         from app.chat.scheduler import ChatNotStarted
         entered = threading.Event()

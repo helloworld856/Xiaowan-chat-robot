@@ -49,6 +49,7 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, base_url: 
     try:
         logger.info('初始化模型代理')
         merchant = model_merchant.lower().strip()
+        # 分析和摘要使用较低温度，角色回复留更多表达空间。
         agent_options = (
             (ANALYSIS_PERSONA, 0.1),
             (TEXT_COMPRESS_PERSONA, 0.1),

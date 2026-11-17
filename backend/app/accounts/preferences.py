@@ -14,6 +14,7 @@ class Preferences(BaseModel):
     send_shortcut: Literal['enter', 'ctrl_enter'] = 'enter'
 
 
+# 旧版 MySQL 表用于迁移与回退，当前偏好以账号文件为准。
 class UserPreferencesStore:
     def __init__(self, pool):
         self._pool = pool
@@ -59,6 +60,7 @@ class FilePreferencesStore:
                 return
         # Registration holds a database connection while creating files. Never query
         # the old preferences table while holding a file lock.
+        # 旧库读取完成后重新检查文件，优先保留等待期间发生的保存。
         initial = defaults or self.legacy.find(user_id) or Preferences()
         with self.paths.lock(user_id):
             if not protect_file(path):

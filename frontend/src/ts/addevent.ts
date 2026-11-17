@@ -32,6 +32,7 @@ function bindChatEvents() {
     });
 
     chatBox.addEventListener('scroll', () => {
+        // 离底部较远时才显示返回按钮，避免轻微滚动时闪烁。
         const isAtBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 120;
         comeToBottom.style.display = isAtBottom ? 'none' : 'block';
     });
@@ -50,6 +51,7 @@ function bindSidebarEvents() {
         const isClosed = window.getComputedStyle(sidebar).display === 'none';
         sidebarBtn.classList.toggle('active', isClosed);
         sidebarBtn.setAttribute('aria-expanded', String(isClosed));
+        // 侧栏收起时同时移出键盘交互范围。
         sidebar.inert = !isClosed;
     });
 }

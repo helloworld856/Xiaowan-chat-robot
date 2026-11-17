@@ -66,6 +66,7 @@ class SettingsStore:
                     data['preferences'].pop(key, None)
             return AppSettings.model_validate(data)
 
+    # 现版只保存管理员模型，旧偏好字段保留读取兼容。
     def _save(self, settings: AppSettings):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(self.path, settings.model_dump(include={'model'}))

@@ -6,6 +6,7 @@ from app.accounts.profile import AVATARS, DEFAULT_AVATAR_ID, MAX_NICKNAME_LENGTH
 router = APIRouter(tags=['profile'])
 
 
+# 资料文件可以用默认字段初始化，用户保存时必须明确提交两项。
 class ProfileRequest(Profile):
     nickname: str = Field(min_length=1, max_length=MAX_NICKNAME_LENGTH)
     avatar_id: AvatarId = Field(...)

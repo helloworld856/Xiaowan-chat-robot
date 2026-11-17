@@ -19,6 +19,7 @@ def get_last_message(response: dict):
 
 def get_total_tokens(message) -> int:
     metadata = getattr(message, 'response_metadata', None)
+    # 兼容旧适配器的 Token 字段，并优先采用统一的用量元数据。
     legacy_usage = metadata.get('token_usage') if isinstance(metadata, dict) else None
     for usage in (getattr(message, 'usage_metadata', None), legacy_usage):
         if isinstance(usage, dict):
@@ -181,6 +182,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         last_message = get_last_message(response)
         text = model_text(last_message.content)
         ai_response = parse_model_json(text, ('reply',))
+        # 纯文本可直接显示，疑似损坏的结构化输出用默认回复兜底。
         if ai_response is None:
             structured_field = re.search(r'''[{,]\s*["'“]?(?:reply|emotion|action|inner monologue)["'”]?\s*[:：]''', text)
             if text and not text.startswith(('{', '[', '```')) and not structured_field:

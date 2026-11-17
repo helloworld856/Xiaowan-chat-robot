@@ -39,6 +39,7 @@ class ConnectionPool:
                     connection = self._idle.pop()
             if connection is not None:
                 try:
+                    # 复用前检查连接，断开的连接直接淘汰，避免偷偷换掉连接状态。
                     connection.ping(reconnect=False)
                 except BaseException as error:
                     failed, connection = connection, None
@@ -55,6 +56,7 @@ class ConnectionPool:
             try:
                 if connection is not None:
                     try:
+                        # 归还前清掉调用方留下的事务，避免下一次借用读到旧状态。
                         connection.rollback()
                     except (OSError, pymysql.MySQLError):
                         self._close_connection(connection)

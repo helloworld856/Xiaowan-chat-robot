@@ -43,6 +43,7 @@ class AuthenticationMiddleware:
         public_auth = (method, path) in {
             ('POST', '/auth/login'), ('POST', '/auth/logout'), ('POST', '/auth/register'), ('GET', '/auth/session'),
         }
+        # Cookie 决定身份，账号头仅检测旧页面是否还绑定着同一个账号。
         user = self.service.get_user(request.cookies.get(COOKIE_NAME))
         requires_user = not public_static and not public_auth
         expected_user = request.headers.get('x-xiaowan-user')
@@ -66,6 +67,7 @@ class AuthenticationMiddleware:
                     logger.info('请求 %s %s 返回 %d', method, route, message['status'])
             await send(message)
 
+        # 认证完成后绑定账号日志上下文，其余请求使用系统日志上下文。
         with account_log_context(self.user_data_paths, tracked_user.id if tracked_user else None):
             try:
                 await self.app(scope, receive, send_private)

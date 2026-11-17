@@ -89,6 +89,7 @@ class UserDirectoryTests(unittest.TestCase):
     def test_legacy_lookup_does_not_block_or_overwrite_a_concurrent_save(self):
         updated = Preferences(send_shortcut='ctrl_enter')
         with ThreadPoolExecutor(max_workers=1) as worker:
+            # 用另一个线程在旧库读取期间保存新偏好，验证锁顺序。
             def legacy_lookup(user_id):
                 worker.submit(self.store.preferences.update, user_id, updated).result(timeout=2)
                 return Preferences()

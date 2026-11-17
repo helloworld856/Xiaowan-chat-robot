@@ -54,6 +54,7 @@ function loadSavedTheme() {
 
 async function init(generation: number){
     const warnings: string[] = [];
+    // 先加载个人资料，保证随后加载的人设和历史使用当前账号的头像。
     const steps = [
         {name: '个人资料', load: loadProfile},
         {name: '角色信息', load: loadPersona},
@@ -95,6 +96,7 @@ async function initializeChat() {
     }
 }
 
+// 退出时清除上个账号的草稿、历史、回顾和资料展示。
 function clearChat() {
     resetPopup(windowAlertContainer);
     windowAlertP.textContent = '';

@@ -14,6 +14,7 @@ def get_persona(request: Request):
     # 用户头像
     user = request.state.user
     profile = request.app.state.profile.get(user.id, user.username)
+    # 角色资料共用，用户头像则从当前账号的资料中读取。
     user_avatar_url = urllib.parse.urljoin(base_url, profile.avatar_url)
 
     return {

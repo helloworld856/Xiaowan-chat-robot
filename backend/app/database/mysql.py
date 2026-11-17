@@ -22,6 +22,7 @@ def open_pool(database='XiaoWan', *, create_if_missing=True, **overrides):
         'write_timeout': 15,
         **overrides,
     }
+    # 连接池按需建连接，只有允许初始化时才补建缺失的数据库。
     def connect():
         try:
             return pymysql.connect(database=database, **options)
@@ -102,6 +103,7 @@ def initialize_schema(pool):
         connection.commit()
 
 
+# 启动时同时清空原文与摘要，账号表和个人配置保留。
 def reset_chat_history(pool):
     with pool.connection() as connection, connection.cursor() as cursor:
         cursor.execute('DELETE FROM history_messages')

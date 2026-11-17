@@ -36,6 +36,7 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(output, {'reply': ['fallback']})
 
     @staticmethod
+    # 用可控的模型回复进入真实生成节点，检查解析与降级。
     def generate(content):
         from app.chat.state import create_initial_state
 

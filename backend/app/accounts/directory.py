@@ -25,6 +25,7 @@ class UserDirectoryStore:
         for _, _, ensure in self._entries(user, preferences):
             ensure()
 
+    # 预检只读，文件格式或权限异常交给迁移报告处理。
     def inspect_missing(self, user: User) -> set[Path]:
         missing = set()
         for path, check, _ in self._entries(user):
@@ -34,6 +35,7 @@ class UserDirectoryStore:
                 missing.add(path)
         return missing
 
+    # 把检查和创建动作放在同一份清单里，让迁移与注册使用相同规则。
     def _entries(self, user: User, preferences: Preferences | None = None):
         user_id = user.id
         yield (self.paths.log_directory(user_id), require_directory,

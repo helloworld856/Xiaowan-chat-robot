@@ -235,6 +235,7 @@ class AuthHTTPTests(unittest.TestCase):
                     self.assertEqual(set(error), {'type', 'loc', 'msg'})
                 self.assertFalse(sample.encode() in body)
 
+    # 旧标签页仍带原账号头，但浏览器已共享新账号的 Cookie。
     def test_stale_tab_cannot_mutate_new_cookie_account_or_log_it_out(self):
         _, admin_cookie = self.login()
         second = self.service.register('OtherUser', 'Reg!12', 'other-client')

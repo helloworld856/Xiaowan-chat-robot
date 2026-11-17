@@ -33,5 +33,6 @@ def count_tokens(text: str) -> int:
     Returns:
         token数量
     """
+    # 只统计文本本身，用于估算历史压缩阈值。
     tokenizer = _get_tokenizer()
     return len(tokenizer.encode(text, add_special_tokens=False).ids)

@@ -74,6 +74,7 @@ class MemoryManager:
             logger.warning('history write failed: %s', type(error).__name__)
             return False
 
+        # 只把提交成功的轮次放进记忆，模型不会参考已知保存失败的消息。
         self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
         return True
 
@@ -81,6 +82,7 @@ class MemoryManager:
         from app.llm.persona import persona
         from app.llm.output_parser import model_text
 
+        # 摘要压缩最早的一半对话，最近的轮次保持原文。
         count = len(self.history_cache) // 2
         if count == 0:
             return
@@ -101,6 +103,7 @@ class MemoryManager:
                         'ON DUPLICATE KEY UPDATE abstract = %s',
                         (self.user_id, summary, summary),
                     )
+                    # 摘要写入与旧原文删除同事务提交，受影响范围始终绑定当前账号。
                     removed = cursor.execute(
                         'DELETE FROM history_messages WHERE user_id = %s AND conversation_round <= %s',
                         (self.user_id, older[-1]['conversation_round']),

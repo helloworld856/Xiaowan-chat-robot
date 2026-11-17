@@ -20,6 +20,7 @@ account_log = ContextVar[tuple[UserDataPaths, int] | None]('account_log', defaul
 
 @contextmanager
 def account_log_context(paths: UserDataPaths | None, user_id: int | None):
+    # 把账号绑定到当前请求，退出时恢复原上下文，避免后续请求串用。
     token = account_log.set((paths, user_id) if paths is not None and user_id is not None else None)
     try:
         yield
@@ -82,12 +83,14 @@ class AccountFileHandler(logging.Handler):
                     _, oldest = self._personal.popitem(last=False)
                     self._close_personal(oldest)
                 self._personal[key] = handler
+            # 最近用过的句柄留在队尾，超出上限时关闭最久未用的句柄。
             self._personal.move_to_end(key)
             handler.handle(record)
         except (OSError, ValueError) as error:
             failed = self._personal.pop(key, None)
             if failed is not None:
                 self._close_personal(failed)
+            # 只向系统日志报告账号与异常类型，避免把原日志正文写过去。
             fallback = logging.LogRecord(record.name, logging.WARNING, __file__, 0,
                                          '账号 %d 的运行日志写入失败（%s）', (user_id, type(error).__name__), None)
             fallback.account_label = ''

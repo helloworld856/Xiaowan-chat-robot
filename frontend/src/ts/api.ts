@@ -13,6 +13,7 @@ export class ChatNotStartedError extends Error {
 }
 export function getRequestGeneration() { return requestGeneration; }
 export function canManageModel() { return currentUser?.role === 'admin'; }
+// 账号切换时取消旧请求，并用请求代数拦住迟到的响应。
 export function invalidateRequests(user?: AuthUser) {
     requestGeneration++;
     sessionRequests.abort();
@@ -33,6 +34,7 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
                 ? AbortSignal.any([options.signal, sessionRequests.signal]) : sessionRequests.signal} : {}),
             headers: {
                 'Content-Type': 'application/json',
+                // 账号头用于发现旧标签页，真正的登录身份由 Cookie 决定。
                 ...(user ? {'X-Xiaowan-User': String(user.id)} : {}),
                 ...options.headers
             }
@@ -47,6 +49,7 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
         if (sessionBound) window.dispatchEvent(new Event('auth-required'));
         throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
     }
+    // 后端明确表示未开始处理时，才给原消息加上失败标记。
     if (path === '/chat' && (response.status === 403 || response.status === 422 || response.status === 429 || response.status === 503) &&
         body?.detail?.code === 'CHAT_NOT_STARTED') {
         const retryable = response.status !== 422;

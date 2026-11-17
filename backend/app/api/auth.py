@@ -136,6 +136,7 @@ def change_password(credentials: PasswordRequest, request: Request):
     except LoginThrottled as error:
         return _throttled(error)
     except PasswordCommitUnknown:
+        # 提交结果未知时清除 Cookie，让用户重新登录确认当前密码。
         return _clear_session_cookie(JSONResponse({'detail': '无法确认密码是否已更改，请重新登录'}, status_code=401), request)
     except PasswordSaveFailed:
         return JSONResponse({'detail': '保存密码失败，原有密码仍有效'}, status_code=500)

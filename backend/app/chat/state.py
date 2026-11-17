@@ -26,6 +26,7 @@ class AIChatState(TypedDict):
     start_time: float
 
 
+# 每次创建独立的列表和字典，避免不同账号共享状态。
 def create_initial_state(next_round: int = 0) -> AIChatState:
     return {
         'user_input': '',

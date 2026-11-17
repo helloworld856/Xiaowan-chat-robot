@@ -1,8 +1,6 @@
 import type { PersonaInfo } from './global_config.ts';
 
-//使用as就是非空1断言，使用querySelector<HTMLButtonElement>(".sendbtn")依然有可能返回null，后面加上！就变成非空断言
-
-//所有DOM操作
+// 这些节点由入口 HTML 提供，脚本启动时即可访问。
 export const chatBox = document.getElementById("chatBox") as HTMLDivElement;//聊天记录框
 export const sendBtn = document.querySelector<HTMLButtonElement>(".sendbtn")!;//发送按钮
 export const inputBox = document.getElementById("userInput") as HTMLTextAreaElement;//文本输入框
@@ -63,6 +61,7 @@ export function resetPopup(element: HTMLDialogElement) {
     element.inert = false;
 }
 
+// 退出动画期间阻止交互，播放完再关闭原生对话框。
 export async function closePopup(element: HTMLDialogElement): Promise<void> {
     if (!element.open || element.classList.contains('closing')) return;
     element.classList.add('closing');
@@ -127,36 +126,6 @@ export function updateUi(persona: PersonaInfo){
     window.BOT_AVATAR= persona.BOT_AVATAR;
 
     //用户头像
+    // 个人资料优先，人设接口的头像仅用于兜底。
     window.USER_AVATAR ||= persona.USER_AVATAR;
 }
-
-
-/*
- scrollTop = 150px（被卷上去的部分）
-        ↓
-┌─────────────────────────────────────────┐
-│ ╭─────╮   这150px的内容在窗户上面         │
-│ │消息1│   你看不到了                     │
-│ ╰─────╯                                 │
-│ ╭─────╮                                 │
-│ │消息2│                                 │
-│ ╰─────╯                                 │
-├─────────────────────────────────────────┤ ← 窗户顶部
-│ ╭─────╮                                 │
-│ │消息3│                                 │
-│ ╰─────╯     clientHeight = 300px        │
-│ ╭─────╮     （窗户高度）                 │
-│ │消息4│                                 │
-│ ╰─────╯                                 │
-│ ╭─────╮                                 │
-│ │消息5│                                 │
-│ ╰─────╯                                 │
-├─────────────────────────────────────────┤ ← 窗户底部
-│ ╭─────╮                                 │
-│ │消息6│   这200px的内容在窗户下面         │
-│ ╰─────╯   你也看不到了                   │
-│                                         │
-└─────────────────────────────────────────┘
-
-scrollHeight = 150 + 300 + 200 = 650px（总高度）
-*/

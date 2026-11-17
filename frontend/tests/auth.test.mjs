@@ -141,6 +141,7 @@ test('registration returns to login and never opens the authenticated page', asy
     assert.equal(element('register-password').value, '');
 });
 
+// 用两个标签页模拟会话变化与页面启动响应的先后顺序。
 test('an auth change in another tab clears private state and rejects a stale startup response', async () => {
     const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;

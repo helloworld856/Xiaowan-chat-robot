@@ -28,6 +28,7 @@ function showDeliveryFailure(row: HTMLDivElement, text: string, error: ChatNotSt
     showAlert(error.message);
 }
 
+// 超时不代表服务端未保存，先刷新历史供用户核对。
 async function checkUncertainDelivery(row: HTMLDivElement, text: string, isCurrent: () => boolean) {
     row.remove();
     let message = '已刷新聊天记录，此消息的发送结果仍需确认。请核对后再发送。';
@@ -74,6 +75,7 @@ async function submitMessage(text: string, row: HTMLDivElement) {
         }
         if (!isCurrent()) return;
         hideTypingIndicator();
+        // 只为已保存的轮次标记编号，刷新历史时用它去重。
         if (data.saved && data.conversation_round !== null) row.dataset.conversationRound = String(data.conversation_round);
         await addAssistantMessage(data.response, isCurrent, () => {
             const metric = 'xiaowan.chat.first-reply';
@@ -93,6 +95,7 @@ export async function sendMessage() {
     if (sendBtn.disabled) return;
     const text = inputBox.value.trim();
     if (!text) return;
+    // 先用字符串长度快速检查，超限时再按字符计数，与后端一致。
     if (text.length > maxMessageLength && [...text].length > maxMessageLength) {
         showAlert(`聊天消息最多 ${maxMessageLength} 个字符`);
         return;

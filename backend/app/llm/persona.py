@@ -24,6 +24,7 @@ class Persona:
             self.FRIEND_PERSONA = extra + data['core_persona']
             logger.info('人格初始化成功')
 
+        # 配置缺失或格式错误时使用默认人设，让聊天入口仍可启动。
         except (OSError, ValueError):
             self.BOT_AVATAR = "xiaowan.png"
             self.BOT_NAME: str = "无名氏"

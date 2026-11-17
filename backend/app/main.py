@@ -17,4 +17,5 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 app = build_application(open_pool(), ProfileStore(), BACKEND_ROOT / 'auth_config')
+# 静态站点挂在最后，已注册的 API 优先匹配。
 app.mount('/', NoCacheStaticFiles(directory=PROJECT_ROOT / 'frontend' / 'dist', html=True), name='static')

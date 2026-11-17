@@ -23,6 +23,7 @@ router = APIRouter()
 @router.post("/history", response_model=HistoryResponse)
 def history(req: HistoryRequest, request: Request):
     try:
+        # 账号 ID 来自中间件，请求体只控制历史记录的读取范围。
         history_messages = load_history(
             request.app.state.db.connection, request.state.user.id, req.num or 0, req.front,
         )

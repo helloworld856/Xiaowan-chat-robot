@@ -37,6 +37,7 @@ class SettingsTests(unittest.TestCase):
     def test_failed_write_keeps_previous_config(self):
         from app.llm.admin_settings import ModelSettings
         self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'))
+        # 故意让替换失败，核对旧配置字节完整且没有临时文件。
         original = self.path.read_bytes()
         with patch('app.json_files.os.replace', side_effect=OSError('write failed')):
             with self.assertRaises(OSError):

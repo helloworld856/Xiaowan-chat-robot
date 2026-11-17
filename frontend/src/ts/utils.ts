@@ -53,6 +53,7 @@ export function addUserMessage(text: string){
 export async function addAssistantMessage(messages: string[], isCurrent: () => boolean = () => true,
                                           onFirstReply?: () => void){
     const baseSendInterval = 1000;
+    // 只在用户原本贴近底部时跟随回复，避免打断查看旧消息。
     const shouldScrollToBottom = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 2;
 
     for (const [index, text] of messages.entries()) {
@@ -75,6 +76,7 @@ export async function addAssistantMessage(messages: string[], isCurrent: () => b
 
 //显示历史聊天记录
 export function showChatHistory(chatHistory: ConversationItem[]){
+    // 按已保存轮次补入缺少的历史，保留页面上还未入库的消息。
     const displayedRows = Array.from(chatBox.querySelectorAll<HTMLElement>('.user_message[data-conversation-round]'));
     const displayed = new Set(displayedRows.map(row => row.dataset.conversationRound));
     let nextDisplayed = 0;

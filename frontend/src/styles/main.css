@@ -255,6 +255,7 @@ body {
     
 }
 
+/* 消息历史在容器内滚动，顶部和输入区保持可用。 */
 #chatBox {
     height: 100%;
     padding: 1.2rem;

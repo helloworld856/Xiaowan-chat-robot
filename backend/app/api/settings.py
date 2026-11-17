@@ -18,6 +18,7 @@ def settings_for(request: Request, preferences: Preferences) -> UserSettings:
             personal = request.app.state.personal_models.get(user.id)
         except (OSError, ValueError):
             personal = None
+        # 个人模型只返回公开字段，API Key 留在服务端。
         return UserSettings(model=personal.public_model() if personal else None,
                             preferences=preferences, model_ready=personal is not None)
     model, ready = request.app.state.model_configuration.admin_status()

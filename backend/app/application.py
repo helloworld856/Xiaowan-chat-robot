@@ -23,6 +23,7 @@ from app.llm.admin_settings import settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 
 
+# 装配通用认证与资料接口，测试可以注入不依赖真实 MySQL 的存储。
 def create_app(version: str, auth_service: AuthService | None = None,
                profile_store: ProfileStore | None = None, lifespan=None,
                *, user_data_paths: UserDataPaths | None = None) -> FastAPI:
@@ -68,6 +69,7 @@ def build_application(db, profile_store, legacy_root):
             directories.ensure(admin)
         except (OSError, ValueError):
             logger.warning('无法初始化管理员的个人目录，请检查文件权限与格式')
+        # 历史原文与摘要只保留本次运行期间的数据。
         reset_chat_history(db)
         model_configuration.activate_saved_model(saved.model if saved else None)
 
@@ -78,6 +80,7 @@ def build_application(db, profile_store, legacy_root):
             yield
         finally:
             try:
+                # 先等已接收的聊天落库，再关闭它们依赖的数据库和日志。
                 await application.state.chat.drain()
             finally:
                 try:

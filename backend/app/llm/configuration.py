@@ -39,6 +39,7 @@ class AdminModelRuntime:
         self.lock = RLock()
         self._active: tuple[ModelSettings, AgentSet] | None = None
 
+    # 整组配置与代理一起读取，聊天开始后持有这一轮使用的代理。
     def snapshot(self) -> tuple[ModelSettings, AgentSet] | None:
         with self.lock:
             return self._active
@@ -62,6 +63,7 @@ def _validate_connection(client) -> None:
     except Exception:
         _validation_slots.release()
         raise
+    # 请求超时也要等探测线程退出，再归还验证名额。
     future.add_done_callback(lambda _: _validation_slots.release())
     try:
         future.result(timeout=VALIDATION_TIMEOUT_SECONDS)
@@ -109,6 +111,7 @@ class ModelConfigurationService:
             return
         try:
             agents = factory.create_agents(model.model_merchant, key, model.model_name, model.base_url)
+            # 启动时从已保存配置装配代理，连接探测留给显式测试或保存。
             self.admin_runtime.publish(model, agents)
         except Exception:
             logger.warning('启动时载入已保存的模型失败，请管理员检查配置')
@@ -145,6 +148,7 @@ class ModelConfigurationService:
                 return ModelConfigResponse(status=False, info='当前正在回复，请稍后重试切换模型')
             try:
                 try:
+                    # 先保存文件，再发布新代理，失败时旧模型仍可继续处理聊天。
                     self.settings.update_model(model)
                 except (OSError, ValueError) as error:
                     logger.warning('管理员模型保存失败: %s', type(error).__name__)

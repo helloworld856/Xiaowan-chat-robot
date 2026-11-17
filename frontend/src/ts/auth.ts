@@ -50,6 +50,7 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
         document.title = show ? '注册 · 小晚' : '登录 · 小晚';
     }
 
+    // 先停止当前账号的请求，再清空页面上的私有内容。
     function signedOut(message = '') {
         if (logoutDialog.open) logoutDialog.close();
         activeUser = undefined;
@@ -144,6 +145,7 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
         // 登录页没有私有状态，后台标签的变更不清空正在填写的表单。
         if (!app.hidden || screen.hidden) signedOut(authChangeMessage);
     });
+    // 页面进入前进后退缓存时先藏起聊天，恢复后验证 Cookie 再显示。
     window.addEventListener('pagehide', event => {
         if (event.persisted && activeUser) app.hidden = true;
     });

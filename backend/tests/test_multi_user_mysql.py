@@ -20,6 +20,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
 
         from app.database.mysql import open_pool
 
+        # 每个用例创建独立测试库，结束时由测试清理。
         database = f'xiaowan_test_{uuid4().hex}'
         db_options = {'host': '127.0.0.1', 'port': int(os.environ['XIAOWAN_TEST_MYSQL_PORT']),
                       'user': 'root', 'password': os.getenv('XIAOWAN_TEST_MYSQL_PASSWORD', '')}

@@ -57,6 +57,7 @@ def migrate_accounts(accounts: SQLAccountStore, directories: UserDirectoryStore,
                     directories.profiles.read_file(legacy_profile)
                 except FileNotFoundError:
                     import_profile = False
+            # 预检只完成读取和校验，确认结果后才进入写入流程。
             if not apply:
                 continue
             if import_profile:

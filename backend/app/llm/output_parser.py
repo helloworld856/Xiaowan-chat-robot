@@ -23,6 +23,7 @@ def model_text(content: object) -> str:
         text = ''.join(parts)
     else:
         return ''
+    # 只保留可见正文，起始处未闭合的推理块也会去除。
     return re.sub(r'^\s*(?:<think>.*?(?:</think>|$)\s*)+', '', text, flags=re.IGNORECASE | re.DOTALL).strip()
 
 

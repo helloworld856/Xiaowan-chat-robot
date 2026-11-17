@@ -106,6 +106,7 @@ class SQLAccountStore:
                 cursor.execute('INSERT INTO users (username, username_key, password_hash, role) VALUES (%s, %s, %s, %s)',
                                (username, username.lower(), password_hash, role))
                 user = User(cursor.lastrowid, username, role)
+                # 账号提交前先准备个人目录，初始化失败时数据库连接池会回滚本次插入。
                 if role == 'user' and self.prepare_user is not None:
                     self.prepare_user(user)
                 db.commit()
@@ -121,6 +122,7 @@ class SQLAccountStore:
         return self._insert(username, password_hash, 'user')
 
     def save_password(self, account: Account, password_hash: str) -> None:
+        # 区分提交前失败与提交结果未知，认证层据此决定是否撤销会话。
         commit_attempted = False
         try:
             with self.pool.connection() as db, db.cursor() as cursor:

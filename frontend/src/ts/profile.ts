@@ -9,6 +9,7 @@ const dialog = () => element('profile-dialog') as HTMLDialogElement;
 
 export function applyProfile(profile: ProfileInfo) {
     current = profile;
+    // 更新头像时也同步已有气泡，页面无需重新加载历史。
     window.USER_AVATAR = profile.avatar_url;
     window.USER_NAME = profile.nickname;
     element('current-username').textContent = profile.nickname;
@@ -52,6 +53,7 @@ export function initProfile() {
     const passwordSave = element('profile-password-save') as HTMLButtonElement;
     let selected: AvatarId = 'cat';
     let busy = false;
+    // 资料成功加载后才能保存，避免读取失败时用空表单覆盖旧资料。
     let ready = false;
 
     function message(id: string, text = '', error = false) {

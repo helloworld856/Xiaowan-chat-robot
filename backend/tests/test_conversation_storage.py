@@ -94,6 +94,7 @@ class MemoryIsolationTests(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.pool = SQLitePool(Path(folder.name) / 'storage.sqlite')
 
+    # 用相同轮次验证 SQL 隔离依赖账号 ID，而非轮次全局唯一。
     def test_two_accounts_can_save_same_round_and_restore_only_owned_history(self):
         account_a = MemoryManager(1, self.pool.connection)
         self.assertTrue(account_a.record_message(message(0, 'A')))

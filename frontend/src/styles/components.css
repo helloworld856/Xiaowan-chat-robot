@@ -409,6 +409,7 @@
     color: var(--menu-text);
 }
 
+/* 管理员地址与普通账号密钥字段由同一份表单按角色显示。 */
 [data-model-admin][hidden], [data-model-personal][hidden] { display: none; }
 
 .modify-btn {    

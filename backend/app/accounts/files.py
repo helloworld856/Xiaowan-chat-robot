@@ -18,6 +18,7 @@ def require_directory(path: Path) -> None:
         raise OSError(f'账号数据路径不是目录: {path.name}')
 
 
+# 使用 lstat 检查路径自身，拒绝符号链接或非普通文件。
 def require_file(path: Path) -> None:
     require_directory(path.parent)
     if not stat.S_ISREG(path.lstat().st_mode):
@@ -58,6 +59,7 @@ def replace_json(path: Path, value) -> None:
 class UserDataPaths:
     def __init__(self, root: Path | None = None):
         self.root = root if root is not None else BACKEND_ROOT / 'user_data'
+        # 用固定数量的可重入锁串行化同账号写入，存储方法可在锁内调用彼此。
         self._locks = tuple(RLock() for _ in range(64))
 
     def directory(self, user_id: int) -> Path:

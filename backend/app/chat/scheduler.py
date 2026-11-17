@@ -80,6 +80,7 @@ class ChatSessions:
         account_acquired = False
         slot_acquired = False
 
+        # 先拿账号锁，再占全局执行位，避免同账号的等待任务占住执行容量。
         async def acquire():
             nonlocal account_acquired, slot_acquired
             await entry.lock.acquire()
@@ -144,6 +145,7 @@ class ChatSessions:
     async def _execute(self, entry: AccountChat, user: User, text: str):
         try:
             loop = asyncio.get_running_loop()
+            # 模型调用在线程池执行，复制上下文让线程日志仍归属当前账号。
             return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
         finally:
             entry.worker = None
@@ -188,6 +190,7 @@ class ChatSessions:
         if entry.runtime is None:
             entry.runtime = self._initialize(user.id)
         runtime = entry.runtime
+        # 每轮操作自己的状态副本，工作流抛错时保留上一次状态。
         state = deepcopy(runtime.state)
         state['user_input'] = text
         result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})

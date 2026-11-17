@@ -27,6 +27,7 @@ function renderPreferences() {
 function applySettings(saved: SavedSettings, requestedModelRevision: number) {
     Object.assign(preferences, saved.preferences);
     renderPreferences();
+    // 迟到的读取可更新偏好，但不能覆盖用户刚切换的模型。
     if (requestedModelRevision === modelRevision) {
         modelConfig.model = saved.model ? {...saved.model} : {model_merchant: '', model_name: '', base_url: ''};
         modelConfig.model_valid = saved.model_ready;
@@ -160,6 +161,7 @@ export function initSettings() {
             const result = await modelAPI(model, testOnly, key);
             if (generation !== getRequestGeneration()) return;
             modelStatus.textContent = result.info || (result.status ? '操作成功' : '连接失败');
+            // 探测通过只显示提示，保存成功才更新当前启用的模型。
             if (result.status && !testOnly) {
                 modelRevision++;
                 modelConfig.model = model;

@@ -24,6 +24,7 @@ test('applying a saved profile updates the menu and all existing user avatars', 
     assert.deepEqual(avatars.map(avatar => avatar.title), ['小林', '小林']);
 });
 
+// 保存前需要真实资料，网络错误与取消都不能让空表单提交。
 test('a failed profile read cannot save an uninitialized or cancelled draft', async () => {
     const source = fs.readFileSync(new URL('../src/ts/profile.ts', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;

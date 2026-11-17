@@ -7,6 +7,7 @@ import {runInNewContext} from 'node:vm';
 const source = fs.readFileSync(new URL('../src/ts/chat.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
 
+// 用受控的接口和 DOM 记录验证发送流程，无需启动后端。
 function harness(chatAPI, historyAPI) {
     const rows = [];
     const confirmed = [];

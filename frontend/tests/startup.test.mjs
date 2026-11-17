@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import {runInNewContext} from 'node:vm';
 
+// 注入浏览器接口，直接执行入口模块的初始化逻辑。
 function runModule(file, globals) {
     const source = fs.readFileSync(new URL('../src/ts/' + file, import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {

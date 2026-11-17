@@ -68,6 +68,7 @@ test('message rendering recalculates delay for each reply and never waits after 
     assert.equal(rendered.length, 5);
 });
 
+// 在两条气泡的显示间隔内退出，验证剩余旧回复被丢弃。
 test('logout stops remaining delayed reply bubbles from the previous page', async () => {
     const source = fs.readFileSync(new URL('../src/ts/utils.ts', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;

@@ -25,6 +25,7 @@ class StartupConfigTests(unittest.TestCase):
         from app.account_logging import get_logger
         from app.config import configer
 
+        # 模拟刚检出的项目，系统日志目录尚不存在。
         log_path = self.root / 'log_config' / 'app.log'
         app_logger = logging.getLogger('xiaowan')
         with (patch.object(configer, 'log_save_path', log_path),

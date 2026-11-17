@@ -21,6 +21,7 @@ class ConnectionPoolTests(unittest.TestCase):
                 self.fail('connection checked out after pool closed')
         connection.close.assert_called_once()
 
+    # 连接池复用的是连接，事务边界仍由每次借用决定。
     def test_reuse_resets_transaction_and_never_shares_an_active_connection(self):
         from app.database.pool import ConnectionPool
 

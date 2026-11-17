@@ -25,6 +25,7 @@
             <div class="typing-shadow"></div>
         </div>
     </div>
+    <!-- 入口由会话探测结果决定，登录与注册复用这一页。 -->
     <section id="login-screen" aria-labelledby="login-title" hidden>
         <form id="login-form" class="login-card" method="post">
             <header class="login-heading">
@@ -258,6 +259,7 @@
                 <!-- 修改模型配置的弹窗 -->
                 <dialog id="model-edit-modal" class="modal" aria-labelledby="open-modify-btn">
                     <div class="modal-content">
+                        <!-- 脚本按账号角色启用对应字段，并分别处理探测和保存。 -->
                         <form id="model-config-form">
                             <div class="form-group">
                                 <label for="modelSelect">选择模型厂商:</label>

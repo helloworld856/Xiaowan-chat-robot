@@ -151,6 +151,7 @@ class AccountStoreTests(unittest.TestCase):
         restored = SQLAccountStore(self.pool)
         self.assertEqual(restored.register('member', 'test credential hash').username, 'member')
 
+    # 模拟数据库已经提交，但客户端没收到响应的情况。
     def test_registration_keeps_directory_when_commit_succeeded_without_ack(self):
         from app.accounts.profile import ProfileStore
         from app.accounts.preferences import UserPreferencesStore

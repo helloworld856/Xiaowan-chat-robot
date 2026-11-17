@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 
+# 认证和模型配置共用此路由类，校验错误只返回字段诊断。
 class CredentialRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()

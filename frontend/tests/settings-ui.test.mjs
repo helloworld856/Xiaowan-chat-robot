@@ -31,6 +31,7 @@ test('only the relevant model fields are visible and active for each role', () =
     }
 });
 
+// 改变异步返回顺序，验证先完成的模型切换不会被旧读取覆盖。
 test('a delayed settings response does not replace a model that the admin just switched to', async () => {
     const nodes = new Map();
     function element(id) {

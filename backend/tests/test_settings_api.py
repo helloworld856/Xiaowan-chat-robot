@@ -198,6 +198,7 @@ class SettingsAPITests(unittest.TestCase):
         from threading import Barrier, Event
 
         capacity = configuration.MODEL_VALIDATION_CAPACITY
+        # 让已有探测都占住名额，再发一个请求验证立即拒绝。
         doing_work = Barrier(capacity + 1)
         release = Event()
 

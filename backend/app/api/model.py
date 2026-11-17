@@ -34,6 +34,7 @@ def test_model(model: ModelConfigRequest, request: Request):
     return request.app.state.model_configuration.configure_admin(model, activate=False)
 
 
+# 个人模型的保存目标由会话账号决定，密钥只用于这次测试或保存。
 @router.post('/model/personal', response_model=ModelConfigResponse, dependencies=[Depends(require_personal_account)])
 def save_personal_model(model: PersonalModel, request: Request):
     return request.app.state.model_configuration.configure_personal(request.state.user.id, model, activate=True)

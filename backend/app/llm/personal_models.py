@@ -79,6 +79,7 @@ class PersonalModelStore:
         with self.paths.lock(user_id):
             self.paths.ensure_directory(user_id)
             self._write(path, model)
+            # 文件写入成功后再替换本账号的代理缓存。
             self._agents[user_id] = (model, agents)
 
     def agents_for(self, user_id: int):
@@ -89,6 +90,7 @@ class PersonalModelStore:
                 self._agents.pop(user_id, None)
                 return None
             cached = self._agents.get(user_id)
+            # 配置变更时重建代理，缓存命中时复用原代理。
             if cached is not None and cached[0] == model:
                 return cached[1]
             agents = model.create_agents()
