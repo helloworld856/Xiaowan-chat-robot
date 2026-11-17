@@ -9,14 +9,14 @@ from _imports import BACKEND_ROOT as _BACKEND_ROOT
 
 class SettingsTests(unittest.TestCase):
     def setUp(self):
-        from settings_config import SettingsStore
+        from app.llm.admin_settings import SettingsStore
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'settings.json'
         self.store = SettingsStore(self.path)
 
     def test_round_trip_persists_only_global_model(self):
-        from settings_config import ModelSettings, SettingsStore
+        from app.llm.admin_settings import ModelSettings, SettingsStore
         self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='MyModel-V2', base_url='https://example.com/v1/'))
         loaded = SettingsStore(self.path).get()
         self.assertEqual(loaded.model.model_name, 'MyModel-V2')
@@ -26,7 +26,8 @@ class SettingsTests(unittest.TestCase):
 
     def test_bad_input_is_rejected(self):
         from pydantic import ValidationError
-        from settings_config import ModelSettings, Preferences
+        from app.llm.admin_settings import ModelSettings
+        from app.accounts.preferences import Preferences
         for address in ['file:///secret', 'https://user:password@example.com/v1', 'https://example.com/?key=secret']:
             with self.subTest(address=address), self.assertRaises(ValidationError):
                 ModelSettings(model_merchant='deepseek', model_name='M', base_url=address)
@@ -34,7 +35,7 @@ class SettingsTests(unittest.TestCase):
             Preferences(send_shortcut='unknown')
 
     def test_failed_write_keeps_previous_config(self):
-        from settings_config import ModelSettings
+        from app.llm.admin_settings import ModelSettings
         self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'))
         original = self.path.read_bytes()
         with patch('app.json_files.os.replace', side_effect=OSError('write failed')):

@@ -25,8 +25,8 @@ def load_route(name, filename):
 
 class SettingsAPITests(unittest.TestCase):
     def setUp(self):
-        from personal_model_config import PersonalModelStore
-        from settings_config import SettingsStore
+        from app.llm.personal_models import PersonalModelStore
+        from app.llm.admin_settings import SettingsStore
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
         self.store = SettingsStore(Path(self.directory.name) / 'settings.json')
@@ -50,7 +50,7 @@ class SettingsAPITests(unittest.TestCase):
         with patch.dict(sys.modules, {
             'agent_config': self.agents,
             'agent_config.agent_factory': types.SimpleNamespace(create_model=create_model),
-            'log_config': types.SimpleNamespace(logger=types.SimpleNamespace(info=lambda _: None, warning=lambda _: None)),
+            'app.account_logging': types.SimpleNamespace(logger=types.SimpleNamespace(info=lambda _: None, warning=lambda _: None)),
         }):
             self.model = load_route('tested_model_router', 'model.py')
             self.settings = load_route('tested_settings_router', 'settings.py')
@@ -93,7 +93,7 @@ class SettingsAPITests(unittest.TestCase):
         self.assertIsNone(settings_b.model)
         self.assertEqual(settings_a.preferences.send_shortcut, 'ctrl_enter')
         self.assertEqual(settings_b.preferences.send_shortcut, 'enter')
-        from settings_config import SettingsStore
+        from app.llm.admin_settings import SettingsStore
         reloaded = SettingsStore(self.store.path).get()
         self.assertEqual(reloaded.model.model_name, 'MyModel-V2')
         self.assertEqual(reloaded.preferences.send_shortcut, 'enter')

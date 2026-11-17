@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
-from memory_config import load_history
-from log_config import logger
+from app.chat.memory import load_history
+from app.account_logging import logger
 
 from pydantic import BaseModel
 from typing import Dict, Optional, List

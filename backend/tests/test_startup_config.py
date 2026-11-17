@@ -32,7 +32,9 @@ class StartupConfigTests(unittest.TestCase):
         with (patch.object(configer, 'log_save_path', log_path), patch.object(app_logger, 'handlers', []),
               redirect_stderr(console)):
             try:
-                logger = runpy.run_path(str(ROOT / 'log_config' / 'log.py'))['logger']
+                from app.account_logging import get_logger
+
+                logger = get_logger()
                 logger.warning('current startup')
             finally:
                 for handler in app_logger.handlers:
@@ -57,9 +59,9 @@ configer.log_save_path = sys.argv[1]
 
 def start_server(app, **options):
     uvicorn.Config(app, **options)
-    from log_config import logger
-    from log_config.account_context import account_log_context
-    from user_data_config import UserDataPaths
+    from app.account_logging import logger
+    from app.account_logging import account_log_context
+    from app.accounts.files import UserDataPaths
 
     server = logging.getLogger('uvicorn.error')
     server.info('Started server process [%d]', 123)
@@ -99,14 +101,14 @@ runpy.run_path('run_serve.py', run_name='__main__')
             self.assertNotIn(message, result.stderr)
 
     def test_bundled_tokenizer_counts_text_without_transformers(self):
-        from utils import tokens_count
+        from app.llm import token_counter
 
         with (patch.dict(sys.modules, {'transformers': None}),
-              patch.object(tokens_count, '_TOKENIZER_CACHE', None)):
-            self.assertEqual(tokens_count.count_tokens(''), 0)
-            self.assertEqual(tokens_count.count_tokens('你好，小晚'), 5)
-            self.assertEqual(tokens_count.count_tokens('Hello, world!'), 4)
-            self.assertEqual(tokens_count.count_tokens('多条回复\n123 😀'), 11)
+              patch.object(token_counter, '_TOKENIZER_CACHE', None)):
+            self.assertEqual(token_counter.count_tokens(''), 0)
+            self.assertEqual(token_counter.count_tokens('你好，小晚'), 5)
+            self.assertEqual(token_counter.count_tokens('Hello, world!'), 4)
+            self.assertEqual(token_counter.count_tokens('多条回复\n123 😀'), 11)
 
     def test_persona_requires_string_fields_and_does_not_log_its_prompt(self):
         from app.config import configer
@@ -117,15 +119,15 @@ runpy.run_path('run_serve.py', run_name='__main__')
         folder = self.root / 'persona_config'
         folder.mkdir()
         path = folder / 'persona.json'
-        with patch.object(configer, 'root_dir_path', str(self.root)), patch.dict(sys.modules, {
-            'log_config': Mock(logger=mock_logger),
-        }):
-            persona = runpy.run_path(str(ROOT / 'persona_config' / 'init_persona.py'))['Persona']
+        from app.llm import persona
+
+        with (patch.object(configer, 'root_dir_path', str(self.root)),
+              patch.object(persona, 'logger', mock_logger)):
             path.write_text(json.dumps(source), encoding='utf-8')
-            self.assertIn(source['core_persona'], persona().FRIEND_PERSONA)
+            self.assertIn(source['core_persona'], persona.Persona().FRIEND_PERSONA)
             self.assertNotIn(source['core_persona'], str(mock_logger.mock_calls))
             path.write_text(json.dumps({**source, 'name': 42}), encoding='utf-8')
-            self.assertEqual(persona().BOT_NAME, '无名氏')
+            self.assertEqual(persona.Persona().BOT_NAME, '无名氏')
 
     def test_launcher_loads_only_the_backend_environment_and_only_when_started(self):
         from app.config import configer

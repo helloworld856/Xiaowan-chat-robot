@@ -5,7 +5,7 @@ import uvicorn
 from dotenv import load_dotenv
 
 from app.config import configer
-from log_config import logger
+from app.account_logging import logger
 
 
 STARTUP_MESSAGES = (

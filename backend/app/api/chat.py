@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from app.core.session import ChatNotStarted
-from log_config import logger
+from app.chat.scheduler import ChatNotStarted
+from app.account_logging import logger
 
 from pydantic import BaseModel
 from typing import List, Optional

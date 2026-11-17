@@ -1,17 +1,30 @@
 import logging
 import os
 from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app.config import configer
-from log_config.account_context import account_log
-from user_data_config import UserDataPaths, protect_file
+from app.accounts.files import UserDataPaths, protect_file
 
 
 MAX_LOG_BYTES = 2_000_000
 BACKUP_COUNT = 3
 MAX_OPEN_ACCOUNT_LOGS = 32
+
+
+account_log = ContextVar[tuple[UserDataPaths, int] | None]('account_log', default=None)
+
+
+@contextmanager
+def account_log_context(paths: UserDataPaths | None, user_id: int | None):
+    token = account_log.set((paths, user_id) if paths is not None and user_id is not None else None)
+    try:
+        yield
+    finally:
+        account_log.reset(token)
 
 
 class AccountLabel(logging.Filter):

@@ -12,14 +12,14 @@ from unittest.mock import Mock
 
 from _imports import BACKEND_ROOT as ROOT
 
-from auth_config import User
-from log_config.account_context import account_log_context
-from log_config.log import AccountFileHandler, AccountLabel
+from app.accounts.repository import User
+from app.account_logging import account_log_context
+from app.account_logging import AccountFileHandler, AccountLabel
 from migrate_user_data import migrate_accounts
-from personal_model_config import PersonalModel
-from profile_config import Profile, ProfileStore
-from settings_config import Preferences
-from user_directory_store import UserDirectoryStore
+from app.llm.personal_models import PersonalModel
+from app.accounts.profile import Profile, ProfileStore
+from app.accounts.preferences import Preferences
+from app.accounts.directory import UserDirectoryStore
 
 
 class UserDirectoryTests(unittest.TestCase):

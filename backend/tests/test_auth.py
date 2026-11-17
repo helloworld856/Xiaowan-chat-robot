@@ -9,7 +9,7 @@ from _imports import BACKEND_ROOT as ROOT
 
 def auth_module():
     try:
-        return importlib.import_module('auth_config')
+        return importlib.import_module('app.accounts.auth_service')
     except ModuleNotFoundError:
         raise AssertionError('账户验证尚未实现') from None
 

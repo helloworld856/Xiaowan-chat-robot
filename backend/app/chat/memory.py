@@ -1,5 +1,5 @@
 import json
-from log_config import logger
+from app.account_logging import logger
 
 
 
@@ -78,8 +78,8 @@ class MemoryManager:
         return True
 
     def compress_history(self, summary_agent):
-        from persona_config import persona
-        from utils.json_parser import model_text
+        from app.llm.persona import persona
+        from app.llm.output_parser import model_text
 
         count = len(self.history_cache) // 2
         if count == 0:

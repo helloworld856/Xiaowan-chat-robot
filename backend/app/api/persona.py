@@ -1,6 +1,6 @@
 import urllib.parse
 from fastapi import APIRouter, Request
-from persona_config import persona
+from app.llm.persona import persona
 
 router = APIRouter()
 

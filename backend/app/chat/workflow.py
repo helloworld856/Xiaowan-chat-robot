@@ -2,9 +2,9 @@ from time import perf_counter
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
-from log_config import logger
-from memory_config import MemoryManager
-from state_config import AIChatState
+from app.account_logging import logger
+from app.chat.memory import MemoryManager
+from app.chat.state import AIChatState
 
 from .nodes import start_node, end_node, analysis, generate
 
@@ -36,5 +36,3 @@ def create_graph(memorier: MemoryManager):
 
     logger.info('工作流初始化完成!\n' + "="*60)
     return builder.compile()
-
-

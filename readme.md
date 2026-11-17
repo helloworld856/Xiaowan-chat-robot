@@ -39,7 +39,7 @@ TONGYI_API_KEY=your-key
 PASSWORD=your-mysql-password
 ```
 
-只需填写实际使用的模型Key。数据库 `XiaoWan` 和所需表会自动创建，数据库账号、地址和端口在 `backend/config/cfg.py` 中配置。
+只需填写实际使用的模型Key。数据库 `XiaoWan` 和所需表会自动创建，数据库账号、地址和端口在 `backend/app/config.py` 中配置。
 
 在 `.env` 中设置 API Key 后重启后端。管理员在页面设置中选择实际模型。
 
@@ -89,7 +89,7 @@ cd frontend
 npm run dev
 ```
 
-访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/config/cfg.py` 中的 `listen_port`，请同步更新 `frontend/vite.config.mts` 的代理端口。
+访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/app/config.py` 中的 `listen_port`，请同步更新 `frontend/vite.config.mts` 的代理端口。
 
 如果只想启动一个服务，先构建前端：
 

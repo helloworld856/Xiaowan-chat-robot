@@ -2,8 +2,8 @@ from starlette.staticfiles import StaticFiles
 
 from app.application import build_application
 from app.config import BACKEND_ROOT, PROJECT_ROOT
-from database_config import open_pool
-from profile_config import ProfileStore
+from app.database.mysql import open_pool
+from app.accounts.profile import ProfileStore
 
 
 class NoCacheStaticFiles(StaticFiles):

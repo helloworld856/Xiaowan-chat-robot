@@ -3,11 +3,11 @@
 from functools import partial
 from pathlib import Path
 
-from auth_config import User
-from personal_model_config import PersonalModelStore
-from profile_config import ProfileStore
-from settings_config import FilePreferencesStore, Preferences, UserPreferencesStore
-from user_data_config import require_directory
+from app.accounts.repository import User
+from app.llm.personal_models import PersonalModelStore
+from app.accounts.profile import ProfileStore
+from app.accounts.preferences import FilePreferencesStore, Preferences, UserPreferencesStore
+from app.accounts.files import require_directory
 
 
 class UserDirectoryStore:

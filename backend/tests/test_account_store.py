@@ -14,7 +14,8 @@ from unittest.mock import patch
 import pymysql
 
 from test_auth import ROOT, request
-from auth_config import AccountStorageError, AuthService, COOKIE_NAME, DuplicateUsername, InvalidCredentials, SQLAccountStore, hash_password
+from app.accounts.repository import AccountStorageError, DuplicateUsername, SQLAccountStore
+from app.accounts.auth_service import AuthService, COOKIE_NAME, InvalidCredentials, hash_password
 
 
 class _Cursor:
@@ -151,9 +152,9 @@ class AccountStoreTests(unittest.TestCase):
         self.assertEqual(restored.register('member', 'test credential hash').username, 'member')
 
     def test_registration_keeps_directory_when_commit_succeeded_without_ack(self):
-        from profile_config import ProfileStore
-        from settings_config import UserPreferencesStore
-        from user_directory_store import UserDirectoryStore
+        from app.accounts.profile import ProfileStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.directory import UserDirectoryStore
 
         directories = UserDirectoryStore(ProfileStore(self.legacy_file.parent / 'users'), UserPreferencesStore(self.pool))
         store = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)

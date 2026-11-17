@@ -2,8 +2,8 @@
 代理工厂 - 动态创建不同厂商的代理
 """
 from langchain.agents import create_agent
-from persona_config import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
-from log_config import logger
+from app.llm.persona import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
+from app.account_logging import logger
 
 CHAT_MODEL_TIMEOUT_SECONDS = 45
 DASHSCOPE_OFFICIAL_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1'

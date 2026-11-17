@@ -4,10 +4,10 @@ from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from auth_config import AuthService, COOKIE_NAME
-from log_config import logger
-from log_config.account_context import account_log_context
-from user_data_config import UserDataPaths
+from app.accounts.auth_service import AuthService, COOKIE_NAME
+from app.account_logging import logger
+from app.account_logging import account_log_context
+from app.accounts.files import UserDataPaths
 
 
 def origin_key(value: str):

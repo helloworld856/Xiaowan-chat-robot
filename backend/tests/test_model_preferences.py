@@ -23,8 +23,8 @@ class ModelSettingsTests(unittest.TestCase):
         with patch.dict(sys.modules, {
             'langchain': types.ModuleType('langchain'),
             'langchain.agents': types.SimpleNamespace(create_agent=lambda **kwargs: kwargs),
-            'persona_config': types.SimpleNamespace(ANALYSIS_PERSONA='analysis', TEXT_COMPRESS_PERSONA='compress', persona=persona),
-            'log_config': types.SimpleNamespace(logger=logger),
+            'app.llm.persona': types.SimpleNamespace(ANALYSIS_PERSONA='analysis', TEXT_COMPRESS_PERSONA='compress', persona=persona),
+            'app.account_logging': types.SimpleNamespace(logger=logger),
             'langchain_openai': types.SimpleNamespace(ChatOpenAI=client),
             'langchain_community.chat_models': types.SimpleNamespace(ChatTongyi=client),
         }):

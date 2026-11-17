@@ -7,11 +7,12 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 
-from auth_config import SQLAccountStore, User
-from database_config import open_pool
-from profile_config import ProfileStore
-from settings_config import Preferences, UserPreferencesStore, settings_store
-from user_directory_store import UserDirectoryStore
+from app.accounts.repository import SQLAccountStore, User
+from app.database.mysql import open_pool
+from app.accounts.profile import ProfileStore
+from app.accounts.preferences import Preferences, UserPreferencesStore
+from app.llm.admin_settings import settings_store
+from app.accounts.directory import UserDirectoryStore
 
 
 @dataclass

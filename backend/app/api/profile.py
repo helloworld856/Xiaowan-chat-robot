@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
-from profile_config import AVATARS, DEFAULT_AVATAR_ID, MAX_NICKNAME_LENGTH, AvatarId, Profile
+from app.accounts.profile import AVATARS, DEFAULT_AVATAR_ID, MAX_NICKNAME_LENGTH, AvatarId, Profile
 
 router = APIRouter(tags=['profile'])
 

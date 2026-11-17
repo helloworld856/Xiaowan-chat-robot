@@ -7,7 +7,7 @@ from unittest.mock import patch
 from _imports import BACKEND_ROOT as ROOT
 
 
-from auth_config import User
+from app.accounts.repository import User
 
 FIRST_USER = User(1, 'First', 'admin')
 SECOND_USER = User(2, 'Second', 'admin')
@@ -15,7 +15,7 @@ SECOND_USER = User(2, 'Second', 'admin')
 
 class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from app.core.session import ChatSessions
+        from app.chat.scheduler import ChatSessions
         self.sessions = ChatSessions(None, max_running=2, max_waiting=2, wait_timeout=0.2)
         self.release = threading.Event()
         self.addCleanup(self.release.set)
@@ -43,7 +43,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                 await first
 
     async def test_cancellation_keeps_account_busy_until_worker_finishes(self):
-        from app.core.session import ChatNotStarted
+        from app.chat.scheduler import ChatNotStarted
         entered = threading.Event()
         calls = []
 
@@ -71,7 +71,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, ['first', 'next'])
 
     async def test_global_and_account_queue_limits(self):
-        from app.core.session import ChatNotStarted, ChatSessions
+        from app.chat.scheduler import ChatNotStarted, ChatSessions
         self.sessions = ChatSessions(None, max_running=1, max_waiting=1, wait_timeout=1)
         entered = threading.Event()
 
@@ -101,7 +101,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await waiting, 'second')
 
     async def test_waiting_turn_is_rejected_if_it_gets_a_slot_after_deadline(self):
-        from app.core.session import ChatNotStarted, ChatSessions
+        from app.chat.scheduler import ChatNotStarted, ChatSessions
         self.sessions = ChatSessions(None, max_running=1, wait_timeout=1)
         self.addAsyncCleanup(self.sessions.drain)
         entered = threading.Event()
@@ -117,7 +117,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(ChatSessions, '_run', run),
-            patch('app.core.session.perf_counter', side_effect=lambda: now),
+            patch('app.chat.scheduler.perf_counter', side_effect=lambda: now),
         ):
             first = asyncio.create_task(self.sessions.send(FIRST_USER, 'first'))
             try:
@@ -135,7 +135,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, ['first', 'next'])
 
     async def test_shutdown_finishes_an_admitted_turn_and_rejects_new_turns(self):
-        from app.core.session import ChatNotStarted
+        from app.chat.scheduler import ChatNotStarted
         entered = threading.Event()
 
         def run(self_, entry, user, text):
@@ -162,7 +162,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                     await shutdown
 
     async def test_failed_initialization_can_be_retried(self):
-        from state_config import create_initial_state
+        from app.chat.state import create_initial_state
         graph = SimpleNamespace(invoke=lambda state, config: state)
         runtime = SimpleNamespace(graph=graph, state=create_initial_state())
         with (
@@ -178,7 +178,7 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
 
 class ChatStateTests(unittest.TestCase):
     def test_initial_state_has_independent_nested_values(self):
-        from state_config import create_initial_state
+        from app.chat.state import create_initial_state
         first = create_initial_state(1)
         second = create_initial_state(7)
         first['message']['assistant'].append('private')

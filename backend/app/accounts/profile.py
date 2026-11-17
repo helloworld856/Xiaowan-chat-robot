@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from log_config import logger
-from user_data_config import UserDataPaths, protect_file, read_text, replace_json
+from app.account_logging import logger
+from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
 
 AVATARS = (
     ('cat', '小猫'), ('fox', '狐狸'), ('rabbit', '兔子'),

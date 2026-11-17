@@ -18,7 +18,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
     def make_database(self):
         import pymysql
 
-        from database_config import open_pool
+        from app.database.mysql import open_pool
 
         database = f'xiaowan_test_{uuid4().hex}'
         db_options = {'host': '127.0.0.1', 'port': int(os.environ['XIAOWAN_TEST_MYSQL_PORT']),
@@ -37,9 +37,9 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         import httpx
 
         from app import application as main
-        from auth_config import hash_password
-        from profile_config import ProfileStore
-        from settings_config import SettingsStore
+        from app.accounts.auth_service import hash_password
+        from app.accounts.profile import ProfileStore
+        from app.llm.admin_settings import SettingsStore
 
         pool, _, _ = self.make_database()
         with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
@@ -59,12 +59,13 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual((await client.get('/profile')).json()['nickname'], 'admin')
 
     def test_existing_account_preferences_migrate_and_can_be_rolled_back(self):
-        from auth_config import SQLAccountStore, hash_password
-        from database_config import initialize_schema
+        from app.accounts.repository import SQLAccountStore
+        from app.accounts.auth_service import hash_password
+        from app.database.mysql import initialize_schema
         from migrate_user_data import migrate_accounts
-        from profile_config import Profile, ProfileStore
-        from settings_config import Preferences, UserPreferencesStore
-        from user_directory_store import UserDirectoryStore
+        from app.accounts.profile import Profile, ProfileStore
+        from app.accounts.preferences import Preferences, UserPreferencesStore
+        from app.accounts.directory import UserDirectoryStore
 
         pool, _, _ = self.make_database()
         initialize_schema(pool)
@@ -94,11 +95,11 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
 
         import agent_config
         from app import application as main
-        from auth_config import hash_password
-        from database_config import open_pool
-        from profile_config import ProfileStore
+        from app.accounts.auth_service import hash_password
+        from app.database.mysql import open_pool
+        from app.accounts.profile import ProfileStore
         from app.api import settings as settings_router
-        from settings_config import SettingsStore
+        from app.llm.admin_settings import SettingsStore
 
         pool, database, db_options = self.make_database()
         with pool.connection() as connection, connection.cursor() as cursor:

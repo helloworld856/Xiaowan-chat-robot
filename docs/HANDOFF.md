@@ -14,11 +14,11 @@
 
 | 位置 | 负责的功能 |
 | --- | --- |
-| `backend/app/core/session.py`、`backend/graph_config/` | 账号会话、并发队列、分析与回复 |
-| `backend/auth_config/accounts.py`、`backend/app/core/auth.py` | MySQL 账号、会话认证和请求中的账号日志上下文 |
-| `backend/user_data_config.py`、`backend/user_directory_store.py` | 用户目录路径、注册初始化和个人配置写入 |
-| `backend/utils/json_parser.py`、`backend/utils/tokens_count.py` | 模型输出解析、本地分词与 Token 计数 |
-| `backend/run_serve.py`、`backend/log_config/` | 服务启动提示和文件日志路由 |
+| `backend/app/application.py`、`backend/app/api/` | 应用装配与 HTTP 接口 |
+| `backend/app/chat/` | 账号聊天状态、并发队列、工作流与历史 |
+| `backend/app/accounts/`、`backend/app/api/auth_middleware.py` | MySQL 账号、会话认证和个人目录 |
+| `backend/app/llm/` | 模型配置、模型输出解析、本地分词与 Token 计数 |
+| `backend/run_serve.py`、`backend/app/account_logging.py` | 服务启动提示和文件日志路由 |
 | `frontend/src/ts/chat.ts`、`utils.ts`、`review.ts`、`settings.ts` | 聊天发送、气泡节奏、回顾和设置 |
 
 ## 数据与日志约定

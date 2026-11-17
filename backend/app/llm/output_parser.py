@@ -7,7 +7,7 @@ from copy import deepcopy
 from io import StringIO
 from typing import Optional
 
-from log_config import logger
+from app.account_logging import logger
 
 
 def model_text(content: object) -> str:
@@ -102,4 +102,3 @@ def safe_parse_json(content: object, default_result: Optional[dict] = None, *,
 
     logger.warning('%s：未收到可用的 JSON，使用默认值', stage)
     return deepcopy(default_result)
-

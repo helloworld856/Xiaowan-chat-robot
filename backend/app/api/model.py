@@ -8,13 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import agent_config
 from agent_config.agent_factory import create_model
-from log_config import logger
-from personal_model_config import PersonalModel
+from app.account_logging import logger
+from app.llm.personal_models import PersonalModel
 from app.api.credential_route import CredentialRoute
-from settings_config import settings_store
+from app.llm.admin_settings import settings_store
 
 from pydantic import BaseModel
-from settings_config import ModelSettings
+from app.llm.admin_settings import ModelSettings
 
 
 class ModelConfigRequest(ModelSettings):

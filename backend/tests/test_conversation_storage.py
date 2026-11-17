@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from _imports import BACKEND_ROOT as ROOT
 
-from memory_config import MemoryManager, load_history
+from app.chat.memory import MemoryManager, load_history
 
 
 class TestCursor:
@@ -160,7 +160,7 @@ class MemoryIsolationTests(unittest.TestCase):
 @unittest.skipUnless(importlib.util.find_spec('langgraph'), 'requires LangGraph')
 class GraphOutputTests(unittest.TestCase):
     def test_token_usage_accepts_standard_metadata_and_ignores_invalid_values(self):
-        from graph_config.nodes import get_total_tokens
+        from app.chat.nodes import get_total_tokens
 
         self.assertEqual(get_total_tokens(SimpleNamespace(
             usage_metadata={'total_tokens': 42},
@@ -182,8 +182,8 @@ class GraphOutputTests(unittest.TestCase):
 )
 class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_unexpected_model_field_types_do_not_break_following_turn(self):
-        from auth_config import User
-        from app.core.session import ChatSessions
+        from app.accounts.repository import User
+        from app.chat.scheduler import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -200,7 +200,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
-            patch('graph_config.nodes.count_tokens', return_value=1),
+            patch('app.chat.nodes.count_tokens', return_value=1),
         ):
             first = await sessions.send(user, 'first turn')
             self.assertTrue((await sessions.send(user, 'second turn'))['saved'])
@@ -210,8 +210,8 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first['ai_monologue'], [])
 
     async def test_next_turn_follows_committed_history_after_failed_save(self):
-        from auth_config import User
-        from app.core.session import ChatSessions
+        from app.accounts.repository import User
+        from app.chat.scheduler import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -228,7 +228,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         agents = (FakeAgent(analyze), FakeAgent(lambda _: 'summary'), FakeAgent(lambda _: '{"reply":["回复"]}'))
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
-            patch('graph_config.nodes.count_tokens', return_value=1),
+            patch('app.chat.nodes.count_tokens', return_value=1),
         ):
             pool.fail_insert = True
             self.assertFalse((await sessions.send(user, 'failed insert'))['saved'])
@@ -244,8 +244,8 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_next_turn_recovers_summary_after_lost_commit_acknowledgement(self):
-        from auth_config import User
-        from app.core.session import ChatSessions
+        from app.accounts.repository import User
+        from app.chat.scheduler import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -266,12 +266,12 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
-            patch('graph_config.nodes.count_tokens', return_value=1),
+            patch('app.chat.nodes.count_tokens', return_value=1),
         ):
             await sessions.send(user, 'first turn')
             await sessions.send(user, 'second turn')
             pool.lose_commit_ack = True
-            with patch('graph_config.nodes.configer.compress_history_threshold', 1):
+            with patch('app.chat.nodes.configer.compress_history_threshold', 1):
                 self.assertTrue((await sessions.send(user, 'compression turn'))['saved'])
             await sessions.send(user, 'next turn')
         self.assertIn('committed summary', prompts[-1])
@@ -279,12 +279,12 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('second turn', prompts[-1])
 
     async def test_same_account_reuses_graph_and_other_account_remains_isolated(self):
-        from app.core.session import ChatSessions
+        from app.chat.scheduler import ChatSessions
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
-        from auth_config import User
+        from app.accounts.repository import User
 
         first_user = User(1, 'First', 'admin')
         second_user = User(2, 'Second', 'admin')
@@ -308,7 +308,7 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
-            patch('graph_config.nodes.count_tokens', return_value=1),
+            patch('app.chat.nodes.count_tokens', return_value=1),
         ):
             first = asyncio.create_task(sessions.send(first_user, 'private-A-first'))
             second = None

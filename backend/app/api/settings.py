@@ -2,9 +2,14 @@ import pymysql
 from fastapi import APIRouter, HTTPException, Request
 
 import agent_config
-from settings_config import Preferences, UserSettings, settings_store
+from app.accounts.preferences import Preferences
+from app.llm.admin_settings import AppSettings, settings_store
 
 router = APIRouter()
+
+
+class UserSettings(AppSettings):
+    model_ready: bool
 
 
 def settings_for(request: Request, preferences: Preferences) -> UserSettings:

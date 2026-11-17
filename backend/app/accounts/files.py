@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Literal
 
+from app.config import BACKEND_ROOT
 from app.json_files import atomic_write_json
 
 
@@ -56,7 +57,7 @@ def replace_json(path: Path, value) -> None:
 
 class UserDataPaths:
     def __init__(self, root: Path | None = None):
-        self.root = root if root is not None else Path(__file__).resolve().with_name('user_data')
+        self.root = root if root is not None else BACKEND_ROOT / 'user_data'
         self._locks = tuple(RLock() for _ in range(64))
 
     def directory(self, user_id: int) -> Path:

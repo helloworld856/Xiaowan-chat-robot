@@ -9,16 +9,18 @@ from app.api.auth import router as auth_router
 from app.api.auth_middleware import AuthenticationMiddleware
 from app.api.profile import router as profile_router
 from app.config import SOFTWARE_NAME, VERSION
-from app.core.session import ChatSessions
-from auth_config import AuthService, SQLAccountStore
-from database_config import initialize_schema, reset_chat_history
-from graph_config import create_graph
-from log_config import logger
-from log_config.log import close_account_logs
-from profile_config import ProfileStore
-from settings_config import UserPreferencesStore, settings_store
-from user_data_config import UserDataPaths
-from user_directory_store import UserDirectoryStore
+from app.chat.scheduler import ChatSessions
+from app.accounts.auth_service import AuthService
+from app.accounts.repository import SQLAccountStore
+from app.database.mysql import initialize_schema, reset_chat_history
+from app.chat.workflow import create_graph
+from app.account_logging import logger
+from app.account_logging import close_account_logs
+from app.accounts.profile import ProfileStore
+from app.accounts.preferences import UserPreferencesStore
+from app.llm.admin_settings import settings_store
+from app.accounts.files import UserDataPaths
+from app.accounts.directory import UserDirectoryStore
 
 
 def create_app(version: str, auth_service: AuthService | None = None,

@@ -4,10 +4,24 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from auth_config import (COOKIE_NAME, SESSION_TTL_SECONDS, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH,
-                         USERNAME_PATTERN, AccountStorageError, DuplicateUsername, InvalidCredentials,
-                         InvalidPassword, InvalidSession, LoginThrottled, PasswordCommitUnknown, PasswordSaveFailed,
-                         ReservedUsername)
+from app.accounts.auth_service import (
+    COOKIE_NAME,
+    SESSION_TTL_SECONDS,
+    MIN_PASSWORD_LENGTH,
+    MAX_PASSWORD_LENGTH,
+    USERNAME_PATTERN,
+    InvalidCredentials,
+    InvalidPassword,
+    InvalidSession,
+    LoginThrottled,
+    PasswordSaveFailed,
+)
+from app.accounts.repository import (
+    AccountStorageError,
+    DuplicateUsername,
+    PasswordCommitUnknown,
+    ReservedUsername,
+)
 
 
 from .credential_route import CredentialRoute

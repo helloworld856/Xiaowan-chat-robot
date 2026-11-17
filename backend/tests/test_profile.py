@@ -1,7 +1,5 @@
 """账户资料与密码路由测试；所有变更都写入临时文件。"""
-import importlib.util
 import json
-import sys
 import tempfile
 import types
 import unittest
@@ -16,7 +14,7 @@ class ProfileHTTPTests(unittest.TestCase):
     def setUp(self):
         self.auth = auth_module()
         from app.application import create_app
-        from profile_config import ProfileStore
+        from app.accounts.profile import ProfileStore
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
         self.credentials_path = Path(self.directory.name) / 'admin.json'
@@ -60,7 +58,7 @@ class ProfileHTTPTests(unittest.TestCase):
         self.assertFalse(self.profile_path.exists())
 
     def test_profile_save_trims_nickname_and_survives_store_restart(self):
-        from profile_config import ProfileStore
+        from app.accounts.profile import ProfileStore
         cookie = self.login()
         status, _, body = request(self.app, '/profile', 'POST',
                                   {'nickname': '  晚风  ', 'avatar_id': 'fox'}, cookie=cookie)
@@ -96,7 +94,7 @@ class ProfileHTTPTests(unittest.TestCase):
         self.assertEqual(json.loads(self.profile_path.read_text(encoding='utf-8')), {'nickname': '管理', 'avatar_id': 'fox'})
 
     def test_migration_preserves_newer_profile(self):
-        from profile_config import Profile
+        from app.accounts.profile import Profile
         legacy = Path(self.directory.name) / 'profile.json'
         legacy.write_text('{"nickname":"旧昵称","avatar_id":"cat"}', encoding='utf-8')
         self.profile.import_legacy_profile(1, legacy)
@@ -173,13 +171,12 @@ class ProfileHTTPTests(unittest.TestCase):
         self.profile_path.write_text(json.dumps({'nickname': '晚风', 'avatar_id': 'penguin'}), encoding='utf-8')
         persona = types.SimpleNamespace(BOT_AVATAR='bot.png', BOT_NAME='小晚',
                                         BOT_BIRTHDAY='2000年1月1日', BOT_BIRTHPLACE='杭州')
-        spec = importlib.util.spec_from_file_location('tested_profile_persona', ROOT / 'app' / 'api' / 'persona.py')
-        module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {'persona_config': types.SimpleNamespace(persona=persona)}):
-            spec.loader.exec_module(module)
-        self.app.include_router(module.router)
+        from app.api import persona as persona_route
+
+        self.app.include_router(persona_route.router)
         cookie = self.login()
-        status, _, body = request(self.app, '/persona', cookie=cookie)
+        with patch.object(persona_route, 'persona', persona):
+            status, _, body = request(self.app, '/persona', cookie=cookie)
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertEqual(data, {'BOT_AVATAR': 'http://testserver/avatars/bot.png', 'BOT_NAME': '小晚',

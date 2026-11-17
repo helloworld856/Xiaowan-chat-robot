@@ -1,13 +1,11 @@
-import importlib.util
 import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from _imports import BACKEND_ROOT as BACKEND
-spec = importlib.util.spec_from_file_location('tested_json_parser', BACKEND / 'utils' / 'json_parser.py')
-parser = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(parser)
+import _imports
+from app.chat import nodes
+from app.llm import output_parser as parser
 
 
 class ModelOutputTests(unittest.TestCase):
@@ -39,11 +37,7 @@ class ModelOutputTests(unittest.TestCase):
 
     @staticmethod
     def generate(content):
-        from state_config import create_initial_state
-
-        spec = importlib.util.spec_from_file_location('tested_reply_nodes', BACKEND / 'graph_config' / 'nodes.py')
-        nodes = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(nodes)
+        from app.chat.state import create_initial_state
 
         state = create_initial_state()
         state['user_input'] = '测试消息'

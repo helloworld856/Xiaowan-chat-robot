@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-from auth_config import User
-from log_config import logger
-from memory_config import MemoryManager
-from personal_model_config import PersonalModelStore
-from state_config import AIChatState, create_initial_state
+from app.accounts.repository import User
+from app.account_logging import logger
+from app.chat.memory import MemoryManager
+from app.llm.personal_models import PersonalModelStore
+from app.chat.state import AIChatState, create_initial_state
 
 class ChatNotStarted(Exception):
     def __init__(self, status_code: int, message: str):
@@ -159,7 +159,7 @@ class ChatSessions:
     def _initialize(self, user_id: int) -> ChatRuntime:
         factory = self._graph_factory
         if factory is None:
-            from graph_config import create_graph
+            from app.chat.workflow import create_graph
             factory = create_graph
 
         start = perf_counter()

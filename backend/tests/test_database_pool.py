@@ -7,7 +7,7 @@ from _imports import BACKEND_ROOT as _BACKEND_ROOT
 class ConnectionPoolTests(unittest.TestCase):
     def test_checkout_rejects_connection_opened_during_close(self):
         import pymysql
-        from database_config import ConnectionPool
+        from app.database.pool import ConnectionPool
 
         connection = Mock()
 
@@ -22,7 +22,7 @@ class ConnectionPoolTests(unittest.TestCase):
         connection.close.assert_called_once()
 
     def test_reuse_resets_transaction_and_never_shares_an_active_connection(self):
-        from database_config import ConnectionPool
+        from app.database.pool import ConnectionPool
 
         first, second = Mock(), Mock()
         pool = ConnectionPool(Mock(side_effect=[first, second]), max_connections=2)
@@ -38,7 +38,7 @@ class ConnectionPoolTests(unittest.TestCase):
             first.ping.assert_called_once_with(reconnect=False)
 
     def test_exception_resets_transaction_and_broken_connection_is_discarded(self):
-        from database_config import ConnectionPool
+        from app.database.pool import ConnectionPool
 
         broken, replacement = Mock(), Mock()
         broken.rollback.side_effect = OSError('lost connection')
@@ -52,7 +52,7 @@ class ConnectionPoolTests(unittest.TestCase):
             self.assertIs(connection, replacement)
 
     def test_failed_checkout_ping_discards_connection_even_if_rollback_works(self):
-        from database_config import ConnectionPool
+        from app.database.pool import ConnectionPool
 
         failed, replacement = Mock(), Mock()
         failed.ping.side_effect = OSError('failed health check')

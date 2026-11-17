@@ -8,10 +8,11 @@ from typing import Callable, Literal, Protocol
 
 import pymysql
 
+from app.config import BACKEND_ROOT
 from app.json_files import atomic_write_json
 
 HASH_ITERATIONS = 600_000
-LEGACY_ADMIN_PATH = Path(__file__).with_name('admin.json')
+LEGACY_ADMIN_PATH = BACKEND_ROOT / 'auth_config' / 'admin.json'
 Role = Literal['admin', 'user']
 
 

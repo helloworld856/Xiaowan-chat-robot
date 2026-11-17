@@ -3,8 +3,8 @@ from threading import BoundedSemaphore, Lock
 
 import pymysql
 
-from log_config import logger
-from log_config.account_context import account_log_context
+from app.account_logging import logger
+from app.account_logging import account_log_context
 
 
 class ConnectionPool:

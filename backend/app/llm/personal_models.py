@@ -4,8 +4,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from settings_config import ModelMerchant, ModelSettings
-from user_data_config import UserDataPaths, protect_file, read_text, replace_json
+from app.llm.admin_settings import ModelMerchant, ModelSettings
+from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
 
 
 class PersonalModel(BaseModel):
