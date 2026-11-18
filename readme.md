@@ -29,27 +29,19 @@ npm --prefix frontend run build
 
 首次运行需要构建一次：后端启动时会检查 `frontend/dist`，即使使用Vite开发也需要该目录。构建产物不随仓库提交。
 
-复制 `backend/.env.example` 为 `backend/.env`，填写要使用的API Key和MySQL `root` 密码：
+首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 的连接信息。`server` 配置后端监听地址和端口，`chat` 配置聊天并发与队列，`models` 配置默认厂商、模型列表、地址和接口协议。数据库 `XiaoWan` 和所需表会在启动时创建。管理员可使用 `backend/.env.example` 创建 `backend/.env`，也可登录后在网页设置中保存模型和 API Key。
 
-```env
-DEEPSEEK_API_KEY=your-key
-TONGYI_API_KEY=your-key
-PASSWORD=your-mysql-password
-```
-
-只需填写实际使用的模型Key。数据库 `XiaoWan` 和所需表会自动创建，数据库账号、地址和端口在 `backend/app/config.py` 中配置。
-
-在 `.env` 中设置 API Key 后重启后端。管理员在页面设置中选择实际模型。
+已有部署升级时，保留原来的 `backend/.env`、`backend/settings.json` 和 `backend/user_data/`。首次启动会把旧管理员模型迁入 `.env` 的 `ADMIN_PROVIDERS`，并补齐缺少的全局模型目录。如果全局配置尚未创建，数据库密码和并发参数也会从旧 `.env` 导入。曾手动修改过 `backend/app/config.py` 的数据库连接或监听地址时，请将这些改动填入 `backend/system_config.json`。
 
 ## 聊天设置
 
-管理员的设置页支持模型厂商、模型名称与自定义 API 基础地址。名称可以手动输入；地址留空使用厂商接口，填写自定义地址时须兼容 OpenAI 聊天接口，包含所需的 `/v1` 等基础路径。管理员使用所选厂商在 `.env` 中配置的密钥。
+管理员和普通用户的网页设置都从 `system_config.json` 读取该厂商可选的模型名，后端用同一份列表校验测试和保存请求。管理员还可以设置厂商的自定义 API 基础地址。自定义地址须兼容 OpenAI 聊天接口，包含所需的 `/v1` 等基础路径。地址留空时使用全局配置中的厂商地址和协议。
 
 “测试连接”只验证连接，不保存或切换；“保存并切换”验证成功后保存配置，并更新聊天、分析、摘要三个代理。验证或保存失败时保留当前模型。
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。每条消息最多 8000 个字符。
 
-管理员的模型配置保存在 `backend/settings.json`，启动时加载。普通账号注册时会创建 `backend/user_data/<user_id>/model.json`，已有账号在首次读取设置或尝试聊天时补建。普通用户在“设置 → 配置个人模型”填写自己的厂商、模型名和 API Key，连接厂商官方地址，保存后即可聊天。个人配置文件含可调用厂商 API 的密钥，应和 `.env` 一样限制文件访问并妥善备份。
+管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<user_id>/model.json` 也是每个厂商一条，后端实际请求读取对应条目的 `base_url`，使用全局配置中该厂商的接口协议。同厂商切换模型会共用地址和密钥，密钥留空时沿用已保存的值。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
 
 在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<user_id>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
 
@@ -87,7 +79,7 @@ cd frontend
 npm run dev
 ```
 
-访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/app/config.py` 中的 `listen_port`，请同步更新 `frontend/vite.config.mts` 的代理端口。
+访问 `http://localhost:5173`。Vite 会将 API 请求代理到 `127.0.0.1:8000`。如果修改了 `backend/system_config.json` 的 `server.port`，请同步更新 `frontend/vite.config.mts` 的代理端口。
 
 如果只想启动一个服务，先构建前端：
 
@@ -101,7 +93,7 @@ python run_serve.py
 
 > 当前设计会在每次启动后端时清空历史对话和历史摘要。
 
-后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`.env` 里的 `XIAOWAN_CHAT_CONCURRENCY`、`XIAOWAN_CHAT_QUEUE_SIZE` 和 `XIAOWAN_CHAT_QUEUE_TIMEOUT` 控制最多同时执行数、等待名额和排队秒数，默认 4、8、2。排队失败时可以从原消息重试。
+后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`system_config.json` 的 `chat.concurrency`、`chat.queue_size` 和 `chat.queue_timeout` 控制最多同时执行数、等待名额和排队秒数，默认分别为 4、8、2。排队失败时可以从原消息重试。
 
 使用Vite开发时，前端修改会自动刷新；访问 `8000` 时，修改前端后需重新执行 `npm --prefix frontend run build`（在项目根目录）。修改后端后需重启后端服务。
 

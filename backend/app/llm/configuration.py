@@ -1,24 +1,25 @@
 """Validate and activate model configurations for the administrator and individual accounts."""
 
-import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextvars import copy_context
 from threading import BoundedSemaphore, RLock
 from time import monotonic
 
 from langchain_core.runnables import Runnable
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from app.account_logging import logger
 from app.llm import factory
-from app.llm.admin_settings import ModelSettings, SettingsStore
+from app.llm.admin_models import AdminModelFile, AdminModelStore
+from app.llm.admin_settings import ModelSettings
+from app.llm.model_catalog import ModelEndpoint
 from app.llm.personal_models import PersonalModel, PersonalModelStore
 
 
 MODEL_VALIDATION_CAPACITY = 2
 VALIDATION_TIMEOUT_SECONDS = 20
 MODEL_SWITCH_TIMEOUT_SECONDS = 25
-MODEL_API_KEYS = {'deepseek': 'DEEPSEEK_API_KEY', 'tongyi': 'TONGYI_API_KEY'}
 
 _validation_pool = ThreadPoolExecutor(max_workers=MODEL_VALIDATION_CAPACITY, thread_name_prefix='model-test')
 _validation_slots = BoundedSemaphore(MODEL_VALIDATION_CAPACITY)
@@ -72,10 +73,10 @@ def _validate_connection(client) -> None:
         raise TimeoutError('模型连接测试超时') from None
 
 
-def _verify_model(merchant: str, key: str, name: str, base_url: str, *, official_only: bool) -> None:
+def _verify_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint) -> None:
     client = factory.create_model(
-        merchant, key, name, 0.1, max_tokens=10, base_url=base_url,
-        validation_timeout=8, official_only=official_only,
+        merchant, key, name, 0.1, max_tokens=10, base_url=endpoint.base_url,
+        validation_timeout=8, adapter=endpoint.adapter,
     )
     _validate_connection(client)
 
@@ -97,20 +98,29 @@ def _connection_failure(error: Exception) -> ModelConfigResponse:
 
 
 class ModelConfigurationService:
-    def __init__(self, settings: SettingsStore, personal_models: PersonalModelStore, admin_runtime: AdminModelRuntime):
-        self.settings = settings
+    def __init__(self, admin_models: AdminModelStore, personal_models: PersonalModelStore, admin_runtime: AdminModelRuntime):
+        self.admin_models = admin_models
         self.personal_models = personal_models
         self.admin_runtime = admin_runtime
 
-    def activate_saved_model(self, model: ModelSettings | None) -> None:
-        if model is None:
-            return
-        key = os.getenv(MODEL_API_KEYS[model.model_merchant])
-        if not key:
-            logger.warning('未配置已保存模型所需的服务端 API Key')
-            return
+    def _admin_endpoint(self, model: ModelSettings) -> ModelEndpoint:
+        if model.base_url:
+            return ModelEndpoint(base_url=model.base_url, adapter='openai')
+        return self.personal_models.catalog.endpoint(model.model_merchant)
+
+    def activate_saved_model(self, legacy: Callable[[], AdminModelFile]) -> None:
         try:
-            agents = factory.create_agents(model.model_merchant, key, model.model_name, model.base_url)
+            saved = self.admin_models.initialize(legacy)
+            model = saved.model
+            if model is None:
+                return
+            key = saved.key_for(model.model_merchant)
+            if key is None:
+                logger.warning('未配置已保存模型所需的管理员 API Key')
+                return
+            endpoint = self._admin_endpoint(model)
+            agents = factory.create_agents(model.model_merchant, key.get_secret_value(), model.model_name,
+                                           base_url=endpoint.base_url, adapter=endpoint.adapter)
             # 启动时从已保存配置装配代理，连接探测留给显式测试或保存。
             self.admin_runtime.publish(model, agents)
         except Exception:
@@ -122,24 +132,29 @@ class ModelConfigurationService:
             if active is not None:
                 return active[0], True
             try:
-                return self.settings.get().model, False
+                return self.admin_models.get().model, False
             except (OSError, ValueError):
                 return None, False
 
-    def configure_admin(self, model: ModelSettings, *, activate: bool) -> ModelConfigResponse:
+    def configure_admin(self, model: ModelSettings, *, activate: bool,
+                        new_key: SecretStr | None = None) -> ModelConfigResponse:
         deadline = monotonic() + MODEL_SWITCH_TIMEOUT_SECONDS
-        merchant = model.model_merchant.lower().strip()
-        name = model.model_name.strip()
-        if not name:
-            return ModelConfigResponse(status=False, info='模型名称不能为空')
+        merchant = model.model_merchant
+        name = model.model_name
+        if not self.personal_models.catalog.allows(merchant, name):
+            return ModelConfigResponse(status=False, info='请选择全局配置中该厂商的模型')
+        use_saved_address = 'base_url' not in model.model_fields_set
         try:
-            key_name = MODEL_API_KEYS.get(merchant)
-            if key_name is None:
-                return ModelConfigResponse(status=False, info='模型配置无效！')
-            key = os.getenv(key_name)
-            if not key:
-                return ModelConfigResponse(status=False, info='尚未配置此厂商的服务端 API Key')
-            agents = self._prepare_model(merchant, key, name, model.base_url, official_only=False, activate=activate)
+            saved = self.admin_models.get() if use_saved_address or new_key is None else None
+            if use_saved_address and saved is not None:
+                entry = saved.providers.get(merchant)
+                if entry is not None:
+                    model = model.model_copy(update={'base_url': entry.base_url})
+            key = new_key if new_key is not None else saved.key_for(merchant)
+            if key is None:
+                return ModelConfigResponse(status=False, info='请先填写此厂商的 API Key')
+            agents = self._prepare_model(merchant, key.get_secret_value(), name, self._admin_endpoint(model),
+                                         activate=activate)
             if agents is None:
                 return ModelConfigResponse(status=True, info='连接测试通过，模型配置尚未修改')
 
@@ -149,10 +164,14 @@ class ModelConfigurationService:
             try:
                 try:
                     # 先保存文件，再发布新代理，失败时旧模型仍可继续处理聊天。
-                    self.settings.update_model(model)
+                    saved_ok = self.admin_models.update_model(
+                        model, key, replace_key=new_key is not None, keep_address=use_saved_address,
+                    )
                 except (OSError, ValueError) as error:
                     logger.warning('管理员模型保存失败: %s', type(error).__name__)
                     return ModelConfigResponse(status=False, info='配置保存失败，原有模型仍在使用')
+                if not saved_ok:
+                    return ModelConfigResponse(status=False, info='此模型的配置已更新，请重新测试或保存')
                 self.admin_runtime.publish(model, agents)
             finally:
                 self.admin_runtime.lock.release()
@@ -163,15 +182,21 @@ class ModelConfigurationService:
             return _connection_failure(error)
 
     def configure_personal(self, user_id: int, model: PersonalModel, *, activate: bool) -> ModelConfigResponse:
+        if not self.personal_models.catalog.allows(model.model_merchant, model.model_name):
+            return ModelConfigResponse(status=False, info='请选择全局配置中该厂商的模型')
         try:
+            selected = self.personal_models.selection(user_id, model)
+            if selected is None:
+                return ModelConfigResponse(status=False, info='请先填写此厂商的 API Key')
             agents = self._prepare_model(
-                model.model_merchant, model.api_key.get_secret_value(), model.model_name, '',
-                official_only=True, activate=activate,
+                selected.model_merchant, selected.api_key.get_secret_value(), selected.model_name,
+                ModelEndpoint(base_url=selected.base_url, adapter=selected.adapter), activate=activate,
             )
             if agents is None:
                 return ModelConfigResponse(status=True, info='连接测试通过')
             try:
-                self.personal_models.update(user_id, model, agents)
+                if not self.personal_models.update(user_id, model, agents, checked=selected):
+                    return ModelConfigResponse(status=False, info='此模型的配置已更新，请重新测试或保存')
             except (OSError, ValueError) as error:
                 logger.warning('个人模型保存失败: %s', type(error).__name__)
                 return ModelConfigResponse(status=False, info='个人模型保存失败，请稍后重试')
@@ -180,9 +205,9 @@ class ModelConfigurationService:
             return _connection_failure(error)
 
     @staticmethod
-    def _prepare_model(merchant: str, key: str, name: str, base_url: str, *,
-                       official_only: bool, activate: bool) -> AgentSet | None:
-        _verify_model(merchant, key, name, base_url, official_only=official_only)
+    def _prepare_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint, *,
+                       activate: bool) -> AgentSet | None:
+        _verify_model(merchant, key, name, endpoint)
         if not activate:
             return None
-        return factory.create_agents(merchant, key, name, base_url, official_only=official_only)
+        return factory.create_agents(merchant, key, name, base_url=endpoint.base_url, adapter=endpoint.adapter)

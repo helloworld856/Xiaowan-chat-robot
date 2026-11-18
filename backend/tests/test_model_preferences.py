@@ -35,10 +35,13 @@ class ModelSettingsTests(unittest.TestCase):
             'langchain_openai': types.SimpleNamespace(ChatOpenAI=client),
             'langchain_community.chat_models': types.SimpleNamespace(ChatTongyi=client),
         }), patch.object(factory, 'create_agent', side_effect=lambda **kwargs: kwargs):
-            openai = factory.create_model('deepseek', 'test-placeholder', 'M', 0.1, validation_timeout=8)
+            openai = factory.create_model('deepseek', 'test-placeholder', 'M', 0.1, validation_timeout=8,
+                                          base_url='https://api.deepseek.com', adapter='openai')
             native = factory.create_model('tongyi', 'test-placeholder', 'M', 0.1, max_tokens=10,
-                                          validation_timeout=8, official_only=True)
-            custom = factory.create_agents('tongyi', 'test-placeholder', 'Custom-V2', 'https://example.com/v1')
+                                          validation_timeout=8, base_url='https://dashscope.aliyuncs.com/api/v1',
+                                          adapter='dashscope')
+            custom = factory.create_agents('tongyi', 'test-placeholder', 'Custom-V2',
+                                           base_url='https://example.com/v1', adapter='openai')
         self.assertEqual(openai['timeout'], 8)
         self.assertEqual(openai['max_retries'], 0)
         self.assertEqual(openai['default_headers']['Accept-Encoding'], 'gzip, deflate')

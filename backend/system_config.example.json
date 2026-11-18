@@ -1,0 +1,36 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "",
+    "name": "XiaoWan",
+    "charset": "utf8mb4"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "chat": {
+    "concurrency": 4,
+    "queue_size": 8,
+    "queue_timeout": 2
+  },
+  "models": {
+    "default_provider": "deepseek",
+    "providers": {
+      "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "adapter": "openai",
+        "default_model": "deepseek-v4-flash",
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+      },
+      "tongyi": {
+        "base_url": "https://dashscope.aliyuncs.com/api/v1",
+        "adapter": "dashscope",
+        "default_model": "qwen3-max",
+        "models": ["qwen3-max", "qwen-plus", "qwen-turbo", "qwen-flash"]
+      }
+    }
+  }
+}

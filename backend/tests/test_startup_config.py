@@ -74,9 +74,11 @@ from pathlib import Path
 import uvicorn
 from app.accounts import files
 from app.config import configer
+from app import system_config
 
 configer.log_save_path = sys.argv[1]
 files.BACKEND_ROOT = Path(sys.argv[1]).parent
+system_config.BACKEND_ROOT = files.BACKEND_ROOT
 
 def start_server(app, **options):
     uvicorn.Config(app, **options)
@@ -171,23 +173,24 @@ launcher['main']()
             path.write_text(json.dumps({**source, 'name': 42}), encoding='utf-8')
             self.assertEqual(persona.Persona().BOT_NAME, '无名氏')
 
-    def test_launcher_loads_only_the_backend_environment_and_only_when_started(self):
+    def test_launcher_reads_the_configured_listener_only_when_started(self):
         from app import account_logging
         from app.accounts import files
         from app.config import configer
+        from app.system_config import ServerConfig, SystemConfig
 
-        dotenv = SimpleNamespace(load_dotenv=Mock())
+        settings = Mock(return_value=SystemConfig(server=ServerConfig(port=8123)))
         uvicorn = SimpleNamespace(run=Mock())
-        with patch.dict(sys.modules, {'dotenv': dotenv, 'uvicorn': uvicorn}), \
+        with patch.dict(sys.modules, {'uvicorn': uvicorn}), \
                 patch('logging.basicConfig'), patch('logging.captureWarnings'), \
                 patch.object(logging.getLogger('uvicorn'), 'setLevel'), \
                 patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
                 patch.object(files, 'BACKEND_ROOT', self.root), \
                 patch.object(configer, 'log_save_path', self.root / 'app.log'), \
-                patch.object(configer, 'listen_host', '127.0.0.1'), patch.object(configer, 'listen_port', 8123):
+                patch('app.system_config.load_system_config', settings):
             launcher = runpy.run_path(str(ROOT / 'run_serve.py'))
             self.assertIs(launcher['logger'], account_logging.logger)
-            dotenv.load_dotenv.assert_not_called()
+            settings.assert_not_called()
             launcher['main']()
-        dotenv.load_dotenv.assert_called_once_with(ROOT / '.env')
+        settings.assert_called_once_with(migrate=True)
         uvicorn.run.assert_called_once_with('app.main:app', host='127.0.0.1', port=8123, workers=1, log_config=None)

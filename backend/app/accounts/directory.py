@@ -5,16 +5,18 @@ from pathlib import Path
 
 from app.accounts.repository import User
 from app.llm.personal_models import PersonalModelStore
+from app.llm.model_catalog import ModelCatalog
 from app.accounts.profile import ProfileStore
 from app.accounts.preferences import FilePreferencesStore, Preferences, UserPreferencesStore
 from app.accounts.files import require_directory
 
 
 class UserDirectoryStore:
-    def __init__(self, profiles: ProfileStore, legacy_preferences: UserPreferencesStore):
+    def __init__(self, profiles: ProfileStore, legacy_preferences: UserPreferencesStore,
+                 catalog: ModelCatalog | None = None):
         self.profiles = profiles
         self.paths = profiles.paths
-        self.models = PersonalModelStore(self.paths)
+        self.models = PersonalModelStore(self.paths, catalog)
         self.preferences = FilePreferencesStore(self.paths, legacy_preferences)
 
     def prepare_new(self, user: User) -> None:

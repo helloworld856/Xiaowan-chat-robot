@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymysql
-from dotenv import load_dotenv
 
 from app.accounts.repository import SQLAccountStore, User
 from app.database.mysql import open_pool
@@ -13,6 +12,7 @@ from app.accounts.profile import ProfileStore
 from app.accounts.preferences import Preferences, UserPreferencesStore
 from app.llm.admin_settings import settings_store
 from app.accounts.directory import UserDirectoryStore
+from app.system_config import load_system_config
 
 
 @dataclass
@@ -78,14 +78,14 @@ def main() -> int:
     args = parser.parse_args()
 
     backend = Path(__file__).resolve().parent
-    load_dotenv(backend / '.env')
-    pool = open_pool(create_if_missing=False)
+    config = load_system_config(backend)
+    pool = open_pool(config=config.database, create_if_missing=False)
     try:
         try:
             admin_preferences = settings_store.get().preferences
         except (OSError, ValueError):
             admin_preferences = None
-        directories = UserDirectoryStore(ProfileStore(), UserPreferencesStore(pool))
+        directories = UserDirectoryStore(ProfileStore(), UserPreferencesStore(pool), config.models)
         report = migrate_accounts(SQLAccountStore(pool), directories, apply=args.apply,
                                   rollback=args.rollback_preferences, legacy_profile=backend / 'auth_config' / 'profile.json',
                                   admin_preferences=admin_preferences)

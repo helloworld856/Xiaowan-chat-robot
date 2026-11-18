@@ -80,16 +80,35 @@ export function personaAPI() {
     }, '角色信息加载失败');
 }
 
-export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string) {
-    const options = {model_merchant: model.model_merchant, model_name: model.model_name};
-    const personal = apiKey !== undefined;
+export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string, personal = false) {
+    const options = {
+        model_merchant: model.model_merchant,
+        model_name: model.model_name,
+        ...(personal ? {} : {base_url: model.base_url || ''}),
+        ...(apiKey === undefined ? {} : {api_key: apiKey})
+    };
     return requestJSON<{status: boolean; info: string}>(`/model${personal ? '/personal' : ''}${testOnly ? '/test' : ''}`, {
         method: 'POST', signal: AbortSignal.timeout(30000),
-        body: JSON.stringify(personal ? {...options, api_key: apiKey} : {...options, base_url: model.base_url || ''})
+        body: JSON.stringify(options)
     }, '模型配置请求失败');
 }
 
-export interface SavedSettings { model: ModelInfo | null; model_ready: boolean; preferences: Preferences; }
+export interface ModelOptions {
+    default_provider: string;
+    providers: Record<string, {
+        default_model: string;
+        names: string[];
+        saved_model: string | null;
+        saved_address: string | null;
+        has_saved_key: boolean;
+    }>;
+}
+export interface SavedSettings {
+    model: ModelInfo | null;
+    model_ready: boolean;
+    preferences: Preferences;
+    model_options?: ModelOptions;
+}
 export function settingsAPI(preferences?: Preferences): Promise<SavedSettings> {
     return requestJSON('/settings', {
         method: preferences ? 'POST' : 'GET', signal: AbortSignal.timeout(15000),

@@ -35,17 +35,5 @@ class Config:
         "action": "",
     }
 
-    # 数据库配置
-    host = "localhost"
-    user = 'root'
-    port = 3306
-    charset = 'utf8mb4'
-
-    # 接口配置
-    # 监听
-    listen_host = "127.0.0.1"
-    # listen_host = "0.0.0.0"
-    listen_port = 8000
-
 
 configer = Config()

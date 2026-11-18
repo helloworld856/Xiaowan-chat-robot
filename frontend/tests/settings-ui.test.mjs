@@ -24,10 +24,10 @@ test('only the relevant model fields are visible and active for each role', () =
     for (admin of [true, false]) {
         exports.updateSettingsPermissions();
         assert.equal(element('[data-model-admin]').hidden, !admin);
-        assert.equal(element('[data-model-personal]').hidden, admin);
         assert.equal(element('model-base-url').disabled, !admin);
-        assert.equal(element('model-api-key').disabled, admin);
-        assert.equal(element('model-api-key').required, !admin);
+        assert.equal(element('model-api-key').disabled, false);
+        assert.equal(element('model-api-key').required, true);
+        assert.equal(element('model-api-key').placeholder, '');
     }
 });
 
@@ -36,7 +36,8 @@ test('preferences auto-save the latest selections in order and restore saved val
     const nodes = new Map();
     function element(id) {
         if (!nodes.has(id)) nodes.set(id, {
-            value: '', disabled: false, listeners: new Map(), reset() {}, replaceChildren() {}, querySelectorAll: () => [],
+            value: '', disabled: false, listeners: new Map(), reset() {},
+            replaceChildren(...children) { this.children = children; }, querySelectorAll: () => [],
             reportValidity: () => true,
             addEventListener(name, handler) { this.listeners.set(name, handler); }
         });
@@ -54,16 +55,22 @@ test('preferences auto-save the latest selections in order and restore saved val
         localStorage: {setItem() { throw new Error('Preferences must not use browser storage'); }}
     });
     let finishSettings;
+    let admin = true;
     const saves = [];
+    const submittedKeys = [];
     const exports = {};
     runInNewContext(compiled, {
         exports,
         Error,
+        Option: function(label, value) { this.label = label; this.value = value; },
         require: name => ({
             './api.ts': {
-                canManageModel: () => true,
+                canManageModel: () => admin,
                 getRequestGeneration: () => 1,
-                modelAPI: async () => ({status: true, info: ''}),
+                modelAPI: async (_model, _testOnly, key) => {
+                    submittedKeys.push(key);
+                    return {status: true, info: ''};
+                },
                 settingsAPI: value => {
                     if (value) return new Promise((resolve, reject) => {
                         saves.push({
@@ -122,4 +129,37 @@ test('preferences auto-save the latest selections in order and restore saved val
     exports.resetSettings();
     assert.equal(documentElement.className, 'theme0');
     assert.equal(themeSelect.value, 'theme0');
+
+    const configured = exports.loadSettings();
+    finishSettings({model: null, model_ready: false, preferences, model_options: {
+        default_provider: 'tongyi', providers: {
+            tongyi: {default_model: 'server-selected-model', names: ['server-selected-model', 'saved-model'],
+                     saved_model: 'server-selected-model', saved_address: 'https://saved-address.example/v1', has_saved_key: true},
+            deepseek: {default_model: 'new-model', names: ['new-model'],
+                       saved_model: 'new-model', saved_address: null, has_saved_key: false}
+        }
+    }});
+    await configured;
+    element('open-modify-btn').listeners.get('click')();
+    assert.equal(element('modelSelect').value, 'tongyi');
+    assert.equal(element('modelName').value, 'server-selected-model');
+    assert.deepEqual(element('modelName').children.map(child => child.value), ['server-selected-model', 'saved-model']);
+    const key = element('model-api-key');
+    assert.equal(key.required, false);
+    assert.equal(key.placeholder, '****');
+    assert.equal(key.value, '');
+    admin = false;
+    element('open-modify-btn').listeners.get('click')();
+    assert.equal(key.placeholder, '****');
+    assert.equal(key.value, '');
+    element('model-config-form').listeners.get('submit')({preventDefault() {}});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(submittedKeys.at(-1), undefined);
+    element('modelName').value = 'saved-model';
+    assert.equal(element('model-base-url').value, 'https://saved-address.example/v1');
+    element('modelSelect').value = 'deepseek';
+    element('modelSelect').listeners.get('change')();
+    assert.equal(key.required, true);
+    assert.equal(key.placeholder, '');
+    assert.equal(key.value, '');
 });

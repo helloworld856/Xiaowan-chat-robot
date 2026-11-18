@@ -52,7 +52,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             (folder / 'profile.json').write_text('{invalid', encoding='utf-8')
             profiles = ProfileStore(folder / 'profiles')
             with patch.object(main, 'settings_store', SettingsStore(folder / 'settings.json')):
-                app = main.build_application(pool, profiles, folder)
+                app = main.build_application(pool, profiles, folder, config_root=folder)
                 async with app.router.lifespan_context(app):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
                         login = await client.post('/auth/login', json={'username': 'admin', 'password': password})
@@ -95,6 +95,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         import httpx
 
         from app.llm import factory as model_factory
+        from app.llm.model_catalog import default_model_catalog
         from app import application as main
         from app.accounts.auth_service import hash_password
         from app.database.mysql import open_pool
@@ -116,6 +117,8 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             (folder / 'profile.json').write_text('{"nickname":"旧昵称","avatar_id":"frog"}', encoding='utf-8')
             profiles = ProfileStore(folder / 'profiles')
             model_settings = SettingsStore(folder / 'settings.json')
+            catalog = default_model_catalog()
+            catalog.providers['deepseek'].models.extend(['test-model', 'my-model'])
             model_settings.path.write_text(json.dumps({
                 'model': {'model_merchant': 'deepseek', 'model_name': 'test-model'},
                 'preferences': {'send_shortcut': 'ctrl_enter'},
@@ -143,10 +146,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             admin_key = 'admin-only-placeholder'
             personal_key = 'personal-placeholder'
 
-            def create_agents(merchant, key, name, base_url, *, official_only=False):
-                self.assertEqual(base_url, '')
+            def create_agents(merchant, key, name, *, base_url, adapter):
+                self.assertEqual(base_url, 'https://api.deepseek.com')
                 self.assertIn(key, (admin_key, personal_key))
-                self.assertEqual(official_only, key == personal_key)
+                self.assertEqual(adapter, 'openai')
                 return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
                         SimpleNamespace(invoke=lambda payload: reply(payload, name)))
 
@@ -154,7 +157,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                     patch.dict(os.environ, {'DEEPSEEK_API_KEY': admin_key}), \
                     patch.object(model_factory, 'create_agents', side_effect=create_agents) as factory, \
                     patch.object(model_factory, 'create_model', return_value=SimpleNamespace(invoke=lambda _: None)) as validator:
-                app = main.build_application(pool, profiles, folder)
+                app = main.build_application(pool, profiles, folder, config_root=folder, model_catalog=catalog)
                 async with app.router.lifespan_context(app):
                     with pool.connection() as connection, connection.cursor() as cursor:
                         cursor.execute('''
@@ -183,7 +186,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(login_b.status_code, 200, login_b.text)
                         self.assertEqual(login_b.json()['user']['role'], 'user')
                         personal_file = profiles.root / str(login_b.json()['user']['id']) / 'model.json'
-                        self.assertEqual(json.loads(personal_file.read_text(encoding='utf-8')), {'model': None})
+                        self.assertIsNone(json.loads(personal_file.read_text(encoding='utf-8'))['active_provider'])
                         self.assertFalse((profiles.root / str(admin_info['id']) / 'model.json').exists())
                         self.assertFalse((await b.get('/settings')).json()['model_ready'])
                         self.assertEqual(factory.call_args.args[1], admin_key)
@@ -203,7 +206,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         test = await b.post('/model/personal/test', json=personal)
                         self.assertTrue(test.json()['status'], test.text)
                         self.assertTrue((await a.post('/model/test', json={**options, 'model_name': 'test-model'})).json()['status'])
-                        self.assertEqual(json.loads(personal_file.read_text(encoding='utf-8')), {'model': None})
+                        self.assertIsNone(json.loads(personal_file.read_text(encoding='utf-8'))['active_provider'])
                         self.assertTrue((await b.post('/model/personal', json=personal)).json()['status'])
                         self.assertEqual(validator.call_args.args[1], personal_key)
                         self.assertEqual(factory.call_args.args[1], personal_key)
@@ -268,7 +271,8 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
 
                 resumed_pool = open_pool(database, **db_options)
                 self.addCleanup(resumed_pool.close)
-                resumed = main.build_application(resumed_pool, profiles, folder)
+                resumed = main.build_application(resumed_pool, profiles, folder, config_root=folder,
+                                                 model_catalog=catalog)
                 async with resumed.router.lifespan_context(resumed):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=resumed), base_url='http://testserver') as b:
                         self.assertEqual((await b.get('/auth/session')).json(), {'user': None})

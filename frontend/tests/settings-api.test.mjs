@@ -31,12 +31,23 @@ test('a personal API key is sent only to the personal model endpoints', async t 
     });
     const model = {model_merchant: 'deepseek', model_name: 'User-Model', base_url: 'https://example.com/v1'};
     const payload = {model_merchant: 'deepseek', model_name: 'User-Model', api_key: 'test-personal-placeholder'};
-    await api.modelAPI(model, true, payload.api_key);
-    await api.modelAPI(model, false, payload.api_key);
+    await api.modelAPI(model, true, payload.api_key, true);
+    await api.modelAPI(model, false, payload.api_key, true);
     assert.deepEqual(calls, [
         {url: 'http://local-test/model/personal/test', payload},
         {url: 'http://local-test/model/personal', payload}
     ]);
+});
+
+test('an administrator can submit an optional key to the admin endpoint', async t => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push({url, payload: JSON.parse(options.body)});
+        return new Response(JSON.stringify({status: true}));
+    });
+    const model = {model_merchant: 'deepseek', model_name: 'Admin-Model', base_url: ''};
+    await api.modelAPI(model, false, 'test-admin-key', false);
+    assert.deepEqual(calls, [{url: 'http://local-test/model', payload: {...model, api_key: 'test-admin-key'}}]);
 });
 
 test('private 401 requests return to login; wrong login passwords do not fire a second expiry event', async t => {

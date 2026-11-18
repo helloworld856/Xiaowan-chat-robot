@@ -1,5 +1,5 @@
-import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
@@ -19,8 +19,11 @@ from app.chat.scheduler import ChatSessions
 from app.chat.workflow import create_graph
 from app.config import SOFTWARE_NAME, VERSION
 from app.database.mysql import initialize_schema, reset_chat_history
+from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
+from app.llm.model_catalog import ModelCatalog
+from app.system_config import ChatConfig, legacy_environment
 
 
 # 装配通用认证与资料接口，测试可以注入不依赖真实 MySQL 的存储。
@@ -36,19 +39,16 @@ def create_app(version: str, auth_service: AuthService | None = None,
     return app
 
 
-def positive_setting(name, default):
-    value = int(os.getenv(name, default))
-    if value < 1:
-        raise ValueError(f'{name} 必须为正整数')
-    return value
-
-
-def build_application(db, profile_store, legacy_root):
+def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig | None = None,
+                      model_catalog: ModelCatalog | None = None, config_root: Path | None = None):
+    chat_config = chat_config or ChatConfig()
+    config_root = config_root if config_root is not None else legacy_root.parent
     legacy_preferences = UserPreferencesStore(db)
-    directories = UserDirectoryStore(profile_store, legacy_preferences)
+    directories = UserDirectoryStore(profile_store, legacy_preferences, model_catalog)
     accounts = SQLAccountStore(db, prepare_user=directories.prepare_new)
     admin_model = AdminModelRuntime()
-    model_configuration = ModelConfigurationService(settings_store, directories.models, admin_model)
+    model_configuration = ModelConfigurationService(AdminModelStore(config_root / '.env', directories.models.catalog), directories.models,
+                                                    admin_model)
 
     def startup():
         logger.info("version:%s", VERSION)
@@ -59,10 +59,10 @@ def build_application(db, profile_store, legacy_root):
         except (OSError, ValueError):
             logger.warning('无法导入旧版管理员资料，可在个人资料中重新保存')
         try:
-            saved = model_configuration.settings.get()
+            saved = settings_store.get()
         except (OSError, ValueError):
             saved = None
-            logger.warning('无法加载模型设置，请在管理界面重新配置')
+            logger.warning('无法读取旧版管理员配置')
         if saved is not None:
             legacy_preferences.import_legacy(admin.id, saved.preferences)
         try:
@@ -71,7 +71,10 @@ def build_application(db, profile_store, legacy_root):
             logger.warning('无法初始化管理员的个人目录，请检查文件权限与格式')
         # 历史原文与摘要只保留本次运行期间的数据。
         reset_chat_history(db)
-        model_configuration.activate_saved_model(saved.model if saved else None)
+        model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
+            saved.model if saved else None, legacy_environment(config_root),
+            previous=directories.paths.file(admin.id, 'model.json'),
+        ))
 
     @asynccontextmanager
     async def lifespan(_):
@@ -99,9 +102,9 @@ def build_application(db, profile_store, legacy_root):
         personal_models=directories.models,
         admin_model=admin_model,
         graph_factory=create_graph,
-        max_running=positive_setting('XIAOWAN_CHAT_CONCURRENCY', 4),
-        max_waiting=positive_setting('XIAOWAN_CHAT_QUEUE_SIZE', 8),
-        wait_timeout=positive_setting('XIAOWAN_CHAT_QUEUE_TIMEOUT', 2),
+        max_running=chat_config.concurrency,
+        max_waiting=chat_config.queue_size,
+        wait_timeout=chat_config.queue_timeout,
     )
     for module in (persona, system, settings, chat, model, history):
         application.include_router(module.router)

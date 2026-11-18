@@ -18,6 +18,11 @@ env/
 *.env
 !.env.example
 /backend/user_data/
+/backend/system_config.json
+/backend/.system_config-*.tmp
+/backend/.env-*.tmp
+/backend/system_config.json.before-provider.bak
+/backend/.system_config.json.before-provider-*.tmp
 
 # 前端依赖与构建缓存
 node_modules/

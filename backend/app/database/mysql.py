@@ -1,22 +1,23 @@
 """创建数据库、迁移表结构，并在应用启动时清理本次运行的聊天数据。"""
-import os
 import re
 
 import pymysql
 
-from app.config import configer
+from app.system_config import DatabaseConfig, load_system_config
 from .pool import ConnectionPool
 
 
-def open_pool(database='XiaoWan', *, create_if_missing=True, **overrides):
+def open_pool(database=None, *, config: DatabaseConfig | None = None, create_if_missing=True, **overrides):
+    config = config or load_system_config().database
+    database = config.name if database is None else database
     if not re.fullmatch(r'[A-Za-z0-9_]+', database):
         raise ValueError('数据库名称无效')
     options = {
-        'host': configer.host,
-        'user': configer.user,
-        'password': os.getenv('PASSWORD'),
-        'port': configer.port,
-        'charset': configer.charset,
+        'host': config.host,
+        'user': config.user,
+        'password': config.password.get_secret_value(),
+        'port': config.port,
+        'charset': config.charset,
         'connect_timeout': 5,
         'read_timeout': 15,
         'write_timeout': 15,

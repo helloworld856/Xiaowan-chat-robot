@@ -3,45 +3,33 @@
 import json
 from pathlib import Path
 from threading import RLock
-from typing import Literal
-from urllib.parse import urlsplit
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr
 
 from app.accounts.preferences import Preferences
 from app.config import BACKEND_ROOT
-from app.json_files import atomic_write_json
+from app.llm.model_catalog import BaseURL, ModelMerchant
 
 
-ModelMerchant = Literal['deepseek', 'tongyi']
+def validate_api_key(value: SecretStr) -> SecretStr:
+    key = value.get_secret_value().strip()
+    if not key or not key.isascii() or any(char.isspace() or ord(char) < 33 or ord(char) == 127 for char in key):
+        raise ValueError('API Key 格式无效')
+    return SecretStr(key)
+
+
+ApiKey = Annotated[SecretStr, Field(min_length=1, max_length=1024), AfterValidator(validate_api_key)]
 
 
 class ModelSelection(BaseModel):
-    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True, hide_input_in_errors=True)
     model_merchant: ModelMerchant
     model_name: str = Field(min_length=1, max_length=200)
 
 
 class ModelSettings(ModelSelection):
-    base_url: str = Field(default='', max_length=2000)
-
-    @field_validator('base_url')
-    @classmethod
-    def validate_url(cls, value):
-        if not value:
-            return ''
-        try:
-            parsed = urlsplit(value)
-        except ValueError:
-            raise ValueError('接口地址须为有效的 HTTP(S) 地址') from None
-        if (parsed.scheme not in ('http', 'https') or not parsed.hostname
-                or parsed.username or parsed.password or parsed.query or parsed.fragment):
-            raise ValueError('接口地址须为不含账号、参数或片段的 HTTP(S) 地址')
-        try:
-            parsed.port
-        except ValueError:
-            raise ValueError('接口地址端口无效')
-        return value.rstrip('/')
+    base_url: BaseURL = ''
 
 
 class AppSettings(BaseModel):
@@ -51,6 +39,8 @@ class AppSettings(BaseModel):
 
 
 class SettingsStore:
+    """Read old settings for the one-time account configuration migration."""
+
     def __init__(self, path: Path):
         self.path = path
         self.lock = RLock()
@@ -65,16 +55,5 @@ class SettingsStore:
                 for key in ('reply_length', 'split_reply', 'playback_mode', 'reply_interval_ms'):
                     data['preferences'].pop(key, None)
             return AppSettings.model_validate(data)
-
-    # 现版只保存管理员模型，旧偏好字段保留读取兼容。
-    def _save(self, settings: AppSettings):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(self.path, settings.model_dump(include={'model'}))
-
-    def update_model(self, model: ModelSettings):
-        with self.lock:
-            settings = AppSettings(model=model)
-            self._save(settings)
-            return settings
 
 settings_store = SettingsStore(BACKEND_ROOT / 'settings.json')

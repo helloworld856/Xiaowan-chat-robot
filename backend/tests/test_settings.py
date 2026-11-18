@@ -15,14 +15,19 @@ class SettingsTests(unittest.TestCase):
         self.path = Path(self.temp.name) / 'settings.json'
         self.store = SettingsStore(self.path)
 
-    def test_round_trip_persists_only_global_model(self):
-        from app.llm.admin_settings import ModelSettings, SettingsStore
-        self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='MyModel-V2', base_url='https://example.com/v1/'))
-        loaded = SettingsStore(self.path).get()
+    def test_round_trip_persists_model_and_key_in_env(self):
+        from pydantic import SecretStr
+        from app.llm.admin_models import AdminModelStore
+        from app.llm.admin_settings import ModelSettings
+
+        store = AdminModelStore(self.path.parent / '.env')
+        selected = ModelSettings(model_merchant='deepseek', model_name='MyModel-V2', base_url='https://example.com/v1/')
+        store.update_model(selected, SecretStr("fake'key\\#${literal}"), replace_key=True)
+        loaded = AdminModelStore(store.path).get()
         self.assertEqual(loaded.model.model_name, 'MyModel-V2')
         self.assertEqual(loaded.model.base_url, 'https://example.com/v1')
-        self.assertEqual(set(json.loads(self.path.read_text(encoding='utf-8'))), {'model'})
-        self.assertNotIn('api_key', self.path.read_text(encoding='utf-8'))
+        self.assertEqual(loaded.providers['deepseek'].api_key.get_secret_value(), "fake'key\\#${literal}")
+        self.assertFalse(self.path.exists())
 
     def test_bad_input_is_rejected(self):
         from pydantic import ValidationError
@@ -37,15 +42,21 @@ class SettingsTests(unittest.TestCase):
             Preferences(theme='unknown')
 
     def test_failed_write_keeps_previous_config(self):
+        from pydantic import SecretStr
+        from app.llm.admin_models import AdminModelStore
         from app.llm.admin_settings import ModelSettings
-        self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'))
+        store = AdminModelStore(self.path.parent / '.env')
+        key = SecretStr('test-key')
+        store.update_model(ModelSettings(model_merchant='deepseek', model_name='Previous'), key, replace_key=True)
+        path = store.path
         # 故意让替换失败，核对旧配置字节完整且没有临时文件。
-        original = self.path.read_bytes()
+        original = path.read_bytes()
+        replacement = ModelSettings(model_merchant='deepseek', model_name='Replacement')
         with patch('app.json_files.os.replace', side_effect=OSError('write failed')):
             with self.assertRaises(OSError):
-                self.store.update_model(ModelSettings(model_merchant='deepseek', model_name='Replacement'))
-        self.assertEqual(self.path.read_bytes(), original)
-        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+                store.update_model(replacement, key, replace_key=True)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_legacy_settings_load_without_removed_options_and_preserve_model(self):
         self.path.write_text(json.dumps({
