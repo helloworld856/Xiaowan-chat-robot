@@ -46,6 +46,7 @@
 
     /* 设置界面 */
     --setting-bg: rgb(245, 244, 244);
+    --select-accent: #435b79;
     
 }
 
@@ -94,6 +95,7 @@ html.theme1 {
 
     /* 设置界面 */
     --setting-bg: white;
+    --select-accent: #285fc3;
 
 }
 
@@ -129,6 +131,7 @@ html.theme2 {
 
     /* 设置界面 */
     --setting-bg: white;
+    --select-accent: #8f4d08;
 }
 
 /* 主题二：樱雨绵绵（温柔粉） */
@@ -164,4 +167,5 @@ html.theme3 {
 
     /* 设置界面 */
     --setting-bg: white;
+    --select-accent: #963d5d;
 }

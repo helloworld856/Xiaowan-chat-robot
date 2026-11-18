@@ -668,13 +668,90 @@
 #preferences-fields { border: none; min-width: 0; }
 .preference-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.8rem 0; font-size: 0.85rem; }
 .settings-select {
-    padding: 0.5rem;
-    border: 1px solid var(--input-border);
-    border-radius: 8px;
-    background: var(--input-bg);
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--select-accent) 24%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, white 96%, var(--select-accent));
     color: inherit;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.35;
+    box-shadow: 0 1px 2px rgb(25 39 55 / 7%);
+    cursor: pointer;
 }
-.preference-row .settings-select { width: 10rem; max-width: 58%; }
+.settings-select:enabled:hover {
+    border-color: color-mix(in srgb, var(--select-accent) 55%, transparent);
+}
+.settings-select:focus-visible {
+    outline: 2px solid var(--select-accent);
+    outline-offset: 2px;
+}
+.settings-select:disabled { cursor: not-allowed; }
+.preference-row .settings-select { width: 11rem; max-width: 62%; }
+
+/* 支持自定义选择器时，展开列表也使用主题样式。 */
+@supports (appearance: base-select) and selector(select::picker(select)) {
+    .settings-select, .settings-select::picker(select) { appearance: base-select; }
+    .settings-select { align-items: center; gap: 0.6rem; }
+    .settings-select::picker-icon {
+        content: '';
+        flex: none;
+        width: 0.45rem;
+        height: 0.45rem;
+        margin-inline-end: 0.15rem;
+        border-right: 1.5px solid currentColor;
+        border-bottom: 1.5px solid currentColor;
+        color: var(--select-accent);
+        transform: translateY(-0.12rem) rotate(45deg);
+    }
+    .settings-select:open {
+        border-color: var(--select-accent);
+    }
+    .settings-select:open::picker-icon {
+        transform: translateY(0.12rem) rotate(225deg);
+    }
+    .settings-select::picker(select) {
+        position-try-order: normal;
+        min-inline-size: anchor-size(width);
+        max-inline-size: calc(100vw - 2rem);
+        max-block-size: min(17rem, 50dvh);
+        margin-block: 0.35rem;
+        padding: 0.3rem;
+        border: 1px solid color-mix(in srgb, var(--select-accent) 18%, transparent);
+        border-radius: 0.85rem;
+        background: color-mix(in srgb, white 98%, var(--select-accent));
+        color: var(--menu-text);
+        box-shadow: 0 10px 28px rgb(25 39 55 / 16%), 0 2px 5px rgb(25 39 55 / 7%);
+        overflow: auto;
+    }
+    .settings-select option {
+        min-block-size: 2.25rem;
+        gap: 0.65rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.55rem;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        cursor: pointer;
+    }
+    .settings-select option:checked {
+        background: color-mix(in srgb, var(--select-accent) 12%, white);
+        color: var(--select-accent);
+        font-weight: 600;
+    }
+    .settings-select option:enabled:hover, .settings-select option:focus-visible {
+        background: color-mix(in srgb, var(--select-accent) 9%, white);
+        outline: 1px solid color-mix(in srgb, var(--select-accent) 55%, transparent);
+        outline-offset: -1px;
+    }
+    .settings-select option::checkmark {
+        order: 1;
+        margin-inline-start: auto;
+        color: var(--select-accent);
+    }
+}
 .settings-help, #preferences-status, #model-test-status { font-size: 0.78rem; line-height: 1.6; margin: 0.5rem 0; overflow-wrap: anywhere; }
 .settings-help { opacity: 0.7; }
 #reload-settings { padding: 0.65rem 1rem; margin-top: 0.5rem; border: 1px solid var(--input-border); border-radius: 8px; cursor: pointer; background: transparent; color: inherit; font-size: 0.75rem; }
