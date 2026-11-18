@@ -3,7 +3,8 @@ import type {SavedSettings} from './api.ts';
 import {modelConfig} from './global_config.ts';
 import {preferences} from './preferences.ts';
 import type {Preferences} from './preferences.ts';
-import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect} from './ui.ts';
+import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect, themeInput} from './ui.ts';
+import {switchTheme} from './utils.ts';
 
 const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
@@ -22,11 +23,14 @@ function updateModelDisplay() {
 
 function renderPreferences() {
     select('send-shortcut').value = preferences.send_shortcut;
+    themeInput.forEach(radio => {
+        radio.checked = radio.value === preferences.theme;
+    });
+    switchTheme(preferences.theme);
 }
 
 function applySettings(saved: SavedSettings, requestedModelRevision: number) {
     Object.assign(preferences, saved.preferences);
-    renderPreferences();
     // 迟到的读取可更新偏好，但不能覆盖用户刚切换的模型。
     if (requestedModelRevision === modelRevision) {
         modelConfig.model = saved.model ? {...saved.model} : {model_merchant: '', model_name: '', base_url: ''};
@@ -50,6 +54,7 @@ export function resetSettings() {
     resetPopup(modelPopup());
     resetPopup(settingsPopup());
     preferences.send_shortcut = 'enter';
+    preferences.theme = 'theme0';
     modelConfig.model = {model_merchant: '', model_name: '', base_url: ''};
     modelConfig.model_valid = false;
     renderPreferences();
@@ -74,6 +79,7 @@ export async function loadSettings() {
         const saved = await settingsAPI();
         if (generation !== getRequestGeneration()) return;
         applySettings(saved, requestedModelRevision);
+        renderPreferences();
         fields().disabled = false;
         status().textContent = '';
     } catch (error) {
@@ -96,7 +102,7 @@ export function initSettings() {
         tongyi: ['qwen3-max', 'qwen-plus', 'qwen-turbo', 'qwen-flash']
     };
     let modelOperation: number | null = null;
-    let preferencesOperation: number | null = null;
+    let preferencesSave: {generation: number; pending?: Preferences} | undefined;
 
     function updateSuggestions() {
         const list = document.getElementById('model-name-options')!;
@@ -190,36 +196,57 @@ export function initSettings() {
     const reload = document.getElementById('reload-settings') as HTMLButtonElement;
     reload.addEventListener('click', async () => {
         const generation = getRequestGeneration();
-        if (preferencesOperation === generation) return;
+        if (preferencesSave?.generation === generation) return;
         reload.disabled = true;
         try { await loadSettings(); } catch { /* 表单状态已展示错误。 */ }
         finally { if (generation === getRequestGeneration()) reload.disabled = false; }
     });
-    document.getElementById('preferences-form')!.addEventListener('submit', async event => {
-        event.preventDefault();
+
+    async function savePreferences() {
+        if (fields().disabled) return;
         const generation = getRequestGeneration();
-        if (preferencesOperation === generation || fields().disabled) return;
+        const selectedTheme = Array.from(themeInput).find(radio => radio.checked);
         const next: Preferences = {
-            send_shortcut: select('send-shortcut').value as Preferences['send_shortcut']
+            send_shortcut: select('send-shortcut').value as Preferences['send_shortcut'],
+            theme: selectedTheme ? selectedTheme.value as Preferences['theme'] : preferences.theme
         };
-        preferencesOperation = generation;
-        fields().disabled = true;
+        switchTheme(next.theme);
+        if (preferencesSave?.generation === generation) {
+            preferencesSave.pending = next;
+            return;
+        }
+
+        const operation: NonNullable<typeof preferencesSave> = {generation, pending: next};
+        preferencesSave = operation;
         reload.disabled = true;
         status().textContent = '正在保存…';
-        const requestedModelRevision = modelRevision;
         try {
-            const saved = await settingsAPI(next);
-            if (generation !== getRequestGeneration()) return;
-            applySettings(saved, requestedModelRevision);
-            status().textContent = '输入设置已保存';
-        } catch (error) {
-            if (generation === getRequestGeneration()) status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
-        } finally {
-            if (preferencesOperation === generation) preferencesOperation = null;
-            if (generation === getRequestGeneration()) {
-                fields().disabled = false;
-                reload.disabled = false;
+            while (operation.pending) {
+                const selection = operation.pending;
+                operation.pending = undefined;
+                const requestedModelRevision = modelRevision;
+                try {
+                    const saved = await settingsAPI(selection);
+                    if (generation !== getRequestGeneration()) return;
+                    applySettings(saved, requestedModelRevision);
+                    if (!operation.pending) status().textContent = '偏好已自动保存';
+                } catch (error) {
+                    if (generation !== getRequestGeneration()) return;
+                    if (!operation.pending) status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
+                }
+                // 较早的保存结果更新已确认的偏好，等最新选择也提交后才同步界面。
+                if (!operation.pending) renderPreferences();
             }
+        } finally {
+            if (preferencesSave === operation) preferencesSave = undefined;
+            if (generation === getRequestGeneration()) reload.disabled = false;
         }
+    }
+
+    select('send-shortcut').addEventListener('change', () => { void savePreferences(); });
+    themeInput.forEach(radio => {
+        radio.addEventListener('change', () => {
+            if (radio.checked) void savePreferences();
+        });
     });
 }

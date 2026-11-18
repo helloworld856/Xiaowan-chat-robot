@@ -13,30 +13,29 @@ function runModule(file, globals) {
     return runInNewContext('(async () => {\n' + compiled + '\n})()', globals);
 }
 
-test('theme storage being unavailable does not prevent authentication', async () => {
+test('startup does not read or write browser theme preferences', async () => {
     let authInitialized = false;
+    let storageAccesses = 0;
     const document = {documentElement: {className: ''}, getElementById: () => ({})};
     const globals = {
         exports: {},
         document,
         localStorage: {
-            getItem() { throw new Error('Storage blocked'); },
-            setItem() { throw new Error('Storage blocked'); }
+            getItem() { storageAccesses++; throw new Error('Preferences must come from the account'); },
+            setItem() { storageAccesses++; throw new Error('Preferences must go to the account'); }
         },
         console: {log() {}}
     };
     await runModule('utils.ts', {...globals, require: () => ({})});
     const utils = globals.exports;
-    const defaultTheme = {value: 'theme0', checked: false};
     await runModule('main.ts', {...globals, exports: {}, require: name => ({
-        './ui.ts': {lockSendBtn() {}, themeInput: [defaultTheme]},
+        './ui.ts': {lockSendBtn() {}},
         './utils.ts': utils,
         './addevent.ts': {addEventToUi() {}},
         './auth.ts': {async initializeAuth() { authInitialized = true; }}
     })[name]});
     assert.equal(authInitialized, true);
-    assert.equal(document.documentElement.className, 'theme0');
-    assert.equal(defaultTheme.checked, true);
+    assert.equal(storageAccesses, 0);
 });
 
 test('loading the persona preserves the user avatar that their profile already supplied', async () => {

@@ -86,6 +86,19 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertEqual({path.name for path in self.store.inspect_missing(self.member)}, required | {'model.json'})
         self.assertFalse(self.store.paths.root.exists())
 
+    def test_themes_survive_reload_and_remain_account_scoped(self):
+        self.store.ensure(self.admin)
+        self.store.prepare_new(self.member)
+        self.store.preferences.update(self.member.id, Preferences(send_shortcut='ctrl_enter', theme='theme2'))
+        reloaded = UserDirectoryStore(ProfileStore(self.root / 'users'), self.legacy)
+        self.assertEqual(reloaded.preferences.get(self.member.id).model_dump(),
+                         {'send_shortcut': 'ctrl_enter', 'theme': 'theme2'})
+        self.assertEqual(reloaded.preferences.get(self.admin.id).theme, 'theme0')
+        self.assertEqual(json.loads(self.store.preferences.path_for(self.member.id).read_text(encoding='utf-8')),
+                         {'send_shortcut': 'ctrl_enter', 'theme': 'theme2'})
+        self.store.preferences.path_for(self.admin.id).write_text('{"send_shortcut":"ctrl_enter"}', encoding='utf-8')
+        self.assertEqual(reloaded.preferences.get(self.admin.id).theme, 'theme0')
+
     def test_legacy_lookup_does_not_block_or_overwrite_a_concurrent_save(self):
         updated = Preferences(send_shortcut='ctrl_enter')
         with ThreadPoolExecutor(max_workers=1) as worker:

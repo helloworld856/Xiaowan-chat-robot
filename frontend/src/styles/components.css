@@ -235,13 +235,12 @@
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* 三个选项间隔 120 毫秒出现，整组动画在 480 毫秒内完成 */
+/* 菜单选项按顺序出现。 */
 #menuBtn.active + #menu > .value {
     animation: menuItemIn 0.24s ease-out backwards;
 }
 
 #menuBtn.active + #menu > .value2 { animation-delay: 0.12s; }
-#menuBtn.active + #menu > .value3 { animation-delay: 0.24s; }
 
 @keyframes menuItemIn {
     from { opacity: 0; transform: translateX(6px); }
@@ -278,15 +277,10 @@
 
 /* 主题选择 */
 .theme-select {
-    display: none;
-    flex-direction: column;
-    padding: 0.3rem 0;
-    margin-top: 0.3rem;
-    border-top: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.value3.active + .theme-select {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem;
+    margin-bottom: 0.8rem;
 }
 
 .theme-select label {
@@ -698,14 +692,13 @@
 #model-info-view .info-item { gap: 1rem; font-size: 0.85rem; }
 #model-info-view .info-item span { overflow-wrap: anywhere; text-align: right; }
 #model-info-view .info-item label { flex-shrink: 0; }
-#preferences-form { margin-top: 1.5rem; border-top: 1px solid var(--chat-border); }
+#preferences-panel { margin-top: 1.5rem; border-top: 1px solid var(--chat-border); }
 #preferences-fields { border: none; min-width: 0; }
 .preference-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.8rem 0; font-size: 0.85rem; }
 .preference-row select { max-width: 58%; padding: 0.5rem; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: inherit; }
 .settings-help, #preferences-status, #model-test-status { font-size: 0.78rem; line-height: 1.6; margin: 0.5rem 0; overflow-wrap: anywhere; }
 .settings-help { opacity: 0.7; }
-.settings-save, #reload-settings { padding: 0.65rem 1rem; margin-top: 0.5rem; border: 1px solid var(--input-border); border-radius: 8px; cursor: pointer; }
-#reload-settings { background: transparent; color: inherit; font-size: 0.75rem; }
+#reload-settings { padding: 0.65rem 1rem; margin-top: 0.5rem; border: 1px solid var(--input-border); border-radius: 8px; cursor: pointer; background: transparent; color: inherit; font-size: 0.75rem; }
 #setting-container button:disabled, #preferences-fields:disabled { opacity: 0.6; }
 #model-edit-modal .modal-content { max-height: 100%; overflow-y: auto; padding: 1.25rem; }
 #model-edit-modal .form-group { flex-direction: column; align-items: stretch; gap: 0.4rem; margin-bottom: 0.8rem; }

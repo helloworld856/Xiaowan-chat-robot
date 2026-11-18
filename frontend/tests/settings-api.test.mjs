@@ -158,7 +158,7 @@ test('profile saves only nickname and system avatar ID; password change goes to 
 });
 
 test('settings are loaded/saved through backend and save failures are reported', async t => {
-    const preferences = {send_shortcut: 'ctrl_enter'};
+    const preferences = {send_shortcut: 'ctrl_enter', theme: 'theme2'};
     const calls = [];
     t.mock.method(globalThis, 'fetch', async (url, options) => {
         calls.push({url, method: options.method, body: options.body});

@@ -7,15 +7,12 @@ import {
     sidebar,
     menuBtn,
     menu,
-    themeInput,
-    menuSelect,
     windowAlertContainer,
     chatBox,
     closeMenu,
     closePopup
 } from './ui.ts';
 import {sendMessage} from './chat.ts';
-import {switchTheme} from './utils.ts';
 import {initChatReview} from './review.ts';
 import {preferences, shouldSendMessage} from './preferences.ts';
 import {initSettings} from './settings.ts';
@@ -57,9 +54,6 @@ function bindSidebarEvents() {
 }
 
 function bindMenuEvents() {
-    const themeSelect = document.querySelector<HTMLDivElement>('#menu .theme-select')!;
-    const themeMenuButton = menuSelect[2];
-
     menuBtn.addEventListener('click', event => {
         event.stopPropagation();
         if (menuBtn.classList.contains('active')) closeMenu();
@@ -67,11 +61,6 @@ function bindMenuEvents() {
             menuBtn.classList.add('active');
             menuBtn.setAttribute('aria-expanded', 'true');
         }
-    });
-
-    themeMenuButton.addEventListener('click', () => {
-        const isClosed = window.getComputedStyle(themeSelect).display === 'none';
-        themeMenuButton.classList.toggle('active', isClosed);
     });
 
     menu.addEventListener('click', event => event.stopPropagation());
@@ -83,13 +72,6 @@ function bindMenuEvents() {
             closeMenu();
             menuBtn.focus();
         }
-    });
-
-    themeInput.forEach(radio => {
-        radio.addEventListener('change', () => {
-            if (!radio.checked) return;
-            switchTheme(radio.value);
-        });
     });
 }
 

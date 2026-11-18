@@ -53,7 +53,7 @@ PASSWORD=your-mysql-password
 
 管理员的模型配置保存在 `backend/settings.json`，启动时加载。普通账号注册时会创建 `backend/user_data/<user_id>/model.json`，已有账号在首次读取设置或尝试聊天时补建。普通用户在“设置 → 配置个人模型”填写自己的厂商、模型名和 API Key，连接厂商官方地址，保存后即可聊天。个人配置文件含可调用厂商 API 的密钥，应和 `.env` 一样限制文件访问并妥善备份。
 
-每个账号的发送快捷键保存在自己的 `backend/user_data/<user_id>/preferences.json`，点击“保存输入设置”后，刷新和重启都能恢复。
+在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<user_id>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 

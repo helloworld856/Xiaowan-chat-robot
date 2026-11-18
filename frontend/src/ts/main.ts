@@ -3,7 +3,6 @@ import {
     updateUi,
     lockSendBtn,
     unlockSendBtn,
-    themeInput,
     showAlert,
     resetPopup,
     windowAlertContainer,
@@ -11,7 +10,7 @@ import {
 } from './ui.ts';
 
 import {personaAPI, historyAPI, AuthRequiredError, CancelledRequestError, getRequestGeneration} from './api.ts';
-import {showChatHistory, switchTheme} from './utils.ts';
+import {showChatHistory} from './utils.ts';
 import {addEventToUi} from './addevent.ts';
 import {personaConfig} from './global_config.ts';
 import {loadSettings, resetSettings, updateSettingsPermissions} from './settings.ts';
@@ -36,20 +35,6 @@ async function loadHistory() {
     if (generation === getRequestGeneration() && result?.history_messages) {
         showChatHistory(result.history_messages);
     }
-}
-
-function loadSavedTheme() {
-    let theme = 'theme0';
-    try {
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme && Array.from(themeInput).some(radio => radio.value === savedTheme)) theme = savedTheme;
-    } catch {
-        // 存储不可用时使用默认主题。
-    }
-    switchTheme(theme);
-    themeInput.forEach(radio => {
-        radio.checked = radio.value === theme;
-    });
 }
 
 async function init(generation: number){
@@ -117,5 +102,4 @@ function clearChat() {
 
 lockSendBtn();
 addEventToUi();
-loadSavedTheme();
 await initializeAuth(initializeChat, clearChat);

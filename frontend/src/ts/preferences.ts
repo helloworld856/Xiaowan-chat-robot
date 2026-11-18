@@ -1,9 +1,11 @@
 export interface Preferences {
     send_shortcut: 'enter' | 'ctrl_enter';
+    theme: 'theme0' | 'theme1' | 'theme2' | 'theme3';
 }
 
 export const preferences: Preferences = {
-    send_shortcut: 'enter'
+    send_shortcut: 'enter',
+    theme: 'theme0'
 };
 
 export function shouldSendMessage(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'keyCode'>, shortcut: Preferences['send_shortcut']) {

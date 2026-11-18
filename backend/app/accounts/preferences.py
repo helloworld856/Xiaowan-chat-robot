@@ -1,4 +1,4 @@
-"""Account input preferences and backward compatibility with the legacy table."""
+"""账号文件中的偏好，以及旧版快捷键表的迁移兼容。"""
 
 from pathlib import Path
 from typing import Literal
@@ -12,6 +12,7 @@ from app.accounts.files import UserDataPaths, protect_file, read_text, replace_j
 class Preferences(BaseModel):
     model_config = ConfigDict(extra='forbid')
     send_shortcut: Literal['enter', 'ctrl_enter'] = 'enter'
+    theme: Literal['theme0', 'theme1', 'theme2', 'theme3'] = 'theme0'
 
 
 # 旧版 MySQL 表用于迁移与回退，当前偏好以账号文件为准。
@@ -74,7 +75,7 @@ class FilePreferencesStore:
             except FileNotFoundError:
                 pass
             except ValueError:
-                logger.warning('个人输入偏好文件格式无效，暂时使用默认设置')
+                logger.warning('个人偏好文件格式无效，暂时使用默认设置')
                 return Preferences()
         self.ensure(user_id)
         with self.paths.lock(user_id):

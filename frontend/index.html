@@ -132,30 +132,6 @@
                 <span>设置</span>
             </button>
 
-            <button class="value value3">
-                <svg viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-                <span>主题</span>
-            </button>
-
-            <!-- 主题选择 -->
-            <div class="theme-select">
-                <label>
-                    <input type="radio" class="theme" name="themeRadio" value="theme0" checked>
-                    <span>默认白</span>
-                </label>
-                <label>
-                    <input type="radio" class="theme" name="themeRadio" value="theme1">
-                    <span>海阔天空</span>
-                </label>
-                <label>
-                    <input type="radio" class="theme" name="themeRadio" value="theme2">
-                    <span>夏日海岸</span>
-                </label>
-                <label>
-                    <input type="radio" class="theme" name="themeRadio" value="theme3">
-                    <span>樱雨绵绵</span>
-                </label>
-            </div>
             <button id="logout-btn" class="value" type="button">退出登录</button>
         </div>
     </div>
@@ -243,18 +219,23 @@
                     <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
                 </div>
 
-                <form id="preferences-form">
+                <section id="preferences-panel">
                     <fieldset id="preferences-fields" disabled>
-                        <legend>输入习惯</legend>
+                        <legend>偏好</legend>
+                        <div class="preference-row" id="theme-label">主题</div>
+                        <div class="theme-select" role="radiogroup" aria-labelledby="theme-label">
+                            <label><input type="radio" class="theme" name="themeRadio" value="theme0" checked><span>默认白</span></label>
+                            <label><input type="radio" class="theme" name="themeRadio" value="theme1"><span>海阔天空</span></label>
+                            <label><input type="radio" class="theme" name="themeRadio" value="theme2"><span>夏日海岸</span></label>
+                            <label><input type="radio" class="theme" name="themeRadio" value="theme3"><span>樱雨绵绵</span></label>
+                        </div>
                         <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
                             <select id="send-shortcut"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
                         </label>
-                        <p class="settings-help">Shift+Enter 始终换行；Ctrl+Enter 模式下也支持 ⌘+Enter。</p>
-                        <button type="submit" id="save-preferences" class="model-submit settings-save">保存输入设置</button>
                     </fieldset>
                     <p id="preferences-status" role="status"></p>
                     <button type="button" id="reload-settings">重新读取设置</button>
-                </form>
+                </section>
 
                 <!-- 修改模型配置的弹窗 -->
                 <dialog id="model-edit-modal" class="modal" aria-labelledby="open-modify-btn">

@@ -33,6 +33,8 @@ class SettingsTests(unittest.TestCase):
                 ModelSettings(model_merchant='deepseek', model_name='M', base_url=address)
         with self.assertRaises(ValidationError):
             Preferences(send_shortcut='unknown')
+        with self.assertRaises(ValidationError):
+            Preferences(theme='unknown')
 
     def test_failed_write_keeps_previous_config(self):
         from app.llm.admin_settings import ModelSettings
@@ -51,7 +53,7 @@ class SettingsTests(unittest.TestCase):
             'preferences': {'reply_length': 'short', 'split_reply': False, 'playback_mode': 'instant', 'reply_interval_ms': 2000, 'send_shortcut': 'ctrl_enter'}
         }), encoding='utf-8')
         loaded = self.store.get()
-        self.assertEqual(loaded.preferences.model_dump(), {'send_shortcut': 'ctrl_enter'})
+        self.assertEqual(loaded.preferences.model_dump(), {'send_shortcut': 'ctrl_enter', 'theme': 'theme0'})
         self.assertEqual(loaded.model.model_name, 'MyModel')
 
 

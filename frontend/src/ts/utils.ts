@@ -103,9 +103,4 @@ export function showChatHistory(chatHistory: ConversationItem[]){
 //设置主题
 export function switchTheme(theme:string){
     document.documentElement.className = theme;
-    try {
-        localStorage.setItem('theme', theme);
-    } catch {
-        // 存储不可用时，仍可临时切换主题。
-    }
 }
