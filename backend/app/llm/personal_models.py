@@ -157,10 +157,6 @@ class PersonalModelStore:
             if not protect_file(path):
                 self._write(path, self._defaults())
 
-    def read_file(self, path: Path) -> ActivePersonalModel | None:
-        settings, _ = self._decode(path)
-        return self._active(settings)
-
     def _read(self, user_id: int, *, persist: bool) -> _PersonalSettings:
         path = self.path_for(user_id)
         try:

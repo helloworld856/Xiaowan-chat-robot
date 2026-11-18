@@ -1,6 +1,9 @@
 """
 代理工厂 - 动态创建不同厂商的代理
 """
+from os import getenv
+
+import httpx
 from langchain.agents import create_agent
 from app.llm.model_catalog import ModelAdapter
 from app.llm.persona import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
@@ -22,8 +25,14 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
         from langchain_openai import ChatOpenAI
         if validation_timeout is not None:
             options.update(timeout=validation_timeout, max_retries=0)
+        timeout = validation_timeout or CHAT_MODEL_TIMEOUT_SECONDS
         if public_only:
-            options.update(public_http_clients(base_url, validation_timeout or CHAT_MODEL_TIMEOUT_SECONDS))
+            options.update(public_http_clients(base_url, timeout))
+        else:
+            # 模型请求携带密钥，禁止 OpenAI 客户端自动跟随重定向。
+            http_options = {'timeout': timeout, 'follow_redirects': False, 'proxy': getenv('OPENAI_PROXY') or None}
+            options.update(http_client=httpx.Client(**http_options),
+                           http_async_client=httpx.AsyncClient(**http_options), openai_proxy='')
         return ChatOpenAI(
             model=model_name,
             api_key=api_key,

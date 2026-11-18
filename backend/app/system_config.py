@@ -3,6 +3,7 @@
 import json
 import os
 from collections import ChainMap
+from io import StringIO
 from pathlib import Path
 from typing import Literal
 
@@ -11,8 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from app.accounts.files import protect_file, read_text
 from app.config import BACKEND_ROOT
-from app.json_files import atomic_write_text, backup_provider_migration, strip_json_line_comments
+from app.json_files import (atomic_write_text, backup_provider_migration, dotenv_assignment,
+                            remove_json_section_field, strip_json_line_comments)
 from app.llm.model_catalog import ModelCatalog, default_model_catalog
+
+MAX_PASSWORD_INPUT_LENGTH = 256
 
 
 class _ConfigSection(BaseModel):
@@ -23,7 +27,7 @@ class DatabaseConfig(_ConfigSection):
     host: str = Field(default='localhost', min_length=1, description='MySQL 主机名或 IP。')
     port: int = Field(default=3306, ge=1, le=65535, description='MySQL 端口。')
     user: str = Field(default='root', min_length=1, description='MySQL 登录用户名。')
-    password: SecretStr = Field(default=SecretStr(''), description='MySQL 登录密码，只保存在服务器上。')
+    password: SecretStr = Field(default=SecretStr(''), exclude=True)
     name: str = Field(default='XiaoWan', pattern=r'^[A-Za-z0-9_]+$', description='数据库名称，允许字母、数字和下划线。')
     charset: str = Field(default='utf8mb4', min_length=1, description='MySQL 连接字符集。')
 
@@ -43,8 +47,8 @@ class ChatConfig(_ConfigSection):
 
 
 class PasswordConfig(_ConfigSection):
-    min_length: int = Field(default=6, ge=1, le=256, description='注册或改密时，新密码的最少字符数。')
-    max_length: int = Field(default=15, ge=1, le=256, description='注册或改密时，新密码的最多字符数，上限为 256。')
+    min_length: int = Field(default=6, ge=1, le=MAX_PASSWORD_INPUT_LENGTH, description='注册或改密时，新密码的最少字符数。')
+    max_length: int = Field(default=15, ge=1, le=MAX_PASSWORD_INPUT_LENGTH, description='注册或改密时，新密码的最多字符数，上限为 256。')
 
     @model_validator(mode='after')
     def check_length_range(self):
@@ -93,7 +97,7 @@ class LoggingConfig(_ConfigSection):
 
 
 class SystemConfig(_ConfigSection):
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig, description='MySQL 连接设置。')
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig, description='MySQL 连接设置。密码由 .env 的 MYSQL_PASSWORD 提供。')
     server: ServerConfig = Field(default_factory=ServerConfig, description='小晚后端监听设置。')
     chat: ChatConfig = Field(default_factory=ChatConfig, description='聊天队列、输入与历史设置。')
     models: ModelCatalog = Field(default_factory=default_model_catalog, description='厂商默认地址、协议和可选模型。')
@@ -107,6 +111,38 @@ class SystemConfig(_ConfigSection):
 def legacy_environment(root: Path) -> ChainMap:
     # 旧启动方式优先使用进程环境，迁移沿用这个优先级。
     return ChainMap(os.environ, dotenv_values(root / '.env'))
+
+
+def _with_database_password(settings: SystemConfig, env_path: Path, *, migrate: bool) -> SystemConfig:
+    try:
+        if migrate:
+            protect_file(env_path)
+        try:
+            text = read_text(env_path)
+        except FileNotFoundError:
+            text = None
+        password = dotenv_values(stream=StringIO(text or ''), interpolate=False).get('MYSQL_PASSWORD')
+        if password is None:
+            if 'password' in settings.database.model_fields_set:
+                password = settings.database.password.get_secret_value()
+            else:
+                password = legacy_environment(env_path.parent).get('PASSWORD')
+            if migrate and password is not None:
+                # 先写入并确认 .env 可以读回密码，之后才能移除旧字段。
+                original = text or ''
+                separator = '\n' if original and not original.endswith('\n') else ''
+                updated = original + separator + dotenv_assignment('MYSQL_PASSWORD', password)
+                if dotenv_values(stream=StringIO(updated), interpolate=False).get('MYSQL_PASSWORD') != password:
+                    raise ValueError('数据库密码无法写入 .env')
+                if text is not None and read_text(env_path) != text:
+                    raise OSError('.env 在读取后已被更新')
+                atomic_write_text(env_path, updated, replace=text is not None)
+                if dotenv_values(stream=StringIO(read_text(env_path)), interpolate=False).get('MYSQL_PASSWORD') != password:
+                    raise ValueError('数据库密码无法从 .env 读回')
+    except (OSError, ValueError):
+        raise ValueError('无法读取或迁移 MySQL 密码，请检查 backend/.env 的格式和权限') from None
+    database = settings.database.model_copy(update={'password': SecretStr(password or '')})
+    return settings.model_copy(update={'database': database})
 
 
 def _format_config_object(data: dict, source, depth: int = 0) -> str:
@@ -132,7 +168,6 @@ def _format_config_object(data: dict, source, depth: int = 0) -> str:
 
 def format_system_config(settings: SystemConfig) -> str:
     data = settings.model_dump(mode='json')
-    data['database']['password'] = settings.database.password.get_secret_value()
     return '// 小晚全局配置。修改后重启后端生效。\n' + _format_config_object(data, settings) + '\n'
 
 
@@ -154,23 +189,28 @@ def load_system_config(root: Path | None = None, *, migrate: bool = False) -> Sy
     except (OSError, ValueError):
         raise ValueError('无法读取 system_config.json，请检查文件格式、字段或权限') from None
     else:
+        settings = _with_database_password(settings, root / '.env', migrate=migrate)
         if migrate:
             original = json.loads(json_text)
+            scrubbed = remove_json_section_field(text, 'database', 'password')
+            if scrubbed != text:
+                scrubbed = scrubbed.replace('    // MySQL 登录密码，只保存在服务器上。\n', '')
             previous = original.get('models', {}).get('providers', {})
             old_lists = [provider['models'] for provider in previous.values() if isinstance(provider['models'], dict)]
             if any(any(any(value is not None for value in model.values()) for model in names.values() if isinstance(model, dict))
                    for names in old_lists):
-                backup_provider_migration(path, text)
+                backup_provider_migration(path, scrubbed)
             # 纯 JSON 旧配置补齐字段和说明，已经带注释的文件保留手写注释。
             if old_lists or json_text == text:
                 _write_system_config(path, settings, replace=True)
+            elif scrubbed != text:
+                atomic_write_text(path, scrubbed)
         return settings
 
     try:
         legacy = legacy_environment(root)
         defaults = ChatConfig()
         settings = SystemConfig(
-            database=DatabaseConfig(password=SecretStr(legacy.get('PASSWORD') or '')),
             chat=ChatConfig(
                 concurrency=int(legacy.get('XIAOWAN_CHAT_CONCURRENCY', defaults.concurrency)),
                 queue_size=int(legacy.get('XIAOWAN_CHAT_QUEUE_SIZE', defaults.queue_size)),
@@ -180,6 +220,7 @@ def load_system_config(root: Path | None = None, *, migrate: bool = False) -> Sy
     except (OSError, TypeError, ValueError):
         raise ValueError('无法读取旧版数据库或并发配置，请检查 .env 或创建 system_config.json') from None
 
+    settings = _with_database_password(settings, root / '.env', migrate=migrate)
     if migrate:
         try:
             _write_system_config(path, settings, replace=False)

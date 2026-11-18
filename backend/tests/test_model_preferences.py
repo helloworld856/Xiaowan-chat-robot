@@ -44,6 +44,8 @@ class ModelSettingsTests(unittest.TestCase):
                                            base_url='https://example.com/v1', adapter='openai')
         self.assertEqual(openai['timeout'], 8)
         self.assertEqual(openai['max_retries'], 0)
+        self.assertFalse(openai['http_client'].follow_redirects)
+        self.assertFalse(openai['http_async_client'].follow_redirects)
         self.assertEqual(openai['default_headers']['Accept-Encoding'], 'gzip, deflate')
         self.assertEqual(native['max_retries'], 1)
         self.assertEqual(native['model_kwargs']['request_timeout'], 8)
@@ -54,3 +56,5 @@ class ModelSettingsTests(unittest.TestCase):
         for agent in custom:
             self.assertEqual(agent['model']['base_url'], 'https://example.com/v1')
             self.assertEqual(agent['model']['model'], 'Custom-V2')
+            self.assertFalse(agent['model']['http_client'].follow_redirects)
+            self.assertFalse(agent['model']['http_async_client'].follow_redirects)

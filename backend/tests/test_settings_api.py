@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
-import _imports
+from _imports import fixture_admin_auth
 
 from app.accounts.preferences import Preferences
 from app.api import model, settings
@@ -16,6 +16,7 @@ from app.llm import configuration, factory
 from app.llm.admin_models import AdminModelStore
 from app.llm.admin_settings import ModelSettings
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
+from app.llm.model_catalog import default_model_catalog
 from app.llm.personal_models import PersonalModelStore
 from app.system_config import ModelRuntimeConfig
 from test_auth import request
@@ -25,9 +26,13 @@ class SettingsAPITests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
-        self.store = AdminModelStore(Path(self.directory.name) / '.env')
+        catalog = default_model_catalog()
+        catalog.providers['deepseek'] = catalog.providers['deepseek'].model_copy(
+            update={'admin_allowed_base_urls': ['https://example.com/v1']},
+        )
+        self.store = AdminModelStore(Path(self.directory.name) / '.env', catalog)
         self.model_path = self.store.path
-        personal_models = PersonalModelStore(Path(self.directory.name) / 'users')
+        personal_models = PersonalModelStore(Path(self.directory.name) / 'users', catalog)
         self.old_agents = (object(), object(), object())
         self.new_agents = (object(), object(), object())
         self.runtime = AdminModelRuntime()
@@ -156,6 +161,44 @@ class SettingsAPITests(unittest.TestCase):
         self.assertEqual(self.agent_calls.call_args.kwargs['base_url'], self.config['base_url'])
         self.assertEqual(self.store.get().providers['deepseek'].model_name, 'deepseek-v4-pro')
 
+    def test_admin_rejects_unapproved_endpoint_before_using_a_key(self):
+        from app.llm.admin_models import AdminModelFile
+
+        self.assertTrue(self.switch(self.selection).status)
+        before = self.model_path.read_bytes()
+        self.model_calls.reset_mock()
+        self.agent_calls.reset_mock()
+        address = 'https://unapproved.example.test/v1'
+        for configure in (self.probe, self.switch):
+            for key in (None, 'test-replacement-key'):
+                selection = model.ModelConfigRequest(**{**self.config, 'base_url': address}, api_key=key)
+                self.assertFalse(configure(selection).status)
+        self.model_calls.assert_not_called()
+        self.agent_calls.assert_not_called()
+        self.assertEqual(self.model_path.read_bytes(), before)
+
+        # 模拟修复前写入的文件。重启也不能再激活未经批准的地址。
+        self.store.update_model(self.selection.selection().model_copy(update={'base_url': address}),
+                                SecretStr('test-stored-key'), replace_key=True)
+        self.configuration.activate_saved_model(AdminModelFile)
+        self.agent_calls.assert_not_called()
+
+    def test_admin_saved_key_stays_bound_to_its_existing_approved_address(self):
+        self.assertTrue(self.switch(self.selection).status)
+        self.model_calls.reset_mock()
+        self.agent_calls.reset_mock()
+        for configure in (self.probe, self.switch):
+            selection = model.ModelConfigRequest(**{**self.config, 'base_url': ''})
+            self.assertFalse(configure(selection).status)
+        self.model_calls.assert_not_called()
+        self.agent_calls.assert_not_called()
+
+        with_new_key = model.ModelConfigRequest(**{**self.config, 'base_url': ''}, api_key='test-default-key')
+        self.assertTrue(self.switch(with_new_key).status)
+        explicit_default = model.ModelConfigRequest(**{**self.config, 'base_url': 'https://api.deepseek.com'})
+        self.assertTrue(self.switch(explicit_default).status)
+        self.assertEqual(self.model_calls.call_args.args[1], 'test-default-key')
+
     def test_admin_model_and_preferences_are_isolated_from_ordinary_user(self):
         self.assertTrue(self.switch(self.selection).status)
         self.assertEqual(self.current_agents(), self.new_agents)
@@ -186,7 +229,7 @@ class SettingsAPITests(unittest.TestCase):
         self.assertFalse(self.model_path.exists())
 
     def test_invalid_model_address_does_not_echo_url_parser_details(self):
-        app = create_app('test')
+        app = create_app('test', auth_service=fixture_admin_auth())
         app.state.model_configuration = self.configuration
         app.include_router(model.router)
         token, _ = app.state.auth.login('admin', '123456', 'test')

@@ -13,6 +13,51 @@ class ConfigFileTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
 
+    def test_backend_requires_env_password_on_an_empty_database(self):
+        from fastapi.testclient import TestClient
+        from app.accounts.profile import ProfileStore
+        from app.application import build_application
+
+        with (patch('app.application.SQLAccountStore') as accounts,
+              patch('app.application.initialize_schema'),
+              patch('app.application.reset_chat_history') as reset):
+            accounts.return_value.get_admin.return_value = None
+            app = build_application(MagicMock(), ProfileStore(self.root / 'user_data'), self.root / 'auth_config')
+            with self.assertRaisesRegex(RuntimeError, 'ADMIN_INITIAL_PASSWORD'), TestClient(app):
+                self.fail('没有管理员时不应启动服务')
+            accounts.return_value.initialize_admin.assert_not_called()
+            reset.assert_not_called()
+
+    def test_startup_initializes_admin_from_dotenv_once(self):
+        from fastapi.testclient import TestClient
+        from app.accounts.auth_service import _verify_password
+        from app.accounts.profile import ProfileStore
+        from app.accounts.repository import User
+        from app.application import build_application
+        from app.llm.admin_settings import SettingsStore
+        from app.system_config import SystemConfig
+
+        password = 'test pass ${UNEXPANDED}'
+        env_file = self.root / '.env'
+        env_file.write_text(f"ADMIN_INITIAL_PASSWORD='{password}'\nADMIN_PROVIDERS='{{}}'\n", encoding='utf-8')
+        admin = User(12, 'admin', 'admin')
+        config = SystemConfig(chat={'clear_history_on_startup': False})
+        with (patch('app.application.SQLAccountStore') as accounts,
+              patch('app.application.initialize_schema'),
+              patch('app.application.settings_store', SettingsStore(self.root / 'settings.json')),
+              patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None)):
+            store = accounts.return_value
+            store.get_admin.side_effect = [None, admin]
+            store.initialize_admin.return_value = admin
+            for _ in range(2):
+                profiles = ProfileStore(self.root / 'users')
+                app = build_application(MagicMock(), profiles, self.root / 'auth_config', system_config=config)
+                with TestClient(app):
+                    self.assertTrue(profiles.path_for(admin.id).is_file())
+                env_file.write_text("ADMIN_PROVIDERS='{}'\n", encoding='utf-8')
+        store.initialize_admin.assert_called_once()
+        self.assertTrue(_verify_password(password, store.initialize_admin.call_args.args[0]))
+
     def test_older_global_config_is_extended_with_comments_and_keeps_existing_values(self):
         from app.system_config import load_system_config
 
@@ -25,6 +70,8 @@ class ConfigFileTests(unittest.TestCase):
         self.assertIn('//', path.read_text(encoding='utf-8'))
         self.assertIn('"session_ttl_seconds": 28800', path.read_text(encoding='utf-8'))
         self.assertEqual(load_system_config(self.root), loaded)
+        self.assertNotIn('p//w', path.read_text(encoding='utf-8'))
+        self.assertIn("MYSQL_PASSWORD='p//w'", (self.root / '.env').read_text(encoding='utf-8'))
 
     def test_system_catalog_migrates_to_lists_and_backs_up_old_address_overrides(self):
         from app.json_files import strip_json_line_comments
@@ -51,6 +98,51 @@ class ConfigFileTests(unittest.TestCase):
         path.write_text(text, encoding='utf-8')
         self.assertFalse(load_system_config(self.root, migrate=True).chat.clear_history_on_startup)
         self.assertEqual(path.read_text(encoding='utf-8'), text)
+
+    def test_password_migration_preserves_comments_and_special_characters(self):
+        from app.system_config import load_system_config
+
+        path = self.root / 'system_config.json'
+        password = "p'\\#${LITERAL}//word"
+        path.write_text(
+            '{\n // operator note\n "database": {"host":"database.example","password":'
+            + json.dumps(password) + '}\n}\n', encoding='utf-8',
+        )
+        env = self.root / '.env'
+        existing = "# Keep my settings\nADMIN_PROVIDERS='{}'\n"
+        env.write_text(existing, encoding='utf-8')
+        loaded = load_system_config(self.root, migrate=True)
+        self.assertEqual(loaded.database.password.get_secret_value(), password)
+        self.assertEqual(load_system_config(self.root).database.password.get_secret_value(), password)
+        self.assertTrue(env.read_text(encoding='utf-8').startswith(existing))
+        self.assertIn('// operator note', path.read_text(encoding='utf-8'))
+        self.assertIn('"host":"database.example"', path.read_text(encoding='utf-8'))
+        self.assertNotIn('"password"', path.read_text(encoding='utf-8'))
+
+    def test_env_password_overrides_a_legacy_json_password(self):
+        from app.system_config import load_system_config
+
+        path = self.root / 'system_config.json'
+        path.write_text('{"database":{"password":"old-test-password"}}', encoding='utf-8')
+        env = self.root / '.env'
+        existing = "MYSQL_PASSWORD='test-configured-password'\n"
+        env.write_text(existing, encoding='utf-8')
+        self.assertEqual(load_system_config(self.root, migrate=True).database.password.get_secret_value(),
+                         'test-configured-password')
+        self.assertEqual(env.read_text(encoding='utf-8'), existing)
+        self.assertNotIn('old-test-password', path.read_text(encoding='utf-8'))
+
+    def test_failed_env_write_keeps_the_legacy_config_for_retry(self):
+        from app.system_config import load_system_config
+
+        path = self.root / 'system_config.json'
+        original = '{"database":{"password":"test-password"}}'
+        path.write_text(original, encoding='utf-8')
+        with patch('app.system_config.atomic_write_text', side_effect=OSError('write failed')):
+            with self.assertRaisesRegex(ValueError, r'backend/\.env'):
+                load_system_config(self.root, migrate=True)
+        self.assertEqual(path.read_text(encoding='utf-8'), original)
+        self.assertFalse((self.root / '.env').exists())
 
     def test_personal_model_switch_reuses_the_provider_address_and_key(self):
         from app.llm.personal_models import PersonalModel, PersonalModelStore
@@ -104,10 +196,12 @@ class ConfigFileTests(unittest.TestCase):
             config = load_system_config(self.root, migrate=True)
             data = json.loads(strip_json_line_comments(path.read_text(encoding='utf-8')))
             self.assertEqual(config.database.password.get_secret_value(), 'old-password')
-            self.assertEqual(data['database']['password'], 'old-password')
+            self.assertNotIn('password', data['database'])
+            self.assertIn("MYSQL_PASSWORD='old-password'", legacy.read_text(encoding='utf-8'))
             self.assertEqual(data['chat']['queue_size'], 15)
             path.write_text(json.dumps({**data, 'server': {'host': '127.0.0.1', 'port': 8123}}), encoding='utf-8')
-            legacy.write_text('PASSWORD=other-password\nXIAOWAN_CHAT_QUEUE_SIZE=1\n', encoding='utf-8')
+            new_env = legacy.read_text(encoding='utf-8').replace('PASSWORD=old-password\n', 'PASSWORD=other-password\n')
+            legacy.write_text(new_env, encoding='utf-8')
             reloaded = load_system_config(self.root, migrate=True)
         self.assertEqual(reloaded.database.password.get_secret_value(), 'old-password')
         self.assertEqual(reloaded.chat.queue_size, 15)
@@ -248,7 +342,7 @@ class ConfigFileTests(unittest.TestCase):
               patch('app.application.initialize_schema'), patch('app.application.reset_chat_history') as reset,
               patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None),
               patch('app.llm.factory.create_agents', return_value=(object(), object(), object())) as agents):
-            accounts.return_value.seed_admin.return_value = User(12, 'admin', 'admin')
+            accounts.return_value.get_admin.return_value = User(12, 'admin', 'admin')
             app = build_application(db, ProfileStore(self.root / 'user_data'), legacy,
                                     chat_config=ChatConfig(concurrency=6, queue_size=10, queue_timeout=3,
                                                            clear_history_on_startup=False))
@@ -284,7 +378,7 @@ class ConfigFileTests(unittest.TestCase):
               patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None),
               patch('app.accounts.preferences.UserPreferencesStore.import_legacy') as import_preferences,
               patch('app.llm.factory.create_agents', return_value=(object(), object(), object())) as agents):
-            accounts.return_value.seed_admin.return_value = User(12, 'admin', 'admin')
+            accounts.return_value.get_admin.return_value = User(12, 'admin', 'admin')
             profiles = ProfileStore(self.root / 'user_data')
             app = build_application(MagicMock(), profiles, legacy, system_config=config)
             with TestClient(app):

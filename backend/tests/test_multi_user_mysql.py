@@ -40,15 +40,16 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         from app import application as main
         from app.accounts.auth_service import hash_password
         from app.accounts.profile import ProfileStore
+        from app.accounts.repository import SQLAccountStore
+        from app.database.mysql import initialize_schema
         from app.llm.admin_settings import SettingsStore
 
         pool, _, _ = self.make_database()
         with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
             folder = Path(directory)
             password = 'test configuration'
-            (folder / 'admin.json').write_text(json.dumps({
-                'username': 'admin', 'password_hash': hash_password(password),
-            }), encoding='utf-8')
+            initialize_schema(pool)
+            SQLAccountStore(pool).initialize_admin(hash_password(password))
             (folder / 'profile.json').write_text('{invalid', encoding='utf-8')
             profiles = ProfileStore(folder / 'profiles')
             with patch.object(main, 'settings_store', SettingsStore(folder / 'settings.json')):
@@ -59,11 +60,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(login.status_code, 200)
                         self.assertEqual((await client.get('/profile')).json()['nickname'], 'admin')
 
-    def test_existing_account_preferences_migrate_and_can_be_rolled_back(self):
+    def test_existing_account_preferences_migrate_on_first_read(self):
         from app.accounts.repository import SQLAccountStore
         from app.accounts.auth_service import hash_password
         from app.database.mysql import initialize_schema
-        from migrate_user_data import migrate_accounts
         from app.accounts.profile import Profile, ProfileStore
         from app.accounts.preferences import Preferences, UserPreferencesStore
         from app.accounts.directory import UserDirectoryStore
@@ -73,23 +73,20 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         accounts = SQLAccountStore(pool)
         user = accounts.register('Legacy_User', hash_password('test only'))
         legacy = UserPreferencesStore(pool)
-        legacy.update(user.id, Preferences(send_shortcut='ctrl_enter'))
+        legacy.import_legacy(user.id, Preferences(send_shortcut='ctrl_enter'))
         with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
             profiles = ProfileStore(Path(directory) / 'profiles')
             data = UserDirectoryStore(profiles, legacy)
             profiles.update(user.id, Profile(nickname='旧资料', avatar_id='fox'))
             before = profiles.path_for(user.id).read_bytes()
-            self.assertEqual(migrate_accounts(accounts, data).pending, 1)
             self.assertFalse(data.preferences.path_for(user.id).exists())
 
-            self.assertEqual(migrate_accounts(accounts, data, apply=True).updated, 1)
-            self.assertEqual(profiles.path_for(user.id).read_bytes(), before)
             self.assertEqual(data.preferences.get(user.id).send_shortcut, 'ctrl_enter')
+            self.assertTrue(data.preferences.path_for(user.id).exists())
+            self.assertEqual(profiles.path_for(user.id).read_bytes(), before)
             data.preferences.update(user.id, Preferences())
-            self.assertEqual(migrate_accounts(accounts, data, apply=True).updated, 0)
+            self.assertEqual(data.preferences.get(user.id).send_shortcut, 'enter')
             self.assertEqual(legacy.find(user.id).send_shortcut, 'ctrl_enter')
-            self.assertEqual(migrate_accounts(accounts, data, rollback=True).updated, 1)
-            self.assertEqual(legacy.find(user.id).send_shortcut, 'enter')
 
     async def test_migration_account_isolation_concurrent_graphs_and_restart(self):
         import httpx
@@ -98,7 +95,8 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         from app.llm.model_catalog import default_model_catalog
         from app import application as main
         from app.accounts.auth_service import hash_password
-        from app.database.mysql import open_pool
+        from app.accounts.repository import SQLAccountStore
+        from app.database.mysql import initialize_schema, open_pool
         from app.accounts.profile import ProfileStore
         from app.llm.admin_settings import SettingsStore
 
@@ -113,7 +111,8 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
             folder = Path(directory)
             credential = 'test admin password'
-            (folder / 'admin.json').write_text(json.dumps({'username': 'admin', 'password_hash': hash_password(credential)}), encoding='utf-8')
+            initialize_schema(pool)
+            SQLAccountStore(pool).initialize_admin(hash_password(credential))
             (folder / 'profile.json').write_text('{"nickname":"旧昵称","avatar_id":"frog"}', encoding='utf-8')
             profiles = ProfileStore(folder / 'profiles')
             model_settings = SettingsStore(folder / 'settings.json')

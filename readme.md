@@ -29,9 +29,9 @@ npm --prefix frontend run build
 
 首次运行需要构建一次：后端启动时会检查 `frontend/dist`，即使使用Vite开发也需要该目录。构建产物不随仓库提交。
 
-首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 的连接信息。全局配置支持 `//` 行注释，字段用途、单位和可选值写在对应字段旁。编辑后重启后端生效。数据库 `XiaoWan` 和所需表会在启动时创建。管理员可使用 `backend/.env.example` 创建 `backend/.env`，也可登录后在网页设置中保存模型和 API Key。
+首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 地址、用户名和库名。全局配置支持 `//` 行注释，字段用途、单位和可选值写在对应字段旁。编辑后重启后端生效。复制 `backend/.env.example` 为 `backend/.env` 后，填写 `MYSQL_PASSWORD` 和管理员初始密码。后端启动时会创建数据库和所需表。登录后可在网页设置中保存模型和 API Key。
 
-已有部署升级时，保留原来的 `backend/system_config.json`、`backend/.env` 和 `backend/user_data/`。首次启动会给旧版纯 JSON 全局配置补齐默认项和字段说明，保留原有值。如果全局配置尚未创建，数据库密码和并发参数会从旧 `.env` 导入。
+已有部署升级时，保留原来的 `backend/system_config.json`、`backend/.env` 和 `backend/user_data/`。首次启动会给旧版纯 JSON 全局配置补齐默认项和字段说明。MySQL 密码会迁移到 `.env` 的 `MYSQL_PASSWORD`，并从旧全局配置移除。已经设置的 `MYSQL_PASSWORD` 优先。如果全局配置尚未创建，旧 `.env` 中的并发参数仍可迁入。
 
 如果服务器已有自定义的 `backend/settings.json`，更新前请保留一份本地副本供迁移。这个文件由 Git 忽略，启动时仍可读取。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`，新安装从全局配置读取默认模型。
 
@@ -40,6 +40,8 @@ npm --prefix frontend run build
 ## 聊天设置
 
 管理员和普通用户都可以在网页设置中查看和更改厂商的 API 基础地址。模型选项来自 `system_config.json`，后端用同一份列表校验测试和保存请求。自定义地址须兼容 OpenAI 聊天接口，并包含所需的 `/v1` 等基础路径。普通用户的自定义地址还须使用公网 HTTPS。清空地址并保存可恢复全局配置中的厂商地址和协议。
+
+管理员可以使用厂商默认地址，以及服务器在 `models.providers.<厂商>.admin_allowed_base_urls` 中批准的完整地址。修改批准列表后重启后端。已有管理员自定义地址也须先经批准，才能在启动时加载。管理员更换地址时须为目标地址填写 API Key。
 
 “测试连接”只验证连接，不保存或切换；“保存并切换”验证成功后保存配置，并更新聊天、分析、摘要三个代理。验证或保存失败时保留当前模型。
 
@@ -59,7 +61,9 @@ npm --prefix frontend run build
 
 打开登录页可用用户名和密码注册普通账号。用户名支持 3–32 个英文字母、数字或下划线，唯一性检查不区分大小写，`admin` 及其大小写变体为保留用户名。注册和设置新密码时使用 6–15 个字符。账户和密码哈希保存在 MySQL。
 
-从旧版升级时，首次启动将 `backend/auth_config/admin.json`、旧资料和发送快捷键导入管理员账号，已迁入的账户数据优先。首次安装的本地管理员用户名为 `admin`，初始密码为 `123456`。管理员可以在个人资料中修改密码。
+首次安装或使用空数据库时，在 `backend/.env` 的 `ADMIN_INITIAL_PASSWORD` 填写自己设置的 12–256 字符密码，然后正常启动后端。服务会创建用户名为 `admin` 的账号，并在 MySQL 中保存加盐哈希。确认登录成功后可从 `.env` 移除这一项。已有管理员的部署沿用 MySQL 中的账号和密码，改密在网页的个人资料中完成。
+
+如果旧部署仍有自定义的 `backend/auth_config/profile.json`，升级前可保留本地副本。服务启动时会把它导入尚未创建的管理员资料。
 
 登录 Cookie 默认有效期为 8 小时，可在 `auth.session_ttl_seconds` 修改。刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
 
@@ -105,19 +109,4 @@ python run_serve.py
 
 升级已有服务器时，一并备份 MySQL、`backend/user_data/` 和服务端配置。保留 MySQL 中的账号 ID 与目录名的对应关系。
 
-停掉旧版小晚，保留 MySQL 服务运行。用平时启动小晚的 Linux 用户，在项目根目录的后端 Python 环境执行：
-
-```bash
-python backend/migrate_user_data.py --dry-run
-```
-
-预览结果正常后，执行迁移并启动新版：
-
-```bash
-python backend/migrate_user_data.py --apply && python backend/run_serve.py
-```
-
-迁移补齐缺失文件，把原有发送快捷键导入各自的 `preferences.json`。资料和模型配置沿用原来的内容。异常会列出账号 ID，修复对应文件或权限后可再次执行。
-
-回退前请用当前版本运行 `python backend/migrate_user_data.py --rollback-preferences`，将个人文件中的偏好回填到 MySQL，再启动旧版。
-如果运行旧版期间修改了快捷键，下一次升级前先将对应的 `preferences.json` 移到备份位置，再执行迁移，读取旧版 MySQL 中的最新值。
+升级后正常启动后端。新注册账号会自动创建个人文件。已有账号首次读取缺失的偏好文件时，后端会从 MySQL 导入旧快捷键。已有个人文件优先使用。

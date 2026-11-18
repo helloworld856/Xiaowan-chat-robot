@@ -10,7 +10,7 @@ from dotenv.parser import parse_stream
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, ValidationError
 
 from app.accounts.files import protect_file, read_text
-from app.json_files import atomic_write_text, backup_provider_migration
+from app.json_files import atomic_write_text, backup_provider_migration, dotenv_assignment
 from app.llm.admin_settings import ApiKey, ModelSettings
 from app.llm.model_catalog import BaseURL, ModelCatalog, ModelMerchant, default_model_catalog, migration_model_name
 
@@ -199,7 +199,5 @@ class AdminModelStore:
         other = ''.join(binding.original.string for binding in bindings
                         if binding.key not in fields and binding.key not in retired).rstrip('\n')
         output = [other + '\n\n'] if other else []
-        for name, value in fields.items():
-            quoted = value.replace('\\', '\\\\').replace("'", "\\'")
-            output.append(f"{name}='{quoted}'\n")
+        output.extend(dotenv_assignment(name, value) for name, value in fields.items())
         atomic_write_text(self.path, ''.join(output))

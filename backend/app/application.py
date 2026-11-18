@@ -2,13 +2,14 @@ from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 
+from dotenv import dotenv_values
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
 from app.account_logging import close_account_logs, logger
-from app.accounts.auth_service import AuthService
+from app.accounts.auth_service import AuthService, hash_password
 from app.accounts.directory import UserDirectoryStore
-from app.accounts.files import UserDataPaths
+from app.accounts.files import UserDataPaths, protect_file
 from app.accounts.preferences import UserPreferencesStore
 from app.accounts.profile import ProfileStore
 from app.accounts.repository import SQLAccountStore
@@ -24,7 +25,7 @@ from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import ModelSettings, settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.model_catalog import ModelCatalog
-from app.system_config import ChatConfig, SystemConfig, legacy_environment
+from app.system_config import MAX_PASSWORD_INPUT_LENGTH, ChatConfig, SystemConfig, legacy_environment
 
 
 # 装配通用认证与资料接口，测试可以注入不依赖真实 MySQL 的存储。
@@ -55,20 +56,32 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
     if profile_store is None:
         profile_store = ProfileStore(config=config.profile, defaults=config.defaults)
     config_root = config_root if config_root is not None else legacy_root.parent
+    env_path = config_root / '.env'
     legacy_preferences = UserPreferencesStore(db)
     directories = UserDirectoryStore(profile_store, legacy_preferences, model_catalog or config.models,
                                      defaults=config.defaults)
     accounts = SQLAccountStore(db, prepare_user=directories.prepare_new)
     admin_model = AdminModelRuntime()
     model_configuration = ModelConfigurationService(
-        AdminModelStore(config_root / '.env', directories.models.catalog), directories.models,
+        AdminModelStore(env_path, directories.models.catalog), directories.models,
         admin_model, config=config.model_runtime,
     )
 
     def startup():
         logger.info("version:%s", VERSION)
         initialize_schema(db)
-        admin = accounts.seed_admin(legacy_root / 'admin.json')
+        admin = accounts.get_admin()
+        if admin is None:
+            # 只在空库读取初始密码，关闭变量展开以保留密码里的特殊字符。
+            try:
+                env = dotenv_values(env_path, interpolate=False) if protect_file(env_path) else {}
+            except (OSError, UnicodeError):
+                raise RuntimeError('无法读取 backend/.env 中的 ADMIN_INITIAL_PASSWORD') from None
+            password = env.get('ADMIN_INITIAL_PASSWORD') or ''
+            if not password.strip() or not 12 <= len(password) <= MAX_PASSWORD_INPUT_LENGTH:
+                raise RuntimeError(f'尚未初始化管理员，请在 backend/.env 中填写 12–{MAX_PASSWORD_INPUT_LENGTH} '
+                                   '个字符的 ADMIN_INITIAL_PASSWORD，再启动后端')
+            admin = accounts.initialize_admin(hash_password(password))
         try:
             profile_store.import_legacy_profile(admin.id, legacy_root / 'profile.json')
         except (OSError, ValueError):

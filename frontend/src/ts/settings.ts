@@ -53,7 +53,7 @@ export function updateSettingsPermissions() {
     apiKey.value = '';
     updateApiKeyPrompt(apiKey, false);
     document.getElementById('model-address-help')!.textContent = admin
-        ? '自定义地址需兼容 OpenAI 接口。'
+        ? '自定义地址须经服务器批准，并兼容 OpenAI 接口。更换地址时请重新填写 API Key。'
         : '自定义地址须使用公网 HTTPS，并兼容 OpenAI 接口。';
     document.getElementById('open-modify-btn')!.textContent = admin ? '修改模型配置' : '配置个人模型';
     document.getElementById('submit-model-btn')!.textContent = admin ? '保存并切换' : '保存模型';

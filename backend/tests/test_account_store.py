@@ -1,7 +1,6 @@
 """Exercise SQL persistence with an isolated database and MySQL parameter syntax adapter."""
 
 import json
-import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -13,7 +12,8 @@ from unittest.mock import patch
 
 import pymysql
 
-from test_auth import ROOT, request
+from _imports import fixture_admin_hash
+from test_auth import request
 from app.accounts.repository import AccountStorageError, DuplicateUsername, SQLAccountStore
 from app.accounts.auth_service import AuthService, COOKIE_NAME, InvalidCredentials, hash_password
 
@@ -75,17 +75,15 @@ class AccountStoreTests(unittest.TestCase):
                 password_hash TEXT NOT NULL, role TEXT NOT NULL
             )''')
             db.commit()
-        self.legacy_file = Path(directory.name) / 'admin.json'
-        shutil.copyfile(ROOT / 'auth_config' / 'admin.json', self.legacy_file)
+        self.root = Path(directory.name)
 
-    def test_admin_import_preserves_new_password_when_setup_runs_again(self):
+    def test_admin_initialization_preserves_new_password_when_setup_runs_again(self):
         old_password = '旧版密码' * 32
         new_password = '🔐' * 15
-        self.legacy_file.write_text(json.dumps({
-            'username': 'admin', 'password_hash': hash_password(old_password),
-        }), encoding='utf-8')
         store = SQLAccountStore(self.pool)
-        admin = store.seed_admin(self.legacy_file)
+        self.assertIsNone(store.get_admin())
+        admin = store.initialize_admin(hash_password(old_password))
+        self.assertEqual(store.get_admin(), admin)
         service = AuthService(account_store=store)
         from app.application import create_app
         app = create_app('test', auth_service=service)
@@ -97,10 +95,9 @@ class AccountStoreTests(unittest.TestCase):
             'current_password': old_password, 'new_password': new_password, 'confirm_password': new_password,
         }, cookie=cookie)
         self.assertEqual(status, 200)
-        self.legacy_file.unlink()
-
         restarted_store = SQLAccountStore(self.pool)
-        self.assertEqual(restarted_store.seed_admin(self.legacy_file), admin)
+        self.assertEqual(restarted_store.initialize_admin(hash_password(old_password)), admin)
+        self.assertEqual(restarted_store.get_admin(), admin)
         restarted_service = AuthService(account_store=restarted_store)
         self.assertEqual(restarted_service.login('admin', new_password, 'cli')[1], admin)
         with self.assertRaises(InvalidCredentials):
@@ -157,7 +154,7 @@ class AccountStoreTests(unittest.TestCase):
         from app.accounts.preferences import UserPreferencesStore
         from app.accounts.directory import UserDirectoryStore
 
-        directories = UserDirectoryStore(ProfileStore(self.legacy_file.parent / 'users'), UserPreferencesStore(self.pool))
+        directories = UserDirectoryStore(ProfileStore(self.root / 'users'), UserPreferencesStore(self.pool))
         store = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)
         commit = _Connection.commit
 
@@ -176,7 +173,7 @@ class AccountStoreTests(unittest.TestCase):
         from app.application import create_app
 
         store = SQLAccountStore(self.pool)
-        admin = store.seed_admin(self.legacy_file)
+        admin = store.initialize_admin(fixture_admin_hash())
         service = AuthService(account_store=store)
         app = create_app('test', auth_service=service)
         admin_tokens = [service.login('admin', '123456', 'cli')[0] for _ in range(2)]
@@ -204,7 +201,7 @@ class AccountStoreTests(unittest.TestCase):
         from app.application import create_app
 
         store = SQLAccountStore(self.pool)
-        admin = store.seed_admin(self.legacy_file)
+        admin = store.initialize_admin(fixture_admin_hash())
         service = AuthService(account_store=store)
         app = create_app('test', auth_service=service)
         token, _ = service.login('admin', '123456', 'cli')

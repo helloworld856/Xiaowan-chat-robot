@@ -15,7 +15,6 @@ from _imports import BACKEND_ROOT as ROOT
 from app.accounts.repository import User
 from app.account_logging import account_log_context
 from app.account_logging import AccountFileHandler, AccountLabel
-from migrate_user_data import migrate_accounts
 from app.llm.personal_models import PersonalModel
 from app.accounts.profile import Profile, ProfileStore
 from app.accounts.preferences import Preferences
@@ -33,7 +32,6 @@ class UserDirectoryTests(unittest.TestCase):
         self.store = UserDirectoryStore(ProfileStore(self.root / 'users'), self.legacy)
         self.admin = User(1, 'admin', 'admin')
         self.member = User(2, 'Member', 'user')
-        self.accounts = Mock(list_users=lambda: [self.admin, self.member])
 
     def test_registration_initializes_private_defaults_without_reading_mysql_preferences(self):
         self.store.prepare_new(self.member)
@@ -47,30 +45,22 @@ class UserDirectoryTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE((root / 'model.json').stat().st_mode), 0o600)
 
-    def test_preview_apply_and_rollback_are_repeatable_and_preserve_files(self):
+    def test_directory_initialization_preserves_existing_files(self):
         self.store.profiles.update(self.member.id, Profile(nickname='旧昵称', avatar_id='frog'))
         self.store.models.update(self.member.id, PersonalModel(model_merchant='deepseek', model_name='model',
                                                               api_key='local-test-placeholder'), ())
         personal = self.store.models.path_for(self.member.id)
         original = personal.read_bytes()
-        preview = migrate_accounts(self.accounts, self.store)
-        self.assertEqual((preview.total, preview.pending, preview.updated), (2, 2, 0))
-        self.assertFalse(self.store.paths.directory(self.admin.id).exists())
-        self.assertFalse(self.store.preferences.path_for(self.member.id).exists())
-
-        applied = migrate_accounts(self.accounts, self.store, apply=True)
-        self.assertEqual((applied.updated, applied.errors), (2, []))
+        self.store.ensure(self.admin)
+        self.store.ensure(self.member)
         self.assertEqual(self.store.preferences.get(self.admin.id).send_shortcut, 'ctrl_enter')
         self.assertFalse(self.store.models.path_for(self.admin.id).exists())
         self.assertEqual(personal.read_bytes(), original)
         self.assertEqual(self.store.profiles.get(self.member.id, self.member.username).nickname, '旧昵称')
 
         self.store.preferences.update(self.admin.id, Preferences())
-        self.assertEqual(migrate_accounts(self.accounts, self.store, apply=True).pending, 0)
+        self.store.ensure(self.admin)
         self.assertEqual(self.store.preferences.get(self.admin.id).send_shortcut, 'enter')
-        rolled_back = migrate_accounts(self.accounts, self.store, rollback=True)
-        self.assertEqual(rolled_back.updated, 2)
-        self.legacy.update.assert_any_call(self.admin.id, Preferences())
 
     def test_configured_defaults_apply_to_new_accounts_and_preserve_existing_files(self):
         self.store.prepare_new(self.member)
@@ -84,20 +74,13 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertEqual(updated.preferences.get(self.member.id), Preferences())
         self.assertEqual(profiles.get(self.member.id, self.member.username).avatar_id, 'cat')
 
-    def test_migration_reports_invalid_files_without_replacing_them(self):
+    def test_invalid_preferences_fall_back_without_replacing_the_file(self):
         self.store.prepare_new(self.member)
         path = self.store.preferences.path_for(self.member.id)
         path.write_text(json.dumps({'send_shortcut': 'invalid'}), encoding='utf-8')
         contents = path.read_bytes()
-        result = migrate_accounts(self.accounts, self.store, apply=True)
-        self.assertEqual(result.errors, [(self.member.id, 'ValidationError')])
+        self.assertEqual(self.store.preferences.get(self.member.id), Preferences())
         self.assertEqual(path.read_bytes(), contents)
-
-    def test_directory_inspection_is_read_only_and_role_specific(self):
-        required = {'profile.json', 'preferences.json', 'logs'}
-        self.assertEqual({path.name for path in self.store.inspect_missing(self.admin)}, required)
-        self.assertEqual({path.name for path in self.store.inspect_missing(self.member)}, required | {'model.json'})
-        self.assertFalse(self.store.paths.root.exists())
 
     def test_themes_survive_reload_and_remain_account_scoped(self):
         self.store.ensure(self.admin)

@@ -15,7 +15,7 @@ class Preferences(BaseModel):
     theme: Literal['theme0', 'theme1', 'theme2', 'theme3'] = 'theme0'
 
 
-# 旧版 MySQL 表用于迁移与回退，当前偏好以账号文件为准。
+# 旧版 MySQL 表供缺少偏好文件的账号导入快捷键。
 class UserPreferencesStore:
     def __init__(self, pool):
         self._pool = pool
@@ -25,13 +25,6 @@ class UserPreferencesStore:
             cursor.execute('SELECT send_shortcut FROM user_preferences WHERE user_id=%s', (user_id,))
             row = cursor.fetchone()
         return Preferences(send_shortcut=row[0]) if row else None
-
-    def update(self, user_id: int, preferences: Preferences):
-        with self._pool.connection() as connection, connection.cursor() as cursor:
-            cursor.execute('''INSERT INTO user_preferences (user_id, send_shortcut) VALUES (%s, %s)
-                              ON DUPLICATE KEY UPDATE send_shortcut=%s''',
-                           (user_id, preferences.send_shortcut, preferences.send_shortcut))
-            connection.commit()
 
     def import_legacy(self, user_id: int, preferences: Preferences):
         with self._pool.connection() as connection, connection.cursor() as cursor:

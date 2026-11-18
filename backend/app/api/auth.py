@@ -20,13 +20,12 @@ from app.accounts.repository import (
     PasswordCommitUnknown,
     ReservedUsername,
 )
-from app.system_config import PasswordConfig
+from app.system_config import MAX_PASSWORD_INPUT_LENGTH, PasswordConfig
 
 from .credential_route import CredentialRoute
 
 
 router = APIRouter(prefix='/auth', tags=['auth'], route_class=CredentialRoute)
-MAX_PASSWORD_INPUT_LENGTH = 256
 
 
 class LoginRequest(BaseModel):

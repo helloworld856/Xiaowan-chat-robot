@@ -34,6 +34,10 @@ class ModelValidationBusy(Exception):
     pass
 
 
+class AdminEndpointNotAllowed(ValueError):
+    pass
+
+
 class AdminModelRuntime:
     def __init__(self):
         self.lock = RLock()
@@ -104,10 +108,13 @@ class ModelConfigurationService:
             raise TimeoutError('模型连接测试超时') from None
 
     def _admin_endpoint(self, model: ModelSettings) -> ModelEndpoint:
-        provider = self.personal_models.catalog.providers.get(model.model_merchant)
-        if model.base_url and (provider is None or model.base_url != provider.base_url):
-            return ModelEndpoint(base_url=model.base_url, adapter='openai')
-        return self.personal_models.catalog.endpoint(model.model_merchant)
+        catalog = self.personal_models.catalog
+        default = catalog.endpoint(model.model_merchant)
+        if not model.base_url or model.base_url == default.base_url:
+            return default
+        if model.base_url not in catalog.providers[model.model_merchant].admin_allowed_base_urls:
+            raise AdminEndpointNotAllowed('管理员接口地址未获批准，请检查 system_config.json')
+        return ModelEndpoint(base_url=model.base_url, adapter='openai')
 
     def activate_saved_model(self, legacy: Callable[[], AdminModelFile]) -> None:
         try:
@@ -124,6 +131,8 @@ class ModelConfigurationService:
                                            base_url=endpoint.base_url, adapter=endpoint.adapter)
             # 启动时从已保存配置装配代理，连接探测留给显式测试或保存。
             self.admin_runtime.publish(model, agents)
+        except AdminEndpointNotAllowed:
+            logger.warning('管理员接口地址未获批准，请检查全局配置和 .env')
         except Exception:
             logger.warning('启动时载入已保存的模型失败，请管理员检查配置')
 
@@ -147,15 +156,21 @@ class ModelConfigurationService:
         use_saved_address = 'base_url' not in model.model_fields_set
         try:
             saved = self.admin_models.get() if use_saved_address or new_key is None else None
-            if use_saved_address and saved is not None:
-                entry = saved.providers.get(merchant)
-                if entry is not None:
-                    model = model.model_copy(update={'base_url': entry.base_url})
+            entry = saved.providers.get(merchant) if saved is not None else None
+            saved_address = entry.base_url if entry is not None else ''
+            if use_saved_address:
+                model = model.model_copy(update={'base_url': saved_address})
+            endpoint = self._admin_endpoint(model)
             key = new_key if new_key is not None else saved.key_for(merchant)
             if key is None:
                 return ModelConfigResponse(status=False, info='请先填写此厂商的 API Key')
-            agents = self._prepare_model(merchant, key.get_secret_value(), name, self._admin_endpoint(model),
-                                         activate=activate)
+            if new_key is None:
+                # 复用密钥时只允许访问它原来对应的有效地址。
+                stored_endpoint = saved_address or self.personal_models.catalog.endpoint(merchant).base_url
+                if endpoint.base_url != stored_endpoint:
+                    return ModelConfigResponse(status=False, info='更换接口地址时，请重新填写此地址的 API Key')
+                model = model.model_copy(update={'base_url': saved_address})
+            agents = self._prepare_model(merchant, key.get_secret_value(), name, endpoint, activate=activate)
             if agents is None:
                 return ModelConfigResponse(status=True, info='连接测试通过，模型配置尚未修改')
 
@@ -166,7 +181,8 @@ class ModelConfigurationService:
                 try:
                     # 先保存文件，再发布新代理，失败时旧模型仍可继续处理聊天。
                     saved_ok = self.admin_models.update_model(
-                        model, key, replace_key=new_key is not None, keep_address=use_saved_address,
+                        model, key, replace_key=new_key is not None,
+                        keep_address=use_saved_address or new_key is None,
                     )
                 except (OSError, ValueError) as error:
                     logger.warning('管理员模型保存失败: %s', type(error).__name__)
@@ -179,6 +195,8 @@ class ModelConfigurationService:
 
             logger.info('模型配置切换成功: %s/%s', merchant, name)
             return ModelConfigResponse(status=True, info=f'已切换到 {merchant}/{name}')
+        except AdminEndpointNotAllowed as error:
+            return ModelConfigResponse(status=False, info=str(error))
         except Exception as error:
             return _connection_failure(error)
 

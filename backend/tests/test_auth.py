@@ -4,7 +4,7 @@ import unittest
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
-from _imports import BACKEND_ROOT as ROOT
+from _imports import fixture_admin_auth
 
 
 def auth_module():
@@ -55,7 +55,7 @@ class AuthTests(unittest.TestCase):
     def setUp(self):
         self.auth = auth_module()
         self.now = 100.0
-        self.service = self.auth.AuthService(clock=lambda: self.now)
+        self.service = fixture_admin_auth(clock=lambda: self.now)
 
     def test_only_admin_with_correct_password_can_create_session(self):
         with self.assertRaises(self.auth.InvalidCredentials):
@@ -92,7 +92,7 @@ class AuthTests(unittest.TestCase):
         config = AuthConfig(rate_limit={
             'login_attempts': 1, 'registration_attempts': 2, 'window_seconds': 7, 'max_clients': 1,
         })
-        service = self.auth.AuthService(clock=lambda: self.now, config=config)
+        service = fixture_admin_auth(clock=lambda: self.now, config=config)
         with self.assertRaises(self.auth.InvalidCredentials):
             service.login('admin', 'wrong', 'first')
         for client in ('first', 'second'):
@@ -117,7 +117,7 @@ class AuthHTTPTests(unittest.TestCase):
         self.auth = auth_module()
         from app.application import create_app
         self.now = 100.0
-        self.service = self.auth.AuthService(clock=lambda: self.now)
+        self.service = fixture_admin_auth(clock=lambda: self.now)
         self.app = create_app('test', auth_service=self.service)
         self.business_calls = []
         async def business():
@@ -231,7 +231,7 @@ class AuthHTTPTests(unittest.TestCase):
         from app.application import create_app
         from app.system_config import AuthConfig
 
-        service = self.auth.AuthService(clock=lambda: self.now, config=AuthConfig(session_ttl_seconds=7))
+        service = fixture_admin_auth(clock=lambda: self.now, config=AuthConfig(session_ttl_seconds=7))
         self.app = create_app('test', auth_service=service)
         headers, cookie = self.login()
         jar = SimpleCookie(headers['set-cookie'])
@@ -247,7 +247,7 @@ class AuthHTTPTests(unittest.TestCase):
 
         auth = AuthConfig(password={'min_length': 8, 'max_length': 20})
         config = SystemConfig(profile={'max_nickname_chars': 12}, chat={'max_message_chars': 80})
-        service = self.auth.AuthService(config=auth)
+        service = fixture_admin_auth(config=auth)
         app = create_app('test', auth_service=service, system_config=config)
         status, _, body = request(app, '/auth/session')
         self.assertEqual(status, 200)
@@ -259,7 +259,7 @@ class AuthHTTPTests(unittest.TestCase):
         from app.application import create_app
         from app.system_config import AuthConfig
 
-        service = self.auth.AuthService(config=AuthConfig(password={'min_length': 8, 'max_length': 20}))
+        service = fixture_admin_auth(config=AuthConfig(password={'min_length': 8, 'max_length': 20}))
         self.app = create_app('test', auth_service=service)
         _, cookie = self.login()
         for password, error_type in (('synthet', 'string_too_short'), ('synthetic-password-2!', 'string_too_long')):

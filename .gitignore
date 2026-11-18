@@ -20,6 +20,8 @@ env/
 /backend/user_data/
 /backend/system_config.json
 /backend/settings.json
+/backend/auth_config/admin.json
+/backend/auth_config/profile.json
 /backend/.system_config-*.tmp
 /backend/.env-*.tmp
 /backend/system_config.json.before-provider.bak

@@ -1,4 +1,4 @@
-"""Persistent account records and import of the legacy administrator."""
+"""Account storage and one-time administrator creation."""
 
 import json
 from dataclasses import dataclass, field, replace
@@ -8,11 +8,9 @@ from typing import Callable, Literal, Protocol
 
 import pymysql
 
-from app.config import BACKEND_ROOT
 from app.json_files import atomic_write_json
 
 HASH_ITERATIONS = 600_000
-LEGACY_ADMIN_PATH = BACKEND_ROOT / 'auth_config' / 'admin.json'
 Role = Literal['admin', 'user']
 
 
@@ -63,7 +61,7 @@ def unpack_hash(encoded: str) -> tuple[int, bytes, bytes]:
     return iterations, salt, digest
 
 
-def read_legacy_admin(path: Path) -> str:
+def _read_admin_credentials(path: Path) -> str:
     try:
         credentials = json.loads(path.read_text(encoding='utf-8'))
         if set(credentials) != {'username', 'password_hash'} or credentials['username'] != 'admin':
@@ -72,7 +70,7 @@ def read_legacy_admin(path: Path) -> str:
         unpack_hash(password_hash)
         return password_hash
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        raise RuntimeError('管理员旧账户文件无效，请检查 auth_config/admin.json') from None
+        raise RuntimeError('管理员凭据文件无效') from None
 
 
 class SQLAccountStore:
@@ -94,11 +92,6 @@ class SQLAccountStore:
         if role not in ('admin', 'user'):
             raise AccountStorageError()
         return Account(User(user_id, username, role), password_hash)
-
-    def list_users(self) -> list[User]:
-        with self.pool.connection() as db, db.cursor() as cursor:
-            cursor.execute('SELECT id, username, role FROM users ORDER BY id')
-            return [User(*row) for row in cursor.fetchall()]
 
     def _insert(self, username: str, password_hash: str, role: Role) -> User:
         try:
@@ -140,27 +133,40 @@ class SQLAccountStore:
                 raise AccountStorageError() from None
             raise
 
-    def seed_admin(self, credentials_path: Path | None = None) -> User:
-        """Import once. Existing account details and any changed password stay authoritative."""
+    def get_admin(self) -> User | None:
         existing = self.find('admin')
         if existing is None:
-            password_hash = read_legacy_admin(credentials_path or LEGACY_ADMIN_PATH)
-            try:
-                return self._insert('admin', password_hash, 'admin')
-            except DuplicateUsername:
-                existing = self.find('admin')
-        if existing is None or existing.user.role != 'admin':
-            raise RuntimeError('用户名 admin 已被普通账号占用，不能迁移管理员')
+            return None
+        if existing.user.role != 'admin':
+            raise RuntimeError('用户名 admin 已被普通账号占用，无法初始化管理员')
         return existing.user
+
+    def initialize_admin(self, password_hash: str) -> User:
+        existing = self.get_admin()
+        if existing is not None:
+            return existing
+        unpack_hash(password_hash)
+        try:
+            return self._insert('admin', password_hash, 'admin')
+        except DuplicateUsername:
+            # 并发初始化只允许一次插入，晚到的命令不会覆盖密码。
+            existing = self.get_admin()
+            if existing is None:
+                raise AccountStorageError() from None
+            return existing
 
 
 class LocalAccountStore:
-    """Isolated, no-MySQL fixture; an explicit legacy file can be used to test import and password changes."""
+    """Isolated store for tests, with credentials supplied explicitly by the caller."""
 
-    def __init__(self, credentials_path: Path | None = None):
+    def __init__(self, credentials_path: Path | None = None, *, admin_password_hash: str | None = None):
         self.credentials_path = credentials_path
         self.lock = RLock()
-        self.accounts = {'admin': Account(User(1, 'admin', 'admin'), read_legacy_admin(credentials_path or LEGACY_ADMIN_PATH))}
+        self.accounts: dict[str, Account] = {}
+        if credentials_path is not None:
+            admin_password_hash = _read_admin_credentials(credentials_path)
+        if admin_password_hash is not None:
+            self.accounts['admin'] = Account(User(1, 'admin', 'admin'), admin_password_hash)
 
     def find(self, username_key: str) -> Account | None:
         with self.lock:
@@ -181,10 +187,10 @@ class LocalAccountStore:
             if self.accounts.get(key) != account:
                 raise AccountStorageError()
             if key == 'admin' and self.credentials_path is not None:
-                self._write_legacy_password(password_hash)
+                self._write_password(password_hash)
             self.accounts[key] = replace(account, password_hash=password_hash)
 
-    def _write_legacy_password(self, password_hash: str) -> None:
+    def _write_password(self, password_hash: str) -> None:
         try:
             atomic_write_json(self.credentials_path, {'username': 'admin', 'password_hash': password_hash})
         except OSError:

@@ -7,7 +7,8 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from unittest.mock import patch
 
-from test_auth import ROOT, auth_module, request
+from _imports import fixture_admin_hash
+from test_auth import auth_module, request
 
 
 class ProfileHTTPTests(unittest.TestCase):
@@ -18,7 +19,9 @@ class ProfileHTTPTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.addCleanup(self.directory.cleanup)
         self.credentials_path = Path(self.directory.name) / 'admin.json'
-        self.credentials_path.write_bytes((ROOT / 'auth_config' / 'admin.json').read_bytes())
+        self.credentials_path.write_text(json.dumps({
+            'username': 'admin', 'password_hash': fixture_admin_hash(),
+        }), encoding='utf-8')
         self.now = 100.0
         self.service = self.auth.AuthService(self.credentials_path, clock=lambda: self.now)
         self.profile = ProfileStore(Path(self.directory.name) / 'user_data')

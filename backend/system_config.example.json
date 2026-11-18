@@ -1,6 +1,6 @@
 // 小晚全局配置。修改后重启后端生效。
 {
-  // MySQL 连接设置。
+  // MySQL 连接设置。密码由 .env 的 MYSQL_PASSWORD 提供。
   "database": {
     // MySQL 主机名或 IP。
     "host": "localhost",
@@ -8,8 +8,6 @@
     "port": 3306,
     // MySQL 登录用户名。
     "user": "root",
-    // MySQL 登录密码，只保存在服务器上。
-    "password": "",
     // 数据库名称，允许字母、数字和下划线。
     "name": "XiaoWan",
     // MySQL 连接字符集。
@@ -52,7 +50,9 @@
         // 默认模型名，须包含在 models 中。
         "default_model": "deepseek-v4-flash",
         // 网页允许选择的模型名列表。
-        "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        // 管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。
+        "admin_allowed_base_urls": []
       },
       // tongyi 厂商配置。
       "tongyi": {
@@ -63,7 +63,9 @@
         // 默认模型名，须包含在 models 中。
         "default_model": "qwen3-max",
         // 网页允许选择的模型名列表。
-        "models": ["qwen3-max", "qwen-plus", "qwen-turbo", "qwen-flash"]
+        "models": ["qwen3-max", "qwen-plus", "qwen-turbo", "qwen-flash"],
+        // 管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。
+        "admin_allowed_base_urls": []
       }
     }
   },

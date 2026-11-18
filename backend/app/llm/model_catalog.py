@@ -46,6 +46,9 @@ class ModelEndpoint(_CatalogEntry):
 class ProviderCatalog(ModelEndpoint):
     default_model: str = Field(min_length=1, max_length=200, description='默认模型名，须包含在 models 中。')
     models: list[str] = Field(description='网页允许选择的模型名列表。')
+    admin_allowed_base_urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
+        default_factory=list, description='管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。',
+    )
 
     @field_validator('models', mode='before')
     @classmethod
