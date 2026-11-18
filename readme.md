@@ -31,7 +31,9 @@ npm --prefix frontend run build
 
 首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 的连接信息。全局配置支持 `//` 行注释，字段用途、单位和可选值写在对应字段旁。编辑后重启后端生效。数据库 `XiaoWan` 和所需表会在启动时创建。管理员可使用 `backend/.env.example` 创建 `backend/.env`，也可登录后在网页设置中保存模型和 API Key。
 
-已有部署升级时，保留原来的 `backend/system_config.json`、`backend/.env`、`backend/settings.json` 和 `backend/user_data/`。首次启动会给旧版纯 JSON 全局配置补齐默认项和字段说明，保留原有值。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`。如果全局配置尚未创建，数据库密码和并发参数会从旧 `.env` 导入。
+已有部署升级时，保留原来的 `backend/system_config.json`、`backend/.env` 和 `backend/user_data/`。首次启动会给旧版纯 JSON 全局配置补齐默认项和字段说明，保留原有值。如果全局配置尚未创建，数据库密码和并发参数会从旧 `.env` 导入。
+
+如果服务器已有自定义的 `backend/settings.json`，更新前请保留一份本地副本供迁移。这个文件由 Git 忽略，启动时仍可读取。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`，新安装从全局配置读取默认模型。
 
 `auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、快捷键和头像。`chat` 管理并发、消息长度、历史压缩和启动时的历史清理。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
 

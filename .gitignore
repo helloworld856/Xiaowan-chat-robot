@@ -19,6 +19,7 @@ env/
 !.env.example
 /backend/user_data/
 /backend/system_config.json
+/backend/settings.json
 /backend/.system_config-*.tmp
 /backend/.env-*.tmp
 /backend/system_config.json.before-provider.bak

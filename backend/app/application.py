@@ -21,7 +21,7 @@ from app.chat.workflow import create_graph
 from app.config import SOFTWARE_NAME, VERSION
 from app.database.mysql import initialize_schema, reset_chat_history
 from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
-from app.llm.admin_settings import settings_store
+from app.llm.admin_settings import ModelSettings, settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.model_catalog import ModelCatalog
 from app.system_config import ChatConfig, SystemConfig, legacy_environment
@@ -73,13 +73,20 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             profile_store.import_legacy_profile(admin.id, legacy_root / 'profile.json')
         except (OSError, ValueError):
             logger.warning('无法导入旧版管理员资料，可在个人资料中重新保存')
+        legacy_model = None
         try:
             saved = settings_store.get()
         except (OSError, ValueError):
-            saved = None
             logger.warning('无法读取旧版管理员配置')
-        if saved is not None:
-            legacy_preferences.import_legacy(admin.id, saved.preferences)
+        else:
+            if saved is None:
+                # 新安装从全局配置取默认模型，旧文件存在时才迁移其中的偏好。
+                catalog = directories.models.catalog
+                merchant = catalog.default_provider
+                legacy_model = ModelSettings(model_merchant=merchant, model_name=catalog.providers[merchant].default_model)
+            else:
+                legacy_model = saved.model
+                legacy_preferences.import_legacy(admin.id, saved.preferences)
         try:
             directories.ensure(admin)
         except (OSError, ValueError):
@@ -87,7 +94,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         if chat_config.clear_history_on_startup:
             reset_chat_history(db)
         model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
-            saved.model if saved else None, legacy_environment(config_root),
+            legacy_model, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),
         ))
 

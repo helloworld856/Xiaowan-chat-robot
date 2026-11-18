@@ -82,7 +82,8 @@ def main() -> int:
     pool = open_pool(config=config.database, create_if_missing=False)
     try:
         try:
-            admin_preferences = settings_store.get().preferences
+            saved = settings_store.get()
+            admin_preferences = saved.preferences if saved is not None else None
         except (OSError, ValueError):
             admin_preferences = None
         profiles = ProfileStore(config=config.profile, defaults=config.defaults)

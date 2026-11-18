@@ -45,11 +45,12 @@ class SettingsStore:
         self.path = path
         self.lock = RLock()
 
-    def get(self) -> AppSettings:
+    def get(self) -> AppSettings | None:
         with self.lock:
-            if not self.path.exists():
-                return AppSettings()
-            data = json.loads(self.path.read_text(encoding='utf-8'))
+            try:
+                data = json.loads(self.path.read_text(encoding='utf-8'))
+            except FileNotFoundError:
+                return None
             # 兼容旧配置文件，仅忽略已移除的设置，保留模型与输入快捷键。
             if isinstance(data, dict) and isinstance(data.get('preferences'), dict):
                 for key in ('reply_length', 'split_reply', 'playback_mode', 'reply_interval_ms'):

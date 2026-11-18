@@ -262,3 +262,36 @@ class ConfigFileTests(unittest.TestCase):
                 self.assertEqual(app.state.chat._max_waiting, 10)
                 self.assertEqual(app.state.chat._wait_timeout, 3)
                 reset.assert_not_called()
+
+    def test_startup_without_legacy_settings_uses_global_defaults(self):
+        from fastapi.testclient import TestClient
+        from app.accounts.profile import ProfileStore
+        from app.accounts.repository import User
+        from app.application import build_application
+        from app.llm.admin_settings import SettingsStore
+        from app.llm.model_catalog import default_model_catalog
+        from app.system_config import SystemConfig
+
+        legacy = self.root / 'auth_config'
+        legacy.mkdir()
+        (self.root / '.env').write_text('TONGYI_API_KEY=test-legacy-key\n', encoding='utf-8')
+        catalog = default_model_catalog().model_copy(update={'default_provider': 'tongyi'})
+        config = SystemConfig(models=catalog, defaults={'theme': 'theme2', 'send_shortcut': 'ctrl_enter'})
+        with (patch.dict('os.environ', {}, clear=True),
+              patch('app.application.settings_store', SettingsStore(self.root / 'settings.json')),
+              patch('app.application.SQLAccountStore') as accounts,
+              patch('app.application.initialize_schema'), patch('app.application.reset_chat_history'),
+              patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None),
+              patch('app.accounts.preferences.UserPreferencesStore.import_legacy') as import_preferences,
+              patch('app.llm.factory.create_agents', return_value=(object(), object(), object())) as agents):
+            accounts.return_value.seed_admin.return_value = User(12, 'admin', 'admin')
+            profiles = ProfileStore(self.root / 'user_data')
+            app = build_application(MagicMock(), profiles, legacy, system_config=config)
+            with TestClient(app):
+                file = app.state.model_configuration.admin_models.get()
+                self.assertEqual(file.model.model_merchant, 'tongyi')
+                self.assertEqual(file.model.model_name, catalog.providers['tongyi'].default_model)
+                self.assertEqual(agents.call_args.args[:2], ('tongyi', 'test-legacy-key'))
+                self.assertEqual(app.state.preferences.get(12).theme, 'theme2')
+                self.assertEqual(app.state.preferences.get(12).send_shortcut, 'ctrl_enter')
+                import_preferences.assert_not_called()
