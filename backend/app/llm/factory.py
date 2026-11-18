@@ -4,13 +4,16 @@
 from langchain.agents import create_agent
 from app.llm.model_catalog import ModelAdapter
 from app.llm.persona import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
+from app.llm.public_endpoint import public_http_clients
 from app.account_logging import logger
 
 CHAT_MODEL_TIMEOUT_SECONDS = 45
 
 
 def create_model(model_merchant, api_key, model_name, temperature, max_tokens=None, *, base_url: str,
-                 adapter: ModelAdapter, validation_timeout=None):
+                 adapter: ModelAdapter, validation_timeout=None, public_only: bool = False):
+    if public_only and adapter != 'openai':
+        raise ValueError('公网自定义地址须使用 OpenAI 兼容接口')
     options = {"temperature": temperature}
     if max_tokens is not None:
         options["max_tokens"] = max_tokens
@@ -19,6 +22,8 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
         from langchain_openai import ChatOpenAI
         if validation_timeout is not None:
             options.update(timeout=validation_timeout, max_retries=0)
+        if public_only:
+            options.update(public_http_clients(base_url, validation_timeout or CHAT_MODEL_TIMEOUT_SECONDS))
         return ChatOpenAI(
             model=model_name,
             api_key=api_key,
@@ -39,7 +44,8 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
     raise ValueError('不支持的模型接口协议')
 
 
-def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_url: str, adapter: ModelAdapter):
+def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_url: str, adapter: ModelAdapter,
+                  public_only: bool = False):
     """根据厂商配置创建分析、压缩和聊天代理。"""
     try:
         logger.info('初始化模型代理')
@@ -52,7 +58,8 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_ur
         agents = tuple(
             create_agent(
                 model=create_model(model_merchant, api_key, model_name, temperature, base_url=base_url,
-                                   validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS, adapter=adapter),
+                                   validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS, adapter=adapter,
+                                   public_only=public_only),
                 system_prompt=system_prompt,
             )
             for system_prompt, temperature in agent_options

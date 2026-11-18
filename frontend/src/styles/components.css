@@ -683,5 +683,10 @@
 #model-edit-modal .form-group { flex-direction: column; align-items: stretch; gap: 0.4rem; margin-bottom: 0.8rem; }
 #model-edit-modal .form-group label { width: auto; }
 #model-edit-modal .form-group input { min-width: 0; width: 100%; background: var(--input-bg); color: var(--menu-text); }
+/* 用文本框避开登录密码提示，只遮住实际输入，保留星号占位。 */
+#model-api-key:not(:placeholder-shown) { -webkit-text-security: disc; }
+@supports not (-webkit-text-security: disc) {
+    #model-edit-modal #model-api-key:not(:placeholder-shown) { color: transparent; caret-color: var(--menu-text); }
+}
 #model-edit-modal .settings-select { min-width: 0; width: 100%; }
 #model-edit-modal .modal-btns { margin-top: 1rem; gap: 0.5rem; flex-wrap: wrap; }

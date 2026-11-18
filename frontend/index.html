@@ -200,7 +200,7 @@
                 <!-- 模型信息展示区 -->
                 <div id="model-info-view">
                     <h2>模型连接</h2>
-                    <div class="info-item" data-model-admin hidden>
+                    <div class="info-item">
                         <label>接口地址：</label>
                         <span id="display-base-url">厂商默认地址</span>
                     </div>
@@ -241,8 +241,7 @@
                 <!-- 修改模型配置的弹窗 -->
                 <dialog id="model-edit-modal" class="modal" aria-labelledby="open-modify-btn">
                     <div class="modal-content">
-                        <!-- 脚本按账号角色启用对应字段，并分别处理探测和保存。 -->
-                        <form id="model-config-form">
+                        <form id="model-config-form" autocomplete="off">
                             <div class="form-group">
                                 <label for="modelSelect">选择模型厂商:</label>
                                 <select id="modelSelect" class="settings-select" autofocus>
@@ -254,15 +253,15 @@
                                 <label for="modelName">模型名:</label>
                                 <select id="modelName" class="settings-select" required></select>
                             </div>
-                            <div class="form-group" data-model-admin hidden>
+                            <div class="form-group">
                                 <label for="model-base-url">接口地址:</label>
-                                <input id="model-base-url" type="url" placeholder="留空使用厂商默认地址">
+                                <input id="model-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="清空可恢复默认地址">
                             </div>
                             <div class="form-group">
                                 <label for="model-api-key">API Key</label>
-                                <input id="model-api-key" type="password" maxlength="1024" autocomplete="off" spellcheck="false">
+                                <input id="model-api-key" type="text" maxlength="1024" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
                             </div>
-                            <p class="settings-help" data-model-admin hidden>自定义地址需兼容 OpenAI 接口，请填写完整 API 基础路径。</p>
+                            <p class="settings-help" id="model-address-help"></p>
                             <p id="model-test-status" role="status"></p>
                             <div class="modal-btns">
                                 <button type="button" id="cancel-modify-btn">取消</button>

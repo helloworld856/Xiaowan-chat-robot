@@ -84,7 +84,7 @@ export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string, pe
     const options = {
         model_merchant: model.model_merchant,
         model_name: model.model_name,
-        ...(personal ? {} : {base_url: model.base_url || ''}),
+        ...(model.base_url === undefined ? {} : {base_url: model.base_url}),
         ...(apiKey === undefined ? {} : {api_key: apiKey})
     };
     return requestJSON<{status: boolean; info: string}>(`/model${personal ? '/personal' : ''}${testOnly ? '/test' : ''}`, {
@@ -97,6 +97,7 @@ export interface ModelOptions {
     default_provider: string;
     providers: Record<string, {
         default_model: string;
+        default_address: string;
         names: string[];
         saved_model: string | null;
         saved_address: string | null;

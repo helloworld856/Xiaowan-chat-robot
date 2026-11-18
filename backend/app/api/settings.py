@@ -11,6 +11,7 @@ router = APIRouter()
 
 class ProviderOptions(BaseModel):
     default_model: str
+    default_address: str
     names: list[str]
     saved_model: str | None = None
     saved_address: str | None = None
@@ -41,13 +42,16 @@ def model_options_for(request: Request) -> ModelOptions:
             saved_keys = {merchant for merchant in catalog.providers if admin.key_for(merchant) is not None}
         else:
             choices = request.app.state.personal_models.saved_choices(user.id)
-            saved_models = {merchant: name for merchant, (name, _) in choices.items()}
-            saved_keys = {merchant for merchant, (_, has_key) in choices.items() if has_key}
+            addresses = {merchant: address for merchant, (_, address, _) in choices.items()
+                         if merchant in catalog.providers and address != catalog.providers[merchant].base_url}
+            saved_models = {merchant: name for merchant, (name, _, _) in choices.items()}
+            saved_keys = {merchant for merchant, (_, _, has_key) in choices.items() if has_key}
     except (OSError, ValueError):
         pass
     # 只构造网页需要的公开字段，任何账号的密钥都不会随设置返回。
     return ModelOptions(default_provider=catalog.default_provider, providers={
         merchant: ProviderOptions(default_model=provider.default_model,
+                                  default_address=provider.base_url,
                                   names=provider.models, saved_model=saved_models.get(merchant),
                                   saved_address=addresses.get(merchant), has_saved_key=merchant in saved_keys)
         for merchant, provider in catalog.providers.items()

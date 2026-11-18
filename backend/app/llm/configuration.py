@@ -15,6 +15,7 @@ from app.llm.admin_models import AdminModelFile, AdminModelStore
 from app.llm.admin_settings import ModelSettings
 from app.llm.model_catalog import ModelEndpoint
 from app.llm.personal_models import PersonalModel, PersonalModelStore
+from app.llm.public_endpoint import PublicEndpointError
 
 
 MODEL_VALIDATION_CAPACITY = 2
@@ -73,16 +74,19 @@ def _validate_connection(client) -> None:
         raise TimeoutError('模型连接测试超时') from None
 
 
-def _verify_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint) -> None:
+def _verify_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint, *, public_only: bool) -> None:
     client = factory.create_model(
         merchant, key, name, 0.1, max_tokens=10, base_url=endpoint.base_url,
-        validation_timeout=8, adapter=endpoint.adapter,
+        validation_timeout=8, adapter=endpoint.adapter, public_only=public_only,
     )
     _validate_connection(client)
 
 
 def _connection_failure(error: Exception) -> ModelConfigResponse:
     logger.warning('模型配置失败: %s', type(error).__name__)
+    for cause in (error, error.__cause__):
+        if isinstance(cause, PublicEndpointError):
+            return ModelConfigResponse(status=False, info=str(cause))
     if isinstance(error, ModelValidationBusy):
         return ModelConfigResponse(status=False, info='模型连接测试繁忙，请稍后重试')
     if isinstance(error, TimeoutError):
@@ -104,7 +108,8 @@ class ModelConfigurationService:
         self.admin_runtime = admin_runtime
 
     def _admin_endpoint(self, model: ModelSettings) -> ModelEndpoint:
-        if model.base_url:
+        provider = self.personal_models.catalog.providers.get(model.model_merchant)
+        if model.base_url and (provider is None or model.base_url != provider.base_url):
             return ModelEndpoint(base_url=model.base_url, adapter='openai')
         return self.personal_models.catalog.endpoint(model.model_merchant)
 
@@ -191,6 +196,7 @@ class ModelConfigurationService:
             agents = self._prepare_model(
                 selected.model_merchant, selected.api_key.get_secret_value(), selected.model_name,
                 ModelEndpoint(base_url=selected.base_url, adapter=selected.adapter), activate=activate,
+                public_only=selected.public_only,
             )
             if agents is None:
                 return ModelConfigResponse(status=True, info='连接测试通过')
@@ -206,8 +212,9 @@ class ModelConfigurationService:
 
     @staticmethod
     def _prepare_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint, *,
-                       activate: bool) -> AgentSet | None:
-        _verify_model(merchant, key, name, endpoint)
+                       activate: bool, public_only: bool = False) -> AgentSet | None:
+        _verify_model(merchant, key, name, endpoint, public_only=public_only)
         if not activate:
             return None
-        return factory.create_agents(merchant, key, name, base_url=endpoint.base_url, adapter=endpoint.adapter)
+        return factory.create_agents(merchant, key, name, base_url=endpoint.base_url, adapter=endpoint.adapter,
+                                     public_only=public_only)

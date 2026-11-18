@@ -7,11 +7,18 @@ import {runInNewContext} from 'node:vm';
 const source = fs.readFileSync(new URL('../src/ts/settings.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
 
+test('the model API key control opts out of autocomplete without using a password input', () => {
+    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const field = html.match(/<input\b[^>]*\bid="model-api-key"[^>]*>/)?.[0] ?? '';
+    assert.match(field, /\btype="text"/);
+    assert.match(field, /\bautocomplete="off"/);
+});
+
 test('only the relevant model fields are visible and active for each role', () => {
     let admin = true;
     const nodes = new Map();
     function element(id) {
-        if (!nodes.has(id)) nodes.set(id, {});
+        if (!nodes.has(id)) nodes.set(id, {disabled: false});
         return nodes.get(id);
     }
     const exports = {};
@@ -23,8 +30,7 @@ test('only the relevant model fields are visible and active for each role', () =
 
     for (admin of [true, false]) {
         exports.updateSettingsPermissions();
-        assert.equal(element('[data-model-admin]').hidden, !admin);
-        assert.equal(element('model-base-url').disabled, !admin);
+        assert.equal(element('model-base-url').disabled, false);
         assert.equal(element('model-api-key').disabled, false);
         assert.equal(element('model-api-key').required, true);
         assert.equal(element('model-api-key').placeholder, '');
@@ -38,7 +44,7 @@ test('preferences auto-save the latest selections in order and restore saved val
         if (!nodes.has(id)) nodes.set(id, {
             value: '', disabled: false, listeners: new Map(), reset() {},
             replaceChildren(...children) { this.children = children; }, querySelectorAll: () => [],
-            reportValidity: () => true,
+            reportValidity: () => true, focus() { this.listeners.get('focus')?.(); },
             addEventListener(name, handler) { this.listeners.set(name, handler); }
         });
         return nodes.get(id);
@@ -57,7 +63,7 @@ test('preferences auto-save the latest selections in order and restore saved val
     let finishSettings;
     let admin = true;
     const saves = [];
-    const submittedKeys = [];
+    const submittedModels = [];
     const exports = {};
     runInNewContext(compiled, {
         exports,
@@ -67,8 +73,8 @@ test('preferences auto-save the latest selections in order and restore saved val
             './api.ts': {
                 canManageModel: () => admin,
                 getRequestGeneration: () => 1,
-                modelAPI: async (_model, _testOnly, key) => {
-                    submittedKeys.push(key);
+                modelAPI: async (model, testOnly, key, personal) => {
+                    submittedModels.push({address: model.base_url, key, personal, testOnly});
                     return {status: true, info: ''};
                 },
                 settingsAPI: value => {
@@ -135,7 +141,7 @@ test('preferences auto-save the latest selections in order and restore saved val
         default_provider: 'tongyi', providers: {
             tongyi: {default_model: 'server-selected-model', names: ['server-selected-model', 'saved-model'],
                      saved_model: 'server-selected-model', saved_address: 'https://saved-address.example/v1', has_saved_key: true},
-            deepseek: {default_model: 'new-model', names: ['new-model'],
+            deepseek: {default_model: 'new-model', default_address: 'https://default.example/v1', names: ['new-model'],
                        saved_model: 'new-model', saved_address: null, has_saved_key: false}
         }
     }});
@@ -146,15 +152,21 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.deepEqual(element('modelName').children.map(child => child.value), ['server-selected-model', 'saved-model']);
     const key = element('model-api-key');
     assert.equal(key.required, false);
-    assert.equal(key.placeholder, '****');
+    assert.equal(key.placeholder, '********');
     assert.equal(key.value, '');
+    const testConnection = element('test-model-btn').listeners.get('click');
+    key.value = 'browser-login-password';
+    testConnection();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(key.value, '');
+    assert.deepEqual(submittedModels.at(-1), {address: undefined, key: undefined, personal: false, testOnly: true});
     admin = false;
     element('open-modify-btn').listeners.get('click')();
-    assert.equal(key.placeholder, '****');
+    assert.equal(key.placeholder, '********');
     assert.equal(key.value, '');
     element('model-config-form').listeners.get('submit')({preventDefault() {}});
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(submittedKeys.at(-1), undefined);
+    assert.equal(submittedModels.at(-1).key, undefined);
     element('modelName').value = 'saved-model';
     assert.equal(element('model-base-url').value, 'https://saved-address.example/v1');
     element('modelSelect').value = 'deepseek';
@@ -162,4 +174,17 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(key.required, true);
     assert.equal(key.placeholder, '');
     assert.equal(key.value, '');
+    const address = element('model-base-url');
+    assert.equal(address.value, 'https://default.example/v1');
+    key.value = 'browser-login-password';
+    const count = submittedModels.length;
+    testConnection();
+    assert.equal(submittedModels.length, count);
+    assert.equal(key.value, '');
+    key.value = 'typed-api-key';
+    key.listeners.get('input')({isTrusted: true, inputType: 'insertText'});
+    address.value = 'https://custom.example/v1';
+    testConnection();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(submittedModels.at(-1), {address: 'https://custom.example/v1', key: 'typed-api-key', personal: true, testOnly: true});
 });

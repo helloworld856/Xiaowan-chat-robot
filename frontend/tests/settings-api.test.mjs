@@ -30,7 +30,7 @@ test('a personal API key is sent only to the personal model endpoints', async t 
         return new Response(JSON.stringify({status: true}));
     });
     const model = {model_merchant: 'deepseek', model_name: 'User-Model', base_url: 'https://example.com/v1'};
-    const payload = {model_merchant: 'deepseek', model_name: 'User-Model', api_key: 'test-personal-placeholder'};
+    const payload = {...model, api_key: 'test-personal-placeholder'};
     await api.modelAPI(model, true, payload.api_key, true);
     await api.modelAPI(model, false, payload.api_key, true);
     assert.deepEqual(calls, [

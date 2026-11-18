@@ -18,7 +18,8 @@ const modelPopup = () => document.getElementById('model-edit-modal') as HTMLDial
 function updateModelDisplay() {
     document.getElementById('display-merchant')!.textContent = modelConfig.model.model_merchant || '未配置';
     document.getElementById('display-model')!.textContent = modelConfig.model.model_name || '未配置';
-    document.getElementById('display-base-url')!.textContent = modelConfig.model.base_url || '厂商默认地址';
+    const provider = modelOptions?.providers[modelConfig.model.model_merchant];
+    document.getElementById('display-base-url')!.textContent = modelConfig.model.base_url || provider?.default_address || '未配置';
     document.getElementById('display-model-status')!.textContent = modelConfig.model_valid ? '可用' : '未就绪';
 }
 
@@ -42,16 +43,18 @@ function applySettings(saved: SavedSettings, requestedModelRevision: number) {
 function updateApiKeyPrompt(apiKey: HTMLInputElement, hasSavedKey: boolean) {
     apiKey.required = !hasSavedKey;
     // 星号只作占位提示，提交时仍用空值表示沿用密钥。
-    apiKey.placeholder = hasSavedKey ? '****' : '';
+    apiKey.placeholder = hasSavedKey ? '********' : '';
 }
 
 export function updateSettingsPermissions() {
     const admin = canManageModel();
-    document.querySelectorAll<HTMLElement>('[data-model-admin]').forEach(element => { element.hidden = !admin; });
-    input('model-base-url').disabled = !admin;
     const apiKey = input('model-api-key');
     apiKey.disabled = false;
+    apiKey.value = '';
     updateApiKeyPrompt(apiKey, false);
+    document.getElementById('model-address-help')!.textContent = admin
+        ? '自定义地址需兼容 OpenAI 接口。'
+        : '自定义地址须使用公网 HTTPS，并兼容 OpenAI 接口。';
     document.getElementById('open-modify-btn')!.textContent = admin ? '修改模型配置' : '配置个人模型';
     document.getElementById('submit-model-btn')!.textContent = admin ? '保存并切换' : '保存模型';
 }
@@ -104,8 +107,15 @@ export function initSettings() {
     const name = select('modelName');
     const address = input('model-base-url');
     const apiKey = input('model-api-key');
+    let loadedAddress = '';
+    let apiKeyEdited = false;
     let modelOperation: number | null = null;
     let preferencesSave: {generation: number; pending?: Preferences} | undefined;
+
+    function resetApiKey() {
+        apiKey.value = '';
+        apiKeyEdited = false;
+    }
 
     function loadProvider(preferredModel?: string) {
         const provider = modelOptions?.providers[merchant.value];
@@ -113,7 +123,9 @@ export function initSettings() {
         const preferred = preferredModel || provider?.saved_model || '';
         name.replaceChildren(...names.map(value => new Option(value, value)));
         name.value = names.includes(preferred) ? preferred : provider?.default_model || '';
-        address.value = provider?.saved_address || '';
+        loadedAddress = provider?.saved_address || provider?.default_address || '';
+        address.value = loadedAddress;
+        resetApiKey();
         updateApiKeyPrompt(apiKey, provider?.has_saved_key === true);
     }
 
@@ -133,14 +145,13 @@ export function initSettings() {
         if (modelOperation !== getRequestGeneration()) {
             merchant.value = modelConfig.model.model_merchant || modelOptions?.default_provider || merchant.options?.[0]?.value || '';
             loadProvider(modelConfig.model.model_name);
-            apiKey.value = '';
             modelStatus.textContent = '';
         }
         openPopup(modal);
     });
     function cancelModelEdit() {
         if (modelOperation === getRequestGeneration()) return;
-        apiKey.value = '';
+        resetApiKey();
         void closePopup(modal);
     }
     document.getElementById('cancel-modify-btn')!.addEventListener('click', cancelModelEdit);
@@ -150,17 +161,34 @@ export function initSettings() {
     });
     merchant.addEventListener('change', () => {
         loadProvider();
-        apiKey.value = '';
         modelStatus.textContent = '';
+    });
+    apiKey.addEventListener('input', event => {
+        const {isTrusted, inputType} = event as InputEvent;
+        apiKeyEdited = isTrusted && Boolean(inputType) && inputType !== 'insertReplacementText';
+        if (!apiKeyEdited) apiKey.value = '';
     });
     form.addEventListener('input', () => { modelStatus.textContent = ''; });
 
     async function configure(testOnly: boolean) {
         const generation = getRequestGeneration();
-        if (modelOperation === generation || !form.reportValidity()) return;
+        if (modelOperation === generation) return;
         const admin = canManageModel();
+        // 自动填充的登录密码不能用于测试或替换已保存的 API Key。
+        if (!apiKeyEdited || apiKey.matches?.(':is(:autofill, :-webkit-autofill)')) apiKey.value = '';
         const key = apiKey.value.trim() || undefined;
-        const model = {model_merchant: merchant.value, model_name: name.value.trim(), base_url: admin ? address.value.trim() : ''};
+        if (!key && apiKey.required) {
+            apiKey.focus();
+            modelStatus.textContent = '请填写此厂商的 API Key';
+            return;
+        }
+        if (!form.reportValidity()) return;
+        const provider = modelOptions?.providers[merchant.value];
+        const enteredAddress = address.value.trim();
+        // 地址未改动时沿用服务端记录，清空或选回默认地址时恢复厂商协议。
+        const base_url = enteredAddress === loadedAddress ? undefined
+            : enteredAddress === provider?.default_address ? '' : enteredAddress;
+        const model = {model_merchant: merchant.value, model_name: name.value.trim(), base_url};
         if (!model.model_name) { modelStatus.textContent = '请选择模型'; return; }
         modelOperation = generation;
         form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -173,15 +201,16 @@ export function initSettings() {
             // 探测通过只显示提示，保存成功才更新当前启用的模型。
             if (result.status && !testOnly) {
                 modelRevision++;
-                const provider = modelOptions?.providers[model.model_merchant];
-                if (provider) {
-                    provider.saved_model = model.model_name;
-                    provider.has_saved_key = true;
-                    if (admin) provider.saved_address = model.base_url;
+                const currentProvider = modelOptions?.providers[model.model_merchant];
+                const effectiveAddress = enteredAddress || currentProvider?.default_address || '';
+                if (currentProvider) {
+                    currentProvider.saved_model = model.model_name;
+                    currentProvider.has_saved_key = true;
+                    currentProvider.saved_address = effectiveAddress;
                 }
-                modelConfig.model = model;
+                modelConfig.model = {...model, base_url: effectiveAddress};
                 modelConfig.model_valid = true;
-                apiKey.value = '';
+                resetApiKey();
                 updateModelDisplay();
                 await closePopup(modal);
             }
@@ -194,7 +223,6 @@ export function initSettings() {
             if (generation === getRequestGeneration()) {
                 form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
                     .forEach(control => { control.disabled = false; });
-                address.disabled = !admin;
             }
         }
     }

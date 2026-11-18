@@ -146,7 +146,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             admin_key = 'admin-only-placeholder'
             personal_key = 'personal-placeholder'
 
-            def create_agents(merchant, key, name, *, base_url, adapter):
+            def create_agents(merchant, key, name, *, base_url, adapter, public_only=False):
                 self.assertEqual(base_url, 'https://api.deepseek.com')
                 self.assertIn(key, (admin_key, personal_key))
                 self.assertEqual(adapter, 'openai')
@@ -200,8 +200,9 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(denied.status_code, 403, denied.text)
                         personal = {**options, 'model_name': 'my-model', 'api_key': personal_key}
                         self.assertEqual((await a.post('/model/personal', json=personal)).status_code, 403)
-                        invalid = await b.post('/model/personal', json={**personal, 'base_url': 'https://example.com'})
-                        self.assertEqual(invalid.status_code, 422)
+                        invalid = await b.post('/model/personal', json={**personal, 'base_url': 'https://127.0.0.1/v1'})
+                        self.assertEqual(invalid.status_code, 200)
+                        self.assertFalse(invalid.json()['status'])
                         self.assertNotIn(personal_key, invalid.text)
                         test = await b.post('/model/personal/test', json=personal)
                         self.assertTrue(test.json()['status'], test.text)

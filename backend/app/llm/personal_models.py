@@ -10,15 +10,18 @@ from app.json_files import backup_provider_migration
 from app.llm.admin_settings import ApiKey, ModelSelection, ModelSettings
 from app.llm.model_catalog import (BaseURL, ModelAdapter, ModelCatalog, ModelEndpoint, ModelMerchant,
                                    default_model_catalog, migration_model_name)
+from app.llm.public_endpoint import PublicEndpoint
 
 
 class PersonalModel(ModelSelection):
     api_key: ApiKey | None = None
+    base_url: BaseURL | None = None
 
 
 class ActivePersonalModel(ModelSettings):
     api_key: ApiKey
     adapter: ModelAdapter
+    public_only: bool = False
 
     def public_model(self) -> ModelSettings:
         return ModelSettings(model_merchant=self.model_merchant, model_name=self.model_name,
@@ -28,7 +31,7 @@ class ActivePersonalModel(ModelSettings):
         from app.llm.factory import create_agents
 
         return create_agents(self.model_merchant, self.api_key.get_secret_value(), self.model_name,
-                             base_url=self.base_url, adapter=self.adapter)
+                             base_url=self.base_url, adapter=self.adapter, public_only=self.public_only)
 
 
 class _PersonalEntry(ModelEndpoint):
@@ -45,6 +48,8 @@ class _ProviderEntry(BaseModel):
 class _PersonalSettings(BaseModel):
     active_provider: ModelMerchant | None = None
     providers: dict[ModelMerchant, _ProviderEntry] = Field(default_factory=dict)
+    # 旧账号文件里的运维配置继续使用原协议，网页填写的地址使用公网传输。
+    public_overrides: set[ModelMerchant] = Field(default_factory=set)
 
 
 class _GroupedSettings(BaseModel):
@@ -76,7 +81,9 @@ class PersonalModelStore:
             grouped = json.loads(previous).get('models', {})
             if any(len(entries) > 1 for entries in grouped.values()):
                 backup_provider_migration(path, previous)
-        data = settings.model_dump()
+        data = settings.model_dump(mode='json')
+        if not settings.public_overrides:
+            data.pop('public_overrides')
         for merchant, entry in settings.providers.items():
             if entry.api_key is not None:
                 data['providers'][merchant]['api_key'] = entry.api_key.get_secret_value()
@@ -124,8 +131,17 @@ class PersonalModelStore:
         if key is None:
             return None
         endpoint = self.catalog.endpoint(merchant)
+        if model.base_url is None:
+            base_url = saved.base_url if saved else endpoint.base_url
+            public_only = merchant in settings.public_overrides
+        else:
+            base_url = model.base_url or endpoint.base_url
+            public_only = base_url != endpoint.base_url
+        if public_only:
+            PublicEndpoint(base_url)
         return ActivePersonalModel(model_merchant=merchant, model_name=name, api_key=key,
-                                   base_url=saved.base_url if saved else endpoint.base_url, adapter=endpoint.adapter)
+                                   base_url=base_url, adapter='openai' if public_only else endpoint.adapter,
+                                   public_only=public_only)
 
     def _active(self, settings: _PersonalSettings) -> ActivePersonalModel | None:
         merchant = settings.active_provider
@@ -164,9 +180,9 @@ class PersonalModelStore:
         with self.paths.lock(user_id):
             return self._resolve(model, self._read(user_id, persist=False))
 
-    def saved_choices(self, user_id: int) -> dict[ModelMerchant, tuple[str, bool]]:
+    def saved_choices(self, user_id: int) -> dict[ModelMerchant, tuple[str, str, bool]]:
         with self.paths.lock(user_id):
-            return {merchant: (entry.model_name, entry.api_key is not None)
+            return {merchant: (entry.model_name, entry.base_url, entry.api_key is not None)
                     for merchant, entry in self._read(user_id, persist=False).providers.items()}
 
     def update(self, user_id: int, model: PersonalModel, agents, *, checked: ActivePersonalModel | None = None) -> bool:
@@ -177,6 +193,10 @@ class PersonalModelStore:
                 return False
             merchant, name = resolved.model_merchant, resolved.model_name
             settings.active_provider = merchant
+            if resolved.public_only:
+                settings.public_overrides.add(merchant)
+            else:
+                settings.public_overrides.discard(merchant)
             settings.providers[merchant] = _ProviderEntry(
                 model_name=name, base_url=resolved.base_url, api_key=resolved.api_key,
             )

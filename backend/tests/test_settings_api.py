@@ -97,6 +97,37 @@ class SettingsAPITests(unittest.TestCase):
         self.assertFalse(catalog(self.request_for(1)).providers['tongyi'].has_saved_key)
         self.assertNotIn('private-member-key', catalog(member).model_dump_json())
 
+    def test_personal_custom_address_applies_to_that_account_only(self):
+        from app.llm.personal_models import PersonalModel
+
+        member = self.request_for(2)
+        address = 'https://models.example.test/v1'
+        selection = PersonalModel(model_merchant='tongyi', model_name='qwen3-max',
+                                  base_url=address, api_key='test-member-key')
+        self.assertTrue(model.test_personal_model(selection, member).status)
+        self.assertFalse(member.app.state.personal_models.path_for(2).exists())
+        self.assertTrue(self.model_calls.call_args.kwargs['public_only'])
+        self.assertTrue(model.save_personal_model(selection, member).status)
+        self.assertEqual(self.agent_calls.call_args.kwargs['base_url'], address)
+        self.assertEqual(self.agent_calls.call_args.kwargs['adapter'], 'openai')
+        self.assertTrue(self.agent_calls.call_args.kwargs['public_only'])
+        self.assertEqual(settings.get_settings(member).model_options.providers['tongyi'].saved_address, address)
+        other = settings.get_settings(self.request_for(3)).model_options.providers['tongyi']
+        self.assertNotEqual(other.saved_address, address)
+        self.assertEqual(other.default_address, 'https://dashscope.aliyuncs.com/api/v1')
+        self.assertTrue(model.save_personal_model(PersonalModel(
+            model_merchant='tongyi', model_name='qwen3-max', base_url='',
+        ), member).status)
+        self.assertEqual(self.agent_calls.call_args.kwargs['adapter'], 'dashscope')
+        self.assertFalse(self.agent_calls.call_args.kwargs['public_only'])
+
+    def test_admin_settings_supply_default_address_without_an_override(self):
+        selection = model.ModelConfigRequest(model_merchant='tongyi', model_name='qwen3-max', api_key='test-key')
+        self.assertTrue(self.switch(selection).status)
+        provider = settings.get_settings(self.request_for(1)).model_options.providers['tongyi']
+        self.assertEqual(provider.saved_address, '')
+        self.assertEqual(provider.default_address, self.agent_calls.call_args.kwargs['base_url'])
+
     def test_admin_can_save_and_reuse_a_key_without_returning_it_in_settings(self):
         selection = model.ModelConfigRequest(**self.config, api_key='new-admin-key')
         self.assertTrue(self.probe(selection).status)
