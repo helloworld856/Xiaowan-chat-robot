@@ -10,13 +10,12 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable
 
+from app.system_config import AuthConfig, PasswordConfig, RateLimitConfig
+
 from .repository import (HASH_ITERATIONS, AccountStorageError, AccountStore,
                        LocalAccountStore, PasswordCommitUnknown, ReservedUsername, User, unpack_hash)
 
 COOKIE_NAME = 'xiaowan_session'
-SESSION_TTL_SECONDS = 8 * 60 * 60
-MIN_PASSWORD_LENGTH = 6
-MAX_PASSWORD_LENGTH = 15
 USERNAME_PATTERN = r'^[a-zA-Z0-9_]{3,32}$'
 TOKEN_PATTERN = re.compile(r'[a-zA-Z0-9_-]{43}')
 
@@ -48,27 +47,26 @@ class _Attempt:
 
 
 class _AttemptLimiter:
-    WINDOW_SECONDS = 60
-    MAX_CLIENTS = 4096
-
-    def __init__(self, clock: Callable[[], float], limit: int):
+    def __init__(self, clock: Callable[[], float], limit: int, config: RateLimitConfig):
         self.clock = clock
         self.limit = limit
+        self.window_seconds = config.window_seconds
+        self.max_clients = config.max_clients
         self.lock = Lock()
         self.clients: dict[str, list[_Attempt]] = {}
 
     def reserve(self, client: str) -> _Attempt:
         with self.lock:
             now = self.clock()
-            if client not in self.clients and len(self.clients) >= self.MAX_CLIENTS:
+            if client not in self.clients and len(self.clients) >= self.max_clients:
                 self.clients = {key: active for key, attempts in self.clients.items()
-                                if (active := [a for a in attempts if now - a.at < self.WINDOW_SECONDS])}
-                if len(self.clients) >= self.MAX_CLIENTS:
+                                if (active := [a for a in attempts if now - a.at < self.window_seconds])}
+                if len(self.clients) >= self.max_clients:
                     oldest = min(attempts[0].at for attempts in self.clients.values())
-                    raise LoginThrottled(max(1, math.ceil(self.WINDOW_SECONDS - (now - oldest))))
-            active = [a for a in self.clients.get(client, ()) if now - a.at < self.WINDOW_SECONDS]
+                    raise LoginThrottled(max(1, math.ceil(self.window_seconds - (now - oldest))))
+            active = [a for a in self.clients.get(client, ()) if now - a.at < self.window_seconds]
             if len(active) >= self.limit:
-                raise LoginThrottled(max(1, math.ceil(self.WINDOW_SECONDS - (now - active[0].at))))
+                raise LoginThrottled(max(1, math.ceil(self.window_seconds - (now - active[0].at))))
             attempt = _Attempt(now)
             self.clients[client] = [*active, attempt]
             return attempt
@@ -109,9 +107,9 @@ def _verify_password(password: str, password_hash: str | None) -> bool:
     return secrets.compare_digest(digest, expected) and password_hash is not None
 
 
-def _validate_new_password(password: str) -> None:
-    if not MIN_PASSWORD_LENGTH <= len(password) <= MAX_PASSWORD_LENGTH:
-        raise InvalidPassword(f'新密码须为 {MIN_PASSWORD_LENGTH}–{MAX_PASSWORD_LENGTH} 个字符')
+def _validate_new_password(password: str, policy: PasswordConfig) -> None:
+    if not policy.min_length <= len(password) <= policy.max_length:
+        raise InvalidPassword(f'新密码须为 {policy.min_length}–{policy.max_length} 个字符')
     try:
         password.encode('utf-8')
     except UnicodeError:
@@ -127,15 +125,17 @@ def _token_digest(token: str | None) -> str | None:
 
 class AuthService:
     def __init__(self, credentials_path: Path | None = None, clock: Callable[[], float] = time.monotonic,
-                 *, account_store: AccountStore | None = None):
+                 *, account_store: AccountStore | None = None, config: AuthConfig | None = None):
         self.account_store = account_store if account_store is not None else LocalAccountStore(credentials_path)
+        self.config = config if config is not None else AuthConfig()
         self.clock = clock
         self._session_lock = Lock()
         self._sessions: dict[str, _Session] = {}
         # A fixed-size set of locks avoids retaining one lock for every supplied username.
         self._account_locks = tuple(Lock() for _ in range(64))
-        self._login_attempts = _AttemptLimiter(clock, limit=5)
-        self._registrations = _AttemptLimiter(clock, limit=5)
+        rate_limit = self.config.rate_limit
+        self._login_attempts = _AttemptLimiter(clock, rate_limit.login_attempts, rate_limit)
+        self._registrations = _AttemptLimiter(clock, rate_limit.registration_attempts, rate_limit)
 
     def _account_lock(self, username_key: str):
         return self._account_locks[hash(username_key) % len(self._account_locks)]
@@ -157,7 +157,7 @@ class AuthService:
             raise ValueError('用户名须为 3–32 位字母、数字或下划线')
         if username.lower() == 'admin':
             raise ReservedUsername()
-        _validate_new_password(password)
+        _validate_new_password(password, self.config.password)
         attempt = self._registrations.reserve(client)
         try:
             return self.account_store.register(username, hash_password(password))
@@ -184,7 +184,7 @@ class AuthService:
                     # 重新登录成功后撤销浏览器此前的会话，防止旧令牌继续使用。
                     if previous_digest is not None:
                         self._sessions.pop(previous_digest, None)
-                    self._sessions[token_hash] = _Session(account.user, now + SESSION_TTL_SECONDS)
+                    self._sessions[token_hash] = _Session(account.user, now + self.config.session_ttl_seconds)
         except AccountStorageError:
             self._login_attempts.release(client, attempt)
             raise
@@ -192,7 +192,7 @@ class AuthService:
         return token, account.user
 
     def change_password(self, user: User, token: str | None, current_password: str, new_password: str, client: str):
-        _validate_new_password(new_password)
+        _validate_new_password(new_password, self.config.password)
         username_key = user.username.lower()
         attempt = self._login_attempts.reserve(client)
         try:

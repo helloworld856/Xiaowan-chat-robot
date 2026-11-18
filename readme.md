@@ -29,9 +29,11 @@ npm --prefix frontend run build
 
 首次运行需要构建一次：后端启动时会检查 `frontend/dist`，即使使用Vite开发也需要该目录。构建产物不随仓库提交。
 
-首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 的连接信息。`server` 配置后端监听地址和端口，`chat` 配置聊天并发与队列，`models` 配置默认厂商、模型列表、地址和接口协议。数据库 `XiaoWan` 和所需表会在启动时创建。管理员可使用 `backend/.env.example` 创建 `backend/.env`，也可登录后在网页设置中保存模型和 API Key。
+首次安装时复制 `backend/system_config.example.json` 为 `backend/system_config.json`，在 `database` 里填写 MySQL 的连接信息。全局配置支持 `//` 行注释，字段用途、单位和可选值写在对应字段旁。编辑后重启后端生效。数据库 `XiaoWan` 和所需表会在启动时创建。管理员可使用 `backend/.env.example` 创建 `backend/.env`，也可登录后在网页设置中保存模型和 API Key。
 
-已有部署升级时，保留原来的 `backend/.env`、`backend/settings.json` 和 `backend/user_data/`。首次启动会把旧管理员模型迁入 `.env` 的 `ADMIN_PROVIDERS`，并补齐缺少的全局模型目录。如果全局配置尚未创建，数据库密码和并发参数也会从旧 `.env` 导入。曾手动修改过 `backend/app/config.py` 的数据库连接或监听地址时，请将这些改动填入 `backend/system_config.json`。
+已有部署升级时，保留原来的 `backend/system_config.json`、`backend/.env`、`backend/settings.json` 和 `backend/user_data/`。首次启动会给旧版纯 JSON 全局配置补齐默认项和字段说明，保留原有值。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`。如果全局配置尚未创建，数据库密码和并发参数会从旧 `.env` 导入。
+
+`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、快捷键和头像。`chat` 管理并发、消息长度、历史压缩和启动时的历史清理。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
 
 ## 聊天设置
 
@@ -57,7 +59,7 @@ npm --prefix frontend run build
 
 从旧版升级时，首次启动将 `backend/auth_config/admin.json`、旧资料和发送快捷键导入管理员账号，已迁入的账户数据优先。首次安装的本地管理员用户名为 `admin`，初始密码为 `123456`。管理员可以在个人资料中修改密码。
 
-登录 Cookie 有效期为 8 小时，刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
+登录 Cookie 默认有效期为 8 小时，可在 `auth.session_ttl_seconds` 修改。刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
 
 菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`。
 

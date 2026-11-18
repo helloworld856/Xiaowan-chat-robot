@@ -29,6 +29,21 @@ export interface ChatResponse {
     saved: boolean;
 }
 
+export interface InputLimits {
+    password_min_length: number;
+    password_max_length: number;
+    max_nickname_chars: number;
+    max_message_chars: number;
+}
+
+// 首次会话检查会应用服务端配置，兼容未返回限制的旧后端。
+export const inputLimits: InputLimits = {
+    password_min_length: 6,
+    password_max_length: 15,
+    max_nickname_chars: 32,
+    max_message_chars: 8000
+};
+
 // 只缓存界面所需的模型信息，不包含个人 API Key。
 export const modelConfig: ModelConfig = {
     model_valid: false,//模型是否有效

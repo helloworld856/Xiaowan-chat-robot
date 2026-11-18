@@ -1,4 +1,4 @@
-import type {ModelInfo, ChatResponse} from './global_config.ts';
+import type {ModelInfo, ChatResponse, InputLimits} from './global_config.ts';
 import type {Preferences} from './preferences.ts';
 
 const base_url = window.location.origin;
@@ -129,7 +129,7 @@ export function registerAPI(username: string, password: string, confirm_password
     }, '注册失败，请检查输入后重试', 'public');
 }
 export function sessionAPI() {
-    return requestJSON<{user: AuthUser | null}>('/auth/session', {
+    return requestJSON<{user: AuthUser | null; limits?: InputLimits}>('/auth/session', {
         method: 'GET', signal: AbortSignal.timeout(15000)
     }, '无法检查登录状态，请检查后端连接', 'public');
 }

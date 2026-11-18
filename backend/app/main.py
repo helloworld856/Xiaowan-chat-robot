@@ -1,9 +1,9 @@
 from starlette.staticfiles import StaticFiles
 
+from app.account_logging import configure_logging
 from app.application import build_application
 from app.config import BACKEND_ROOT, PROJECT_ROOT
 from app.database.mysql import open_pool
-from app.accounts.profile import ProfileStore
 from app.system_config import load_system_config
 
 
@@ -18,7 +18,7 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 config = load_system_config(migrate=True)
-app = build_application(open_pool(config=config.database), ProfileStore(), BACKEND_ROOT / 'auth_config',
-                        chat_config=config.chat, model_catalog=config.models)
+configure_logging(config.logging)
+app = build_application(open_pool(config=config.database), None, BACKEND_ROOT / 'auth_config', system_config=config)
 # 静态站点挂在最后，已注册的 API 优先匹配。
 app.mount('/', NoCacheStaticFiles(directory=PROJECT_ROOT / 'frontend' / 'dist', html=True), name='static')

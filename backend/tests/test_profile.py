@@ -71,8 +71,21 @@ class ProfileHTTPTests(unittest.TestCase):
                          {'nickname': '晚风', 'avatar_id': 'fox'})
         self.app.state.profile = ProfileStore(self.profile.root)
         self.assertEqual(json.loads(request(self.app, '/profile', cookie=cookie)[2]), data)
-        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2]),
-                         {'user': {'id': 1, 'username': 'admin', 'role': 'admin'}})
+        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2])['user'],
+                         {'id': 1, 'username': 'admin', 'role': 'admin'})
+
+    def test_new_nickname_limit_preserves_existing_nickname_until_edit(self):
+        from app.accounts.profile import Profile, ProfileStore
+        from app.system_config import ProfileConfig
+
+        cookie = self.login()
+        self.profile.update(1, Profile(nickname='已有昵称'))
+        self.app.state.profile = ProfileStore(self.profile.root, config=ProfileConfig(max_nickname_chars=2))
+        self.assertEqual(json.loads(request(self.app, '/profile', cookie=cookie)[2])['nickname'], '已有昵称')
+        self.assertEqual(request(self.app, '/profile', 'POST',
+                                 {'nickname': '😀😀😀', 'avatar_id': 'fox'}, cookie=cookie)[0], 422)
+        self.assertEqual(request(self.app, '/profile', 'POST',
+                                 {'nickname': '😀😀', 'avatar_id': 'fox'}, cookie=cookie)[0], 200)
 
     def test_registered_account_has_its_own_profile_file_and_defaults(self):
         password = 'Second!2026'
@@ -199,7 +212,7 @@ class ProfileHTTPTests(unittest.TestCase):
         for old_cookie in [cookie, other_cookie]:
             with self.subTest(cookie=old_cookie):
                 self.assertEqual(request(self.app, '/profile', cookie=old_cookie)[0], 401)
-                self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=old_cookie)[2]), {'user': None})
+                self.assertIsNone(json.loads(request(self.app, '/auth/session', cookie=old_cookie)[2])['user'])
         saved = self.credentials_path.read_bytes()
         self.assertNotEqual(saved, original)
         self.assertNotIn(b'Change!2026', saved)
@@ -226,7 +239,7 @@ class ProfileHTTPTests(unittest.TestCase):
     def test_session_expiring_before_password_change_returns_401_and_preserves_credentials(self):
         cookie = self.login()
         original = self.credentials_path.read_bytes()
-        with patch.object(self.service, 'clock', side_effect=(self.now, self.now + self.auth.SESSION_TTL_SECONDS)):
+        with patch.object(self.service, 'clock', side_effect=(self.now, self.now + self.service.config.session_ttl_seconds)):
             status, _, _ = request(self.app, '/auth/password', 'POST', {
                 'current_password': '123456', 'new_password': 'Change!2026', 'confirm_password': 'Change!2026',
             }, cookie=cookie)

@@ -17,6 +17,7 @@ from app.llm.admin_models import AdminModelStore
 from app.llm.admin_settings import ModelSettings
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.personal_models import PersonalModelStore
+from app.system_config import ModelRuntimeConfig
 from test_auth import request
 
 
@@ -33,6 +34,7 @@ class SettingsAPITests(unittest.TestCase):
         self.previous = ModelSettings(model_merchant='deepseek', model_name='previous')
         self.runtime.publish(self.previous, self.old_agents)
         self.configuration = ModelConfigurationService(self.store, personal_models, self.runtime)
+        self.addCleanup(self.configuration.close)
         self.agent_calls = self.enter_patch(factory, 'create_agents', return_value=self.new_agents)
         self.model_calls = self.enter_patch(factory, 'create_model', return_value=types.SimpleNamespace(invoke=lambda _: None))
         self.config = {'model_merchant': 'deepseek', 'model_name': 'deepseek-v4-flash', 'base_url': 'https://example.com/v1'}
@@ -286,7 +288,12 @@ class SettingsAPITests(unittest.TestCase):
         from concurrent.futures import ThreadPoolExecutor
         from threading import Barrier, Event
 
-        capacity = configuration.MODEL_VALIDATION_CAPACITY
+        capacity = 1
+        self.configuration = ModelConfigurationService(
+            self.store, self.configuration.personal_models, self.runtime,
+            config=ModelRuntimeConfig(validation_concurrency=capacity),
+        )
+        self.addCleanup(self.configuration.close)
         # 让已有探测都占住名额，再发一个请求验证立即拒绝。
         doing_work = Barrier(capacity + 1)
         release = Event()

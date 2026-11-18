@@ -2,8 +2,19 @@
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
+
+
+_JSON_STRING_OR_COMMENT = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\r\n]*')
+
+
+def strip_json_line_comments(text: str) -> str:
+    # 跳过字符串里的双斜杠，保留 URL、密码和转义字符。
+    return _JSON_STRING_OR_COMMENT.sub(
+        lambda match: ' ' * len(match[0]) if match[0].startswith('//') else match[0], text,
+    )
 
 
 def atomic_write_json(path: Path, value: object, *, replace: bool = True) -> None:

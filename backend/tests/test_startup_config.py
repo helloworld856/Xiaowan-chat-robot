@@ -179,7 +179,7 @@ launcher['main']()
         from app.config import configer
         from app.system_config import ServerConfig, SystemConfig
 
-        settings = Mock(return_value=SystemConfig(server=ServerConfig(port=8123)))
+        settings = Mock(return_value=SystemConfig(server=ServerConfig(port=8123), logging={'clear_on_startup': False}))
         uvicorn = SimpleNamespace(run=Mock())
         with patch.dict(sys.modules, {'uvicorn': uvicorn}), \
                 patch('logging.basicConfig'), patch('logging.captureWarnings'), \
@@ -187,10 +187,12 @@ launcher['main']()
                 patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
                 patch.object(files, 'BACKEND_ROOT', self.root), \
                 patch.object(configer, 'log_save_path', self.root / 'app.log'), \
-                patch('app.system_config.load_system_config', settings):
+                patch('app.system_config.load_system_config', settings), \
+                patch('app.account_logging.reset_active_logs') as reset_logs:
             launcher = runpy.run_path(str(ROOT / 'run_serve.py'))
             self.assertIs(launcher['logger'], account_logging.logger)
             settings.assert_not_called()
             launcher['main']()
         settings.assert_called_once_with(migrate=True)
+        reset_logs.assert_not_called()
         uvicorn.run.assert_called_once_with('app.main:app', host='127.0.0.1', port=8123, workers=1, log_config=None)

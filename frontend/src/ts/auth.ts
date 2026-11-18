@@ -1,5 +1,6 @@
 import {AuthRequiredError, invalidateRequests, loginAPI, logoutAPI, registerAPI, sessionAPI} from './api.ts';
 import type {AuthUser} from './api.ts';
+import {inputLimits} from './global_config.ts';
 import {lockSendBtn, showAlert} from './ui.ts';
 
 const authChangeKey = 'xiaowan.auth-changed';
@@ -37,6 +38,7 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
     const logoutConfirm = document.getElementById('logout-confirm') as HTMLButtonElement;
     let busy = false;
     let externalAuthChange = 0;
+    let startupPending = true;
     let activeUser: AuthUser | undefined;
 
     function showRegister(show: boolean) {
@@ -106,8 +108,9 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
             return;
         }
         const length = [...registerPassword.value].length;
-        if (length < 6 || length > 15) {
-            registerError.textContent = '密码须为 6–15 个字符';
+        const {password_min_length: min, password_max_length: max} = inputLimits;
+        if (length < min || length > max) {
+            registerError.textContent = `密码须为 ${min}–${max} 个字符`;
             registerPassword.focus();
             return;
         }
@@ -143,7 +146,7 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
         if (event.key !== authChangeKey || event.newValue === null) return;
         externalAuthChange++;
         // 登录页没有私有状态，后台标签的变更不清空正在填写的表单。
-        if (!app.hidden || screen.hidden) signedOut(authChangeMessage);
+        if (!startupPending && (!app.hidden || screen.hidden)) signedOut(authChangeMessage);
     });
     // 页面进入前进后退缓存时先藏起聊天，恢复后验证 Cookie 再显示。
     window.addEventListener('pagehide', event => {
@@ -235,10 +238,14 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
     const startup = externalAuthChange;
     try {
         const result = await sessionAPI();
-        if (startup !== externalAuthChange) return;
-        if (result.user) await signedIn(result.user);
+        startupPending = false;
+        if (result.limits) Object.assign(inputLimits, result.limits);
+        if (startup !== externalAuthChange) signedOut(authChangeMessage);
+        else if (result.user) await signedIn(result.user);
         else signedOut();
     } catch (reason) {
+        if (startupPending && startup !== externalAuthChange) signedOut(authChangeMessage);
+        startupPending = false;
         if (startup !== externalAuthChange) return;
         signedOut(reason instanceof AuthRequiredError ? '' : '无法检查登录状态，请确认后端已启动后再登录');
     }

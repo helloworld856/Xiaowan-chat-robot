@@ -24,8 +24,7 @@ test('applying a saved profile updates the menu and all existing user avatars', 
     assert.deepEqual(avatars.map(avatar => avatar.title), ['小林', '小林']);
 });
 
-// 保存前需要真实资料，网络错误与取消都不能让空表单提交。
-test('a failed profile read cannot save an uninitialized or cancelled draft', async () => {
+function profileHarness(api, inputLimits) {
     const source = fs.readFileSync(new URL('../src/ts/profile.ts', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
     const elements = new Map();
@@ -47,18 +46,34 @@ test('a failed profile read cannot save an uninitialized or cancelled draft', as
     class CancelledRequestError extends Error {}
     const exports = {};
     runInNewContext(compiled, {
-        exports, window: {},
+        exports, window: {dispatchEvent() {}}, Event,
         document: {getElementById: getElement, querySelectorAll: () => []},
-        require: name => name === './ui.ts' ? {menuBtn: makeElement(), menuSelect: [menu]} : {
-            AuthRequiredError, CancelledRequestError, getRequestGeneration: () => 0,
-            profileAPI: async payload => {
-                if (!payload) throw new Error('GET failed');
-                posts.push(payload);
-                return payload;
+        require: name => ({
+            './ui.ts': {menuBtn: makeElement(), menuSelect: [menu]},
+            './global_config.ts': {inputLimits},
+            './api.ts': {
+                AuthRequiredError, CancelledRequestError, getRequestGeneration: () => 0,
+                profileAPI: async payload => {
+                    if (payload) posts.push(payload);
+                    return api.profileAPI(payload);
+                },
+                changePasswordAPI: api.changePasswordAPI
             }
-        }
+        })[name]
     });
-    exports.applyProfile({username: 'admin', nickname: 'Saved', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png', avatars: [], default_avatar_id: 'cat'});
+    return {exports, getElement, menu, posts};
+}
+
+const savedProfile = {
+    username: 'admin', nickname: 'Saved', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png', avatars: [], default_avatar_id: 'cat'
+};
+
+// 保存前需要真实资料，网络错误与取消都不能让空表单提交。
+test('a failed profile read cannot save an uninitialized or cancelled draft', async () => {
+    const {exports, getElement, menu, posts} = profileHarness({
+        profileAPI: async () => { throw new Error('GET failed'); }
+    });
+    exports.applyProfile(savedProfile);
     exports.initProfile();
     await menu.listeners.get('click')();
     assert.equal(getElement('profile-fields').disabled, true);
@@ -66,4 +81,43 @@ test('a failed profile read cannot save an uninitialized or cancelled draft', as
     getElement('profile-nickname').value = 'New nickname';
     await getElement('profile-form').listeners.get('submit')({preventDefault() {}});
     assert.equal(posts.length, 0);
+});
+
+test('a configured nickname limit counts Unicode characters', async () => {
+    const {exports, getElement, menu, posts} = profileHarness({
+        profileAPI: async payload => ({...savedProfile, ...payload})
+    }, {max_nickname_chars: 3});
+    exports.initProfile();
+    await menu.listeners.get('click')();
+    const nickname = getElement('profile-nickname');
+    const submit = () => getElement('profile-form').listeners.get('submit')({preventDefault() {}});
+    nickname.value = '🙂🙂🙂🙂';
+    await submit();
+    assert.equal(posts.length, 0);
+    assert.match(getElement('profile-status').textContent, /3/);
+    nickname.value = '🙂🙂🙂';
+    await submit();
+    assert.equal(posts[0].nickname, '🙂🙂🙂');
+});
+
+test('changing a password enforces the configured length range', async () => {
+    const changes = [];
+    const {exports, getElement} = profileHarness({
+        changePasswordAPI: async payload => { changes.push(payload); return {ok: true}; }
+    }, {password_min_length: 8, password_max_length: 20});
+    exports.initProfile();
+    getElement('profile-current-password').value = 'Old!12';
+    const submit = async value => {
+        getElement('profile-new-password').value = value;
+        getElement('profile-confirm-password').value = value;
+        await getElement('profile-password-form').listeners.get('submit')({preventDefault() {}});
+    };
+    await submit('Short!1');
+    await submit('🙂'.repeat(21));
+    assert.equal(changes.length, 0);
+    assert.match(getElement('profile-password-status').textContent, /8–20/);
+    const valid = '🙂'.repeat(20);
+    await submit(valid);
+    assert.equal(changes[0].new_password, valid);
+    assert.equal(changes[0].current_password, 'Old!12');
 });

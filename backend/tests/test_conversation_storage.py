@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import closing, contextmanager
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -247,12 +248,13 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_next_turn_recovers_summary_after_lost_commit_acknowledgement(self):
         from app.accounts.repository import User
         from app.chat.scheduler import ChatSessions
+        from app.chat.workflow import create_graph
 
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         pool = SQLitePool(Path(folder.name) / 'graph.sqlite')
         user = User(1, 'First', 'admin')
-        sessions = ChatSessions(pool.connection)
+        sessions = ChatSessions(pool.connection, graph_factory=partial(create_graph, compression_tokens=8))
         self.addAsyncCleanup(sessions.drain)
         prompts = []
 
@@ -267,13 +269,12 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
-            patch('app.chat.nodes.count_tokens', return_value=1),
+            patch('app.chat.nodes.count_tokens', side_effect=(1, 1, 0)),
         ):
             await sessions.send(user, 'first turn')
             await sessions.send(user, 'second turn')
             pool.lose_commit_ack = True
-            with patch('app.chat.nodes.configer.compress_history_threshold', 1):
-                self.assertTrue((await sessions.send(user, 'compression turn'))['saved'])
+            self.assertTrue((await sessions.send(user, 'compression turn'))['saved'])
             await sessions.send(user, 'next turn')
         self.assertIn('committed summary', prompts[-1])
         self.assertNotIn('first turn', prompts[-1])

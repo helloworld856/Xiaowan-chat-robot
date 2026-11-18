@@ -1,3 +1,4 @@
+from functools import partial
 from time import perf_counter
 
 from langchain_core.runnables import RunnableConfig
@@ -6,10 +7,10 @@ from app.account_logging import logger
 from app.chat.memory import MemoryManager
 from app.chat.state import AIChatState
 
-from .nodes import start_node, end_node, analysis, generate
+from .nodes import DEFAULT_COMPRESSION_TOKENS, start_node, end_node, analysis, generate
 
 
-def create_graph(memorier: MemoryManager):
+def create_graph(memorier: MemoryManager, *, compression_tokens: int = DEFAULT_COMPRESSION_TOKENS):
     # 节点共享本账号的记忆管理器，每轮使用调度器传入的代理。
     def bind_node(name, node):
         def run(state: AIChatState, config: RunnableConfig) -> AIChatState:
@@ -24,7 +25,7 @@ def create_graph(memorier: MemoryManager):
     logger.info('初始化工作流...')
     builder = StateGraph(AIChatState)
 
-    builder.add_node('start', bind_node('start', start_node))
+    builder.add_node('start', bind_node('start', partial(start_node, compression_tokens=compression_tokens)))
     builder.add_node('end', bind_node('end', end_node))
     builder.add_node('analysis', bind_node('analysis', analysis))
     builder.add_node('generate', bind_node('generate', generate))

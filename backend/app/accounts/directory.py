@@ -9,19 +9,23 @@ from app.llm.model_catalog import ModelCatalog
 from app.accounts.profile import ProfileStore
 from app.accounts.preferences import FilePreferencesStore, Preferences, UserPreferencesStore
 from app.accounts.files import require_directory
+from app.system_config import DefaultsConfig
 
 
 class UserDirectoryStore:
     def __init__(self, profiles: ProfileStore, legacy_preferences: UserPreferencesStore,
-                 catalog: ModelCatalog | None = None):
+                 catalog: ModelCatalog | None = None, *, defaults: DefaultsConfig | None = None):
         self.profiles = profiles
         self.paths = profiles.paths
         self.models = PersonalModelStore(self.paths, catalog)
-        self.preferences = FilePreferencesStore(self.paths, legacy_preferences)
+        initial = defaults or DefaultsConfig()
+        self.preferences = FilePreferencesStore(
+            self.paths, legacy_preferences, Preferences(send_shortcut=initial.send_shortcut, theme=initial.theme),
+        )
 
     def prepare_new(self, user: User) -> None:
         # This runs inside the registration transaction. The new user has no legacy settings.
-        self.ensure(user, Preferences())
+        self.ensure(user, self.preferences.defaults)
 
     def ensure(self, user: User, preferences: Preferences | None = None) -> None:
         for _, _, ensure in self._entries(user, preferences):

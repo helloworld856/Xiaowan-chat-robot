@@ -85,7 +85,8 @@ def main() -> int:
             admin_preferences = settings_store.get().preferences
         except (OSError, ValueError):
             admin_preferences = None
-        directories = UserDirectoryStore(ProfileStore(), UserPreferencesStore(pool), config.models)
+        profiles = ProfileStore(config=config.profile, defaults=config.defaults)
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(pool), config.models, defaults=config.defaults)
         report = migrate_accounts(SQLAccountStore(pool), directories, apply=args.apply,
                                   rollback=args.rollback_preferences, legacy_profile=backend / 'auth_config' / 'profile.json',
                                   admin_preferences=admin_preferences)

@@ -17,14 +17,14 @@ class ChatResponse(BaseModel):
 
 
 router = APIRouter()
-MAX_MESSAGE_LENGTH = 8000
 
 
 @router.post('/chat', response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request):
     try:
-        if len(req.user_input) > MAX_MESSAGE_LENGTH:
-            raise ChatNotStarted(422, f'消息最多可输入 {MAX_MESSAGE_LENGTH} 个字符')
+        limit = request.app.state.system_config.chat.max_message_chars
+        if len(req.user_input) > limit:
+            raise ChatNotStarted(422, f'消息最多可输入 {limit} 个字符')
         if not req.user_input.strip():
             raise ChatNotStarted(422, '请输入消息内容')
         # 调度使用认证后的账号，消息体只提供聊天内容。

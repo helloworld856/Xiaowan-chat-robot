@@ -20,6 +20,7 @@ from app.llm.personal_models import PersonalModel
 from app.accounts.profile import Profile, ProfileStore
 from app.accounts.preferences import Preferences
 from app.accounts.directory import UserDirectoryStore
+from app.system_config import DefaultsConfig, LoggingConfig
 
 
 class UserDirectoryTests(unittest.TestCase):
@@ -71,6 +72,18 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertEqual(rolled_back.updated, 2)
         self.legacy.update.assert_any_call(self.admin.id, Preferences())
 
+    def test_configured_defaults_apply_to_new_accounts_and_preserve_existing_files(self):
+        self.store.prepare_new(self.member)
+        defaults = DefaultsConfig(theme='theme3', send_shortcut='ctrl_enter', avatar_id='frog')
+        profiles = ProfileStore(self.store.paths, defaults=defaults)
+        updated = UserDirectoryStore(profiles, self.legacy, defaults=defaults)
+        new_user = User(3, 'NewMember', 'user')
+        updated.prepare_new(new_user)
+        self.assertEqual(updated.preferences.get(new_user.id), Preferences(theme='theme3', send_shortcut='ctrl_enter'))
+        self.assertEqual(profiles.get(new_user.id, new_user.username).avatar_id, 'frog')
+        self.assertEqual(updated.preferences.get(self.member.id), Preferences())
+        self.assertEqual(profiles.get(self.member.id, self.member.username).avatar_id, 'cat')
+
     def test_migration_reports_invalid_files_without_replacing_them(self):
         self.store.prepare_new(self.member)
         path = self.store.preferences.path_for(self.member.id)
@@ -113,7 +126,8 @@ class UserDirectoryTests(unittest.TestCase):
     def test_user_logs_keep_context_when_a_worker_is_reused_and_rotate_private_files(self):
         self.store.prepare_new(self.member)
         system_path = self.root / 'system.log'
-        handler = AccountFileHandler(system_path, max_bytes=120, max_open=1)
+        handler = AccountFileHandler(system_path)
+        handler.configure(LoggingConfig(max_bytes=120, max_open_account_logs=1, backup_count=1))
         handler.addFilter(AccountLabel())
         handler.setFormatter(logging.Formatter('%(account_label)s %(message)s'))
         logger = logging.Logger('review-test', level=logging.INFO)
@@ -140,6 +154,7 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertIn('member-only', member_log.read_text(encoding='utf-8'))
         self.assertNotIn('admin-only', member_log.read_text(encoding='utf-8'))
         self.assertTrue((admin_dir / 'app.log.1').exists())
+        self.assertFalse((admin_dir / 'app.log.2').exists())
         self.assertNotIn('member-only', (admin_dir / 'app.log').read_text(encoding='utf-8'))
         if os.name == 'posix':
             self.assertEqual(stat.S_IMODE((admin_dir / 'app.log.1').stat().st_mode), 0o600)

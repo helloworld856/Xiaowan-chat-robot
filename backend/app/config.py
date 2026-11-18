@@ -15,9 +15,6 @@ class Config:
     # 日志配置
     log_save_path = str(BACKEND_ROOT / 'log_config' / 'app.log')
 
-    # 压缩对话阈值，输入总token数大于这个阈值就压缩历史对话
-    compress_history_threshold = 100000
-
     # tokenizer配置
     tokenizer_path = str(BACKEND_ROOT / 'utils' / 'deepseek_tokenizer')
 

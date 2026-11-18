@@ -276,7 +276,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                                                  model_catalog=catalog)
                 async with resumed.router.lifespan_context(resumed):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=resumed), base_url='http://testserver') as b:
-                        self.assertEqual((await b.get('/auth/session')).json(), {'user': None})
+                        self.assertIsNone((await b.get('/auth/session')).json()['user'])
                         self.assertEqual((await b.post('/auth/login', json={'username': 'Second_User', 'password': user_credential})).status_code, 200)
                         self.assertEqual((await b.get('/profile')).json()['nickname'], '第二个账号')
                         self.assertEqual((await b.get('/settings')).json()['preferences']['send_shortcut'], 'ctrl_enter')

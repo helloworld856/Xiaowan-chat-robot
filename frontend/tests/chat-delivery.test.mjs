@@ -8,7 +8,7 @@ const source = fs.readFileSync(new URL('../src/ts/chat.ts', import.meta.url), 'u
 const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
 
 // 用受控的接口和 DOM 记录验证发送流程，无需启动后端。
-function harness(chatAPI, historyAPI) {
+function harness(chatAPI, historyAPI, maxMessageChars = 8000) {
     const rows = [];
     const confirmed = [];
     const sendBtn = {disabled: false};
@@ -55,7 +55,7 @@ function harness(chatAPI, historyAPI) {
                 lockSendBtn() { sendBtn.disabled = true; }, unlockSendBtn() { sendBtn.disabled = false; },
                 showTypingIndicator() {}, hideTypingIndicator() {}, scrollToBottom() {}, showAlert(message) { alerts.push(message); }
             };
-            if (name === './global_config.ts') return {modelConfig: {model_valid: true}};
+            if (name === './global_config.ts') return {inputLimits: {max_message_chars: maxMessageChars}};
             return {
                 addUserMessage(text) { const row = element('user'); row.textContent = text; rows.push(row); return row; },
                 async addAssistantMessage(messages, _isCurrent, firstReply) { confirmed.push(...messages); firstReply?.(); },
@@ -75,13 +75,13 @@ test('the chat limit counts Unicode characters and preserves an oversized draft'
     const app = harness(async text => {
         sent.push(text);
         return {response: ['回复'], conversation_round: 1, saved: true};
-    });
-    const valid = '🙂'.repeat(8000);
+    }, undefined, 3);
+    const valid = '🙂🙂🙂';
     app.inputBox.value = valid + '好';
     await app.sendMessage();
     assert.equal(sent.length, 0);
     assert.equal(app.inputBox.value, valid + '好');
-    assert.match(app.alerts[0], /8000/);
+    assert.match(app.alerts[0], /3/);
     app.inputBox.value = valid;
     await app.sendMessage();
     assert.deepEqual(sent, [valid]);

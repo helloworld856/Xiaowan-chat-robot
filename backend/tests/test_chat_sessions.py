@@ -194,13 +194,15 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         from fastapi import FastAPI
         from httpx import ASGITransport, AsyncClient
         from app.api.chat import router
+        from app.system_config import SystemConfig
 
         async def send(user, text):
             self.assertEqual(user.id, 42)
-            self.assertEqual(text, ' ' + '晚' * 7998 + ' ')
+            self.assertEqual(text, ' 😀晚 ')
             return {'ai_response': ['回复'], 'message': {'conversation_round': 1}, 'saved': True}
 
         app = FastAPI()
+        app.state.system_config = SystemConfig(chat={'max_message_chars': 4})
         app.state.chat = SimpleNamespace(send=send)
         app.include_router(router)
 
@@ -210,10 +212,10 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
             return await call_next(request)
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
-            for text in ('', ' \n\t', '晚' * 8001):
+            for text in ('', ' \n\t', '晚' * 5):
                 with self.subTest(length=len(text)):
                     response = await client.post('/chat', json={'user_input': text})
                     self.assertEqual(response.status_code, 422)
                     self.assertEqual(response.json()['detail']['code'], 'CHAT_NOT_STARTED')
-            response = await client.post('/chat', json={'user_input': ' ' + '晚' * 7998 + ' '})
+            response = await client.post('/chat', json={'user_input': ' 😀晚 '})
             self.assertEqual(response.status_code, 200)

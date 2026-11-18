@@ -1,5 +1,6 @@
 import {AuthRequiredError, CancelledRequestError, changePasswordAPI, getRequestGeneration, profileAPI} from './api.ts';
 import type {AvatarId, ProfileInfo} from './api.ts';
+import {inputLimits} from './global_config.ts';
 import {menuBtn, menuSelect} from './ui.ts';
 
 let current: ProfileInfo | null = null;
@@ -150,7 +151,11 @@ export function initProfile() {
         if (busy || !ready || !current || !form.reportValidity()) return;
         const value = nickname.value.trim();
         if (!value) { message('profile-status', '请输入昵称', true); return; }
-        if ([...value].length > 32) { message('profile-status', '昵称最多为 32 个字符', true); return; }
+        const maxNicknameLength = inputLimits.max_nickname_chars;
+        if ([...value].length > maxNicknameLength) {
+            message('profile-status', `昵称最多为 ${maxNicknameLength} 个字符`, true);
+            return;
+        }
         const generation = getRequestGeneration();
         setBusy(true);
         message('profile-status', '正在保存…');
@@ -175,8 +180,10 @@ export function initProfile() {
             confirm_password: input('profile-confirm-password').value
         };
         const length = [...passwords.new_password].length;
-        if (length < 6 || length > 15) {
-            message('profile-password-status', '新密码须为 6–15 个字符', true); return;
+        const {password_min_length: min, password_max_length: max} = inputLimits;
+        if (length < min || length > max) {
+            message('profile-password-status', `新密码须为 ${min}–${max} 个字符`, true);
+            return;
         }
         if (passwords.new_password !== passwords.confirm_password) {
             message('profile-password-status', '两次新密码不一致', true); return;

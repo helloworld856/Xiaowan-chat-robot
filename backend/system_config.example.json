@@ -1,36 +1,123 @@
+// 小晚全局配置。修改后重启后端生效。
 {
+  // MySQL 连接设置。
   "database": {
+    // MySQL 主机名或 IP。
     "host": "localhost",
+    // MySQL 端口。
     "port": 3306,
+    // MySQL 登录用户名。
     "user": "root",
+    // MySQL 登录密码，只保存在服务器上。
     "password": "",
+    // 数据库名称，允许字母、数字和下划线。
     "name": "XiaoWan",
+    // MySQL 连接字符集。
     "charset": "utf8mb4"
   },
+  // 小晚后端监听设置。
   "server": {
+    // 后端监听地址。使用本机反向代理时通常填 127.0.0.1。
     "host": "127.0.0.1",
+    // 后端监听端口。修改后同步调整反向代理和健康检查。
     "port": 8000
   },
+  // 聊天队列、输入与历史设置。
   "chat": {
+    // 可同时执行的聊天请求数。
     "concurrency": 4,
+    // 等待处理的聊天请求名额。
     "queue_size": 8,
-    "queue_timeout": 2
+    // 聊天排队最长等待时间，单位为秒。
+    "queue_timeout": 2,
+    // 单条用户消息最多允许的字符数。
+    "max_message_chars": 8000,
+    // 历史对话估算 token 数超过该值时触发摘要压缩。
+    "history_compression_tokens": 100000,
+    // 设为 true 时，后端启动会清空所有账号的聊天历史和摘要。
+    "clear_history_on_startup": true
   },
+  // 厂商默认地址、协议和可选模型。
   "models": {
+    // 默认厂商，须在 providers 中出现。
     "default_provider": "deepseek",
+    // 按厂商设置默认地址和可选模型。
     "providers": {
+      // deepseek 厂商配置。
       "deepseek": {
+        // 厂商默认 API 基础地址，含所需的路径。
         "base_url": "https://api.deepseek.com",
+        // 默认接口协议。可选 openai 或 dashscope。
         "adapter": "openai",
+        // 默认模型名，须包含在 models 中。
         "default_model": "deepseek-v4-flash",
+        // 网页允许选择的模型名列表。
         "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
       },
+      // tongyi 厂商配置。
       "tongyi": {
+        // 厂商默认 API 基础地址，含所需的路径。
         "base_url": "https://dashscope.aliyuncs.com/api/v1",
+        // 默认接口协议。可选 openai 或 dashscope。
         "adapter": "dashscope",
+        // 默认模型名，须包含在 models 中。
         "default_model": "qwen3-max",
+        // 网页允许选择的模型名列表。
         "models": ["qwen3-max", "qwen-plus", "qwen-turbo", "qwen-flash"]
       }
     }
+  },
+  // 登录会话、密码规则与认证限流。
+  "auth": {
+    // 登录 Cookie 和服务端会话的有效期，单位为秒。28800 秒等于 8 小时。
+    "session_ttl_seconds": 28800,
+    // 注册和改密使用的密码长度规则。
+    "password": {
+      // 注册或改密时，新密码的最少字符数。
+      "min_length": 6,
+      // 注册或改密时，新密码的最多字符数，上限为 256。
+      "max_length": 15
+    },
+    // 按客户端统计的认证限流。
+    "rate_limit": {
+      // 认证限流的统计窗口，单位为秒。
+      "window_seconds": 60,
+      // 每个客户端在窗口内的登录与改密失败额度，两者共用。
+      "login_attempts": 5,
+      // 每个客户端在窗口内的注册额度。
+      "registration_attempts": 5,
+      // 每个限流器最多跟踪的客户端数。
+      "max_clients": 4096
+    }
+  },
+  // 个人资料的校验规则。
+  "profile": {
+    // 网页保存昵称时允许的最多字符数，上限为 256。
+    "max_nickname_chars": 32
+  },
+  // 新账号的初始偏好和头像。
+  "defaults": {
+    // 新账号发送快捷键。可选 enter 或 ctrl_enter。
+    "send_shortcut": "enter",
+    // 新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵。
+    "theme": "theme0",
+    // 新账号头像。可选 cat、fox、rabbit、bear、penguin、frog。
+    "avatar_id": "cat"
+  },
+  // 模型配置的运行限制。
+  "model_runtime": {
+    // 管理员与普通用户共用的并行模型连接验证名额。
+    "validation_concurrency": 2
+  },
+  // 系统日志与账号日志的轮转和启动清理。
+  "logging": {
+    // 单个系统或账号日志达到多少字节时轮转。
+    "max_bytes": 2000000,
+    // 每个日志最多保留的轮转归档份数。
+    "backup_count": 3,
+    // 后端最多同时打开多少个账号日志文件。
+    "max_open_account_logs": 32,
+    // 设为 true 时，启动会清空当前系统和账号日志，保留轮转归档。
+    "clear_on_startup": true
   }
 }

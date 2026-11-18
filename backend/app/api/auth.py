@@ -1,14 +1,12 @@
 from dataclasses import asdict
 
 from fastapi import APIRouter, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.accounts.auth_service import (
     COOKIE_NAME,
-    SESSION_TTL_SECONDS,
-    MIN_PASSWORD_LENGTH,
-    MAX_PASSWORD_LENGTH,
     USERNAME_PATTERN,
     InvalidCredentials,
     InvalidPassword,
@@ -22,32 +20,49 @@ from app.accounts.repository import (
     PasswordCommitUnknown,
     ReservedUsername,
 )
-
+from app.system_config import PasswordConfig
 
 from .credential_route import CredentialRoute
 
 
 router = APIRouter(prefix='/auth', tags=['auth'], route_class=CredentialRoute)
+MAX_PASSWORD_INPUT_LENGTH = 256
 
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=1, max_length=MAX_PASSWORD_INPUT_LENGTH)
 
 
 class PasswordRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    current_password: str = Field(min_length=1, max_length=256)
-    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
-    confirm_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+    current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_INPUT_LENGTH)
+    new_password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
+    confirm_password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
 
 
 class RegistrationRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     username: str = Field(pattern=USERNAME_PATTERN)
-    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
-    confirm_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+    password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
+    confirm_password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
+
+
+def _validate_password_lengths(policy: PasswordConfig, **passwords: str) -> None:
+    errors = []
+    for field, password in passwords.items():
+        if len(password) < policy.min_length:
+            error_type = 'string_too_short'
+            message = f'String should have at least {policy.min_length} characters'
+        elif len(password) > policy.max_length:
+            error_type = 'string_too_long'
+            message = f'String should have at most {policy.max_length} characters'
+        else:
+            continue
+        errors.append({'type': error_type, 'loc': ['body', field], 'msg': message})
+    if errors:
+        raise RequestValidationError(errors)
 
 
 def _throttled(error: LoginThrottled) -> JSONResponse:
@@ -79,7 +94,7 @@ def login(credentials: LoginRequest, request: Request):
     except AccountStorageError:
         return _unavailable()
     response = JSONResponse({'user': asdict(user)})
-    response.set_cookie(COOKIE_NAME, token, max_age=SESSION_TTL_SECONDS, httponly=True,
+    response.set_cookie(COOKIE_NAME, token, max_age=service.config.session_ttl_seconds, httponly=True,
                         secure=request.url.scheme == 'https', samesite='strict', path='/')
     return response
 
@@ -87,15 +102,27 @@ def login(credentials: LoginRequest, request: Request):
 @router.get('/session')
 async def get_session(request: Request):
     user = request.state.user
+    password = request.app.state.auth.config.password
+    config = request.app.state.system_config
     # 会话探测本身是公开操作；未登录是正常状态，不是资源请求失败。
-    return {'user': asdict(user) if user is not None else None}
+    return {
+        'user': asdict(user) if user is not None else None,
+        'limits': {
+            'password_min_length': password.min_length,
+            'password_max_length': password.max_length,
+            'max_nickname_chars': config.profile.max_nickname_chars,
+            'max_message_chars': config.chat.max_message_chars,
+        },
+    }
 
 
 @router.post('/register', status_code=201)
 def register(credentials: RegistrationRequest, request: Request):
+    service = request.app.state.auth
+    _validate_password_lengths(service.config.password, password=credentials.password,
+                               confirm_password=credentials.confirm_password)
     if credentials.password != credentials.confirm_password:
         return JSONResponse({'detail': '两次输入的密码不一致'}, status_code=400)
-    service = request.app.state.auth
     client = request.client.host if request.client else 'unknown'
     try:
         user = service.register(credentials.username, credentials.password, client)
@@ -120,9 +147,11 @@ async def logout(request: Request):
 
 @router.post('/password')
 def change_password(credentials: PasswordRequest, request: Request):
+    service = request.app.state.auth
+    _validate_password_lengths(service.config.password, new_password=credentials.new_password,
+                               confirm_password=credentials.confirm_password)
     if credentials.new_password != credentials.confirm_password:
         return JSONResponse({'detail': '两次输入的新密码不一致'}, status_code=400)
-    service = request.app.state.auth
     client = request.client.host if request.client else 'unknown'
     try:
         service.change_password(request.state.user, request.cookies.get(COOKIE_NAME),

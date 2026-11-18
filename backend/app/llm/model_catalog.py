@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import BACKEND_ROOT
+from app.json_files import strip_json_line_comments
 
 
 ModelMerchant = Literal['deepseek', 'tongyi']
@@ -38,13 +39,13 @@ class _CatalogEntry(BaseModel):
 
 
 class ModelEndpoint(_CatalogEntry):
-    base_url: BaseURL = Field(min_length=1)
-    adapter: ModelAdapter
+    base_url: BaseURL = Field(min_length=1, description='厂商默认 API 基础地址，含所需的路径。')
+    adapter: ModelAdapter = Field(description='默认接口协议。可选 openai 或 dashscope。')
 
 
 class ProviderCatalog(ModelEndpoint):
-    default_model: str = Field(min_length=1, max_length=200)
-    models: list[str]
+    default_model: str = Field(min_length=1, max_length=200, description='默认模型名，须包含在 models 中。')
+    models: list[str] = Field(description='网页允许选择的模型名列表。')
 
     @field_validator('models', mode='before')
     @classmethod
@@ -63,8 +64,8 @@ class ProviderCatalog(ModelEndpoint):
 
 
 class ModelCatalog(_CatalogEntry):
-    default_provider: ModelMerchant
-    providers: dict[ModelMerchant, ProviderCatalog]
+    default_provider: ModelMerchant = Field(description='默认厂商，须在 providers 中出现。')
+    providers: dict[ModelMerchant, ProviderCatalog] = Field(description='按厂商设置默认地址和可选模型。')
 
     @model_validator(mode='after')
     def check_default_provider(self):
@@ -85,7 +86,8 @@ class ModelCatalog(_CatalogEntry):
 
 def default_model_catalog() -> ModelCatalog:
     # 示例文件提供新安装和旧全局配置缺少 models 时的初始目录。
-    example = json.loads((BACKEND_ROOT / 'system_config.example.json').read_text(encoding='utf-8'))
+    text = (BACKEND_ROOT / 'system_config.example.json').read_text(encoding='utf-8')
+    example = json.loads(strip_json_line_comments(text))
     return ModelCatalog.model_validate(example['models'])
 
 

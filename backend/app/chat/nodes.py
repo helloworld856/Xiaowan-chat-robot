@@ -8,6 +8,10 @@ from app.llm.persona import persona
 from app.chat.state import AIChatState
 from app.llm.token_counter import count_tokens
 from app.llm.output_parser import model_text, parse_model_json, safe_parse_json
+from app.system_config import ChatConfig
+
+
+DEFAULT_COMPRESSION_TOKENS = ChatConfig().history_compression_tokens
 
 
 def get_last_message(response: dict):
@@ -31,7 +35,8 @@ def get_total_tokens(message) -> int:
 
 # 基础结点定义
 # 定义开始结点
-def start_node(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
+def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
+               compression_tokens: int = DEFAULT_COMPRESSION_TOKENS) -> AIChatState:
     try:
         logger.info('执行结点"start_node"...')
         state['start_time'] = time()
@@ -54,7 +59,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents) -> AIChatSta
         t = count_tokens(history_text) if history_text else 0
         t += 4 * o  # 把每条对话的user,assistant,conversation_round都算上
 
-        if t > configer.compress_history_threshold:
+        if t > compression_tokens:
             # 生成历史对话摘要
             _, summary_agent, _ = agents
             memorier.compress_history(summary_agent)

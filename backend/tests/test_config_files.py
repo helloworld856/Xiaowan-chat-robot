@@ -13,11 +13,26 @@ class ConfigFileTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
 
-    def test_system_catalog_migrates_to_lists_and_backs_up_old_address_overrides(self):
+    def test_older_global_config_is_extended_with_comments_and_keeps_existing_values(self):
         from app.system_config import load_system_config
 
         path = self.root / 'system_config.json'
-        data = json.loads((_imports.BACKEND_ROOT / 'system_config.example.json').read_text(encoding='utf-8'))
+        path.write_text('{"database":{"password":"p//w"},"chat":{"queue_size":19}}', encoding='utf-8')
+        loaded = load_system_config(self.root, migrate=True)
+        self.assertEqual(loaded.database.password.get_secret_value(), 'p//w')
+        self.assertEqual(loaded.chat.queue_size, 19)
+        self.assertEqual(loaded.auth.session_ttl_seconds, 28800)
+        self.assertIn('//', path.read_text(encoding='utf-8'))
+        self.assertIn('"session_ttl_seconds": 28800', path.read_text(encoding='utf-8'))
+        self.assertEqual(load_system_config(self.root), loaded)
+
+    def test_system_catalog_migrates_to_lists_and_backs_up_old_address_overrides(self):
+        from app.json_files import strip_json_line_comments
+        from app.system_config import load_system_config
+
+        path = self.root / 'system_config.json'
+        text = (_imports.BACKEND_ROOT / 'system_config.example.json').read_text(encoding='utf-8')
+        data = json.loads(strip_json_line_comments(text))
         data['models']['providers']['deepseek']['models'] = {
             'deepseek-v4-flash': {'base_url': 'https://old-model.example/v1'}, 'deepseek-v4-pro': {},
         }
@@ -27,6 +42,15 @@ class ConfigFileTests(unittest.TestCase):
         self.assertEqual(catalog.endpoint('deepseek').base_url, 'https://api.deepseek.com')
         self.assertEqual(catalog.providers['deepseek'].models, ['deepseek-v4-flash', 'deepseek-v4-pro'])
         self.assertTrue(path.with_name('system_config.json.before-provider.bak').exists())
+
+    def test_commented_config_preserves_operator_notes_on_restarts(self):
+        from app.system_config import load_system_config
+
+        path = self.root / 'system_config.json'
+        text = '{\n // 用户自己记的说明\n "chat": {"clear_history_on_startup": false}\n}\n'
+        path.write_text(text, encoding='utf-8')
+        self.assertFalse(load_system_config(self.root, migrate=True).chat.clear_history_on_startup)
+        self.assertEqual(path.read_text(encoding='utf-8'), text)
 
     def test_personal_model_switch_reuses_the_provider_address_and_key(self):
         from app.llm.personal_models import PersonalModel, PersonalModelStore
@@ -68,6 +92,7 @@ class ConfigFileTests(unittest.TestCase):
         self.assertEqual(json.loads(backup.read_text(encoding='utf-8')), old)
 
     def test_system_config_migrates_legacy_values_once_and_uses_json_afterward(self):
+        from app.json_files import strip_json_line_comments
         from app.system_config import load_system_config
 
         legacy = self.root / '.env'
@@ -77,7 +102,7 @@ class ConfigFileTests(unittest.TestCase):
             self.assertEqual(load_system_config(self.root).chat.queue_size, 15)
             self.assertFalse(path.exists())
             config = load_system_config(self.root, migrate=True)
-            data = json.loads(path.read_text(encoding='utf-8'))
+            data = json.loads(strip_json_line_comments(path.read_text(encoding='utf-8')))
             self.assertEqual(config.database.password.get_secret_value(), 'old-password')
             self.assertEqual(data['database']['password'], 'old-password')
             self.assertEqual(data['chat']['queue_size'], 15)
@@ -220,12 +245,13 @@ class ConfigFileTests(unittest.TestCase):
         with (patch.dict('os.environ', {}, clear=True),
               patch('app.application.settings_store', SettingsStore(old_settings)),
               patch('app.application.SQLAccountStore') as accounts,
-              patch('app.application.initialize_schema'), patch('app.application.reset_chat_history'),
+              patch('app.application.initialize_schema'), patch('app.application.reset_chat_history') as reset,
               patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None),
               patch('app.llm.factory.create_agents', return_value=(object(), object(), object())) as agents):
             accounts.return_value.seed_admin.return_value = User(12, 'admin', 'admin')
             app = build_application(db, ProfileStore(self.root / 'user_data'), legacy,
-                                    chat_config=ChatConfig(concurrency=6, queue_size=10, queue_timeout=3))
+                                    chat_config=ChatConfig(concurrency=6, queue_size=10, queue_timeout=3,
+                                                           clear_history_on_startup=False))
             with TestClient(app):
                 file = app.state.model_configuration.admin_models.get()
                 self.assertEqual(file.model.model_name, 'OldModel')
@@ -235,3 +261,4 @@ class ConfigFileTests(unittest.TestCase):
                 self.assertEqual(agents.call_args.kwargs['base_url'], 'https://api.deepseek.com')
                 self.assertEqual(app.state.chat._max_waiting, 10)
                 self.assertEqual(app.state.chat._wait_timeout, 3)
+                reset.assert_not_called()

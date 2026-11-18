@@ -8,11 +8,10 @@ from pathlib import Path
 
 from app.config import configer
 from app.accounts.files import UserDataPaths, protect_file, require_directory, require_file
+from app.system_config import LoggingConfig
 
 
-MAX_LOG_BYTES = 2_000_000
-BACKUP_COUNT = 3
-MAX_OPEN_ACCOUNT_LOGS = 32
+_DEFAULTS = LoggingConfig()
 
 
 def _truncate_existing_log(path: Path) -> None:
@@ -82,13 +81,21 @@ class PrivateLogFile(RotatingFileHandler):
 
 
 class AccountFileHandler(logging.Handler):
-    def __init__(self, path: Path, *, max_bytes=MAX_LOG_BYTES, max_open=MAX_OPEN_ACCOUNT_LOGS):
+    def __init__(self, path: Path, *, max_bytes=_DEFAULTS.max_bytes, max_open=_DEFAULTS.max_open_account_logs):
         super().__init__()
-        self._options = dict(maxBytes=max_bytes, backupCount=BACKUP_COUNT, delay=True, encoding='utf-8',
+        self._options = dict(maxBytes=max_bytes, backupCount=_DEFAULTS.backup_count, delay=True, encoding='utf-8',
                              errors='backslashreplace')
         self._system = RotatingFileHandler(path, **self._options)
         self._personal = OrderedDict()
         self._max_open = max_open
+
+    def configure(self, settings: LoggingConfig) -> None:
+        with self.lock:
+            self.close_accounts()
+            self._options.update(maxBytes=settings.max_bytes, backupCount=settings.backup_count)
+            self._system.maxBytes = settings.max_bytes
+            self._system.backupCount = settings.backup_count
+            self._max_open = settings.max_open_account_logs
 
     def setFormatter(self, formatter):
         super().setFormatter(formatter)
@@ -165,6 +172,12 @@ def close_account_logs(paths: UserDataPaths) -> None:
     for handler in logger.handlers:
         if isinstance(handler, AccountFileHandler):
             handler.close_accounts(paths)
+
+
+def configure_logging(settings: LoggingConfig) -> None:
+    for handler in logger.handlers:
+        if isinstance(handler, AccountFileHandler):
+            handler.configure(settings)
 
 
 logger = get_logger()

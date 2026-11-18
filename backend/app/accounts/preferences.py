@@ -42,9 +42,10 @@ class UserPreferencesStore:
 
 
 class FilePreferencesStore:
-    def __init__(self, paths: UserDataPaths, legacy: UserPreferencesStore):
+    def __init__(self, paths: UserDataPaths, legacy: UserPreferencesStore, defaults: Preferences | None = None):
         self.paths = paths
         self.legacy = legacy
+        self.defaults = defaults or Preferences()
 
     def path_for(self, user_id: int) -> Path:
         return self.paths.file(user_id, 'preferences.json')
@@ -60,7 +61,7 @@ class FilePreferencesStore:
             if protect_file(path):
                 return
         # 注册时会先占用数据库连接再创建文件。这里先释放文件锁，再查询旧库，避免互相等待。
-        initial = defaults or self.legacy.find(user_id) or Preferences()
+        initial = defaults or self.legacy.find(user_id) or self.defaults
         with self.paths.lock(user_id):
             # 重新拿到锁后检查文件，优先保留查询期间已经保存的设置。
             if not protect_file(path):
@@ -75,7 +76,7 @@ class FilePreferencesStore:
                 pass
             except ValueError:
                 logger.warning('个人偏好文件格式无效，暂时使用默认设置')
-                return Preferences()
+                return self.defaults.model_copy()
         self.ensure(user_id)
         with self.paths.lock(user_id):
             return self.read_file(path)

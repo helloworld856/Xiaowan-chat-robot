@@ -1,25 +1,20 @@
 """为每个账号保存独立的个人资料。"""
 from pathlib import Path
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.account_logging import logger
 from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
+from app.system_config import AvatarId, DefaultsConfig, ProfileConfig
 
 AVATARS = (
     ('cat', '小猫'), ('fox', '狐狸'), ('rabbit', '兔子'),
     ('bear', '小熊'), ('penguin', '企鹅'), ('frog', '青蛙'),
 )
-DEFAULT_AVATAR_ID = 'cat'
-MAX_NICKNAME_LENGTH = 32
-AvatarId = Literal['cat', 'fox', 'rabbit', 'bear', 'penguin', 'frog']
-
-
 class Profile(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    nickname: str = Field(default='admin', min_length=1, max_length=MAX_NICKNAME_LENGTH)
-    avatar_id: AvatarId = DEFAULT_AVATAR_ID
+    # 已保存的昵称可以超过当前上限，新提交的昵称按部署配置验证。
+    nickname: str = Field(default='admin', min_length=1, max_length=256)
+    avatar_id: AvatarId = 'cat'
 
     @field_validator('nickname', mode='before')
     @classmethod
@@ -32,9 +27,15 @@ class Profile(BaseModel):
 
 
 class ProfileStore:
-    def __init__(self, root: Path | UserDataPaths | None = None):
+    def __init__(self, root: Path | UserDataPaths | None = None, *, config: ProfileConfig | None = None,
+                 defaults: DefaultsConfig | None = None):
         self.paths = root if isinstance(root, UserDataPaths) else UserDataPaths(root)
         self.root = self.paths.root
+        self.config = config or ProfileConfig()
+        self.default_avatar_id = (defaults or DefaultsConfig()).avatar_id
+
+    def _initial_profile(self, username: str) -> Profile:
+        return Profile(nickname=username[:self.config.max_nickname_chars], avatar_id=self.default_avatar_id)
 
     def path_for(self, user_id: int) -> Path:
         return self.paths.file(user_id, 'profile.json')
@@ -47,7 +48,7 @@ class ProfileStore:
         with self.paths.lock(user_id):
             self.paths.ensure_directory(user_id)
             if not protect_file(self.path_for(user_id)):
-                self.update(user_id, Profile(nickname=username))
+                self.update(user_id, self._initial_profile(username))
 
     def get(self, user_id: int, username: str) -> Profile:
         path = self.path_for(user_id)
@@ -55,10 +56,10 @@ class ProfileStore:
             try:
                 return self.read_file(path)
             except FileNotFoundError:
-                return self.update(user_id, Profile(nickname=username))
+                return self.update(user_id, self._initial_profile(username))
             except ValueError:
                 logger.warning('个人资料文件格式无效，暂时使用默认资料')
-            return Profile(nickname=username)
+            return self._initial_profile(username)
 
     # 旧资料只用于首次补齐，已有的个人资料优先。
     def import_legacy_profile(self, user_id: int, legacy_path: Path):

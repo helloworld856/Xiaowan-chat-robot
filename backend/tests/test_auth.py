@@ -73,7 +73,7 @@ class AuthTests(unittest.TestCase):
         self.service.logout(token)
         self.assertIsNone(self.service.get_user(token))
         token, _ = self.service.login('admin', '123456', 'test')
-        self.now += self.auth.SESSION_TTL_SECONDS + 1
+        self.now += 28800
         self.assertIsNone(self.service.get_user(token))
 
     def test_repeated_bad_logins_are_limited_and_recover(self):
@@ -86,7 +86,33 @@ class AuthTests(unittest.TestCase):
         token, _ = self.service.login('admin', '123456', 'test')
         self.assertEqual(self.service.get_user(token).username, 'admin')
 
+    def test_configured_rate_limits_apply_per_client_and_expire(self):
+        from app.system_config import AuthConfig
+
+        config = AuthConfig(rate_limit={
+            'login_attempts': 1, 'registration_attempts': 2, 'window_seconds': 7, 'max_clients': 1,
+        })
+        service = self.auth.AuthService(clock=lambda: self.now, config=config)
+        with self.assertRaises(self.auth.InvalidCredentials):
+            service.login('admin', 'wrong', 'first')
+        for client in ('first', 'second'):
+            with self.subTest(client=client), self.assertRaises(self.auth.LoginThrottled) as error:
+                service.login('admin', '123456', client)
+            self.assertEqual(error.exception.retry_after, 7)
+
+        service.register('FirstUser', 'Reg!12', 'first')
+        service.register('SecondUser', 'Reg!12', 'first')
+        with self.assertRaises(self.auth.LoginThrottled):
+            service.register('ThirdUser', 'Reg!12', 'first')
+        self.now += 7
+        self.assertEqual(service.login('admin', '123456', 'second')[1].username, 'admin')
+        self.assertEqual(service.register('ThirdUser', 'Reg!12', 'second').username, 'ThirdUser')
+
+
 class AuthHTTPTests(unittest.TestCase):
+    DEFAULT_LIMITS = {'password_min_length': 6, 'password_max_length': 15,
+                      'max_nickname_chars': 32, 'max_message_chars': 8000}
+
     def setUp(self):
         self.auth = auth_module()
         from app.application import create_app
@@ -124,7 +150,7 @@ class AuthHTTPTests(unittest.TestCase):
             with self.subTest(cookie=cookie):
                 status, headers, body = request(self.app, '/auth/session', cookie=cookie)
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body), {'user': None})
+                self.assertEqual(json.loads(body), {'user': None, 'limits': self.DEFAULT_LIMITS})
                 self.assertIn('no-store', headers['cache-control'])
 
     def test_login_cookie_refresh_session_logout_and_old_token_rejection(self):
@@ -139,7 +165,7 @@ class AuthHTTPTests(unittest.TestCase):
         self.assertIn('Max-Age=0', logout_headers['set-cookie'])
         status, _, body = request(self.app, '/auth/session', cookie=cookie)
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {'user': None})
+        self.assertEqual(json.loads(body), {'user': None, 'limits': self.DEFAULT_LIMITS})
         self.assertEqual(request(self.app, '/history', cookie=cookie)[0], 401)
 
     def test_wrong_password_and_expired_session_are_rejected(self):
@@ -147,10 +173,10 @@ class AuthHTTPTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertNotIn('set-cookie', headers)
         _, cookie = self.login()
-        self.now += self.auth.SESSION_TTL_SECONDS + 1
+        self.now += 28800
         status, _, body = request(self.app, '/auth/session', cookie=cookie)
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {'user': None})
+        self.assertEqual(json.loads(body), {'user': None, 'limits': self.DEFAULT_LIMITS})
         self.assertEqual(request(self.app, '/chat', 'POST', cookie=cookie)[0], 401)
 
     def test_relogin_rotates_token_and_https_cookie_is_secure(self):
@@ -160,7 +186,7 @@ class AuthHTTPTests(unittest.TestCase):
         self.assertIn('Secure', headers['set-cookie'])
         status, _, body = request(self.app, '/auth/session', cookie=old_cookie)
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {'user': None})
+        self.assertEqual(json.loads(body), {'user': None, 'limits': self.DEFAULT_LIMITS})
         self.assertEqual(request(self.app, '/auth/session', cookie=new_cookie)[0], 200)
 
     def test_automatic_https_proxy_preserves_same_origin_and_secure_cookie(self):
@@ -198,7 +224,64 @@ class AuthHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(json.loads(body), {'user': user})
         cookie = headers['set-cookie'].split(';', 1)[0]
-        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2]), {'user': user})
+        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2]),
+                         {'user': user, 'limits': self.DEFAULT_LIMITS})
+
+    def test_configured_session_lifetime_applies_to_cookie_and_server(self):
+        from app.application import create_app
+        from app.system_config import AuthConfig
+
+        service = self.auth.AuthService(clock=lambda: self.now, config=AuthConfig(session_ttl_seconds=7))
+        self.app = create_app('test', auth_service=service)
+        headers, cookie = self.login()
+        jar = SimpleCookie(headers['set-cookie'])
+        self.assertEqual(jar[self.auth.COOKIE_NAME]['max-age'], '7')
+        self.now += 6
+        self.assertEqual(json.loads(request(self.app, '/auth/session', cookie=cookie)[2])['user']['username'], 'admin')
+        self.now += 1
+        self.assertIsNone(json.loads(request(self.app, '/auth/session', cookie=cookie)[2])['user'])
+
+    def test_session_exposes_only_the_configured_form_limits(self):
+        from app.application import create_app
+        from app.system_config import AuthConfig, SystemConfig
+
+        auth = AuthConfig(password={'min_length': 8, 'max_length': 20})
+        config = SystemConfig(profile={'max_nickname_chars': 12}, chat={'max_message_chars': 80})
+        service = self.auth.AuthService(config=auth)
+        app = create_app('test', auth_service=service, system_config=config)
+        status, _, body = request(app, '/auth/session')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {'user': None, 'limits': {
+            'password_min_length': 8, 'password_max_length': 20, 'max_nickname_chars': 12, 'max_message_chars': 80,
+        }})
+
+    def test_configured_password_policy_applies_when_setting_a_password(self):
+        from app.application import create_app
+        from app.system_config import AuthConfig
+
+        service = self.auth.AuthService(config=AuthConfig(password={'min_length': 8, 'max_length': 20}))
+        self.app = create_app('test', auth_service=service)
+        _, cookie = self.login()
+        for password, error_type in (('synthet', 'string_too_short'), ('synthetic-password-2!', 'string_too_long')):
+            with self.subTest(password_length=len(password)):
+                status, _, body = request(self.app, '/auth/register', 'POST', {
+                    'username': 'NewUser', 'password': password, 'confirm_password': password,
+                })
+                self.assertEqual(status, 422)
+                details = json.loads(body)['detail']
+                self.assertEqual([(item['loc'][-1], item['type']) for item in details],
+                                 [('password', error_type), ('confirm_password', error_type)])
+                self.assertNotIn(password.encode(), body)
+
+        accepted = 'synthetic-password-1'
+        self.assertEqual(request(self.app, '/auth/register', 'POST', {
+            'username': 'NewUser', 'password': accepted, 'confirm_password': accepted,
+        })[0], 201)
+        change = {'current_password': '123456', 'new_password': accepted, 'confirm_password': accepted}
+        self.assertEqual(request(self.app, '/auth/password', 'POST',
+                                 {**change, 'new_password': 'short'}, cookie=cookie)[0], 422)
+        self.assertEqual(request(self.app, '/auth/password', 'POST', change, cookie=cookie)[0], 200)
+        self.assertEqual(request(self.app, '/auth/login', 'POST', {'username': 'admin', 'password': accepted})[0], 200)
 
     def test_registration_rejects_client_role_invalid_password_length_and_invalid_username(self):
         secret = 'Reg!12'

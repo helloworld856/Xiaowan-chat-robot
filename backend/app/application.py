@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -23,16 +24,21 @@ from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.model_catalog import ModelCatalog
-from app.system_config import ChatConfig, legacy_environment
+from app.system_config import ChatConfig, SystemConfig, legacy_environment
 
 
 # 装配通用认证与资料接口，测试可以注入不依赖真实 MySQL 的存储。
 def create_app(version: str, auth_service: AuthService | None = None,
                profile_store: ProfileStore | None = None, lifespan=None,
-               *, user_data_paths: UserDataPaths | None = None) -> FastAPI:
+               *, user_data_paths: UserDataPaths | None = None,
+               system_config: SystemConfig | None = None) -> FastAPI:
+    config = system_config or SystemConfig()
     app = FastAPI(title=SOFTWARE_NAME, version=version, lifespan=lifespan)
-    app.state.auth = auth_service or AuthService()
-    app.state.profile = profile_store if profile_store is not None else ProfileStore()
+    app.state.system_config = config
+    app.state.auth = auth_service or AuthService(config=config.auth)
+    app.state.profile = profile_store if profile_store is not None else ProfileStore(
+        config=config.profile, defaults=config.defaults,
+    )
     app.add_middleware(AuthenticationMiddleware, service=app.state.auth, user_data_paths=user_data_paths)
     app.include_router(auth_router)
     app.include_router(profile_router)
@@ -40,15 +46,24 @@ def create_app(version: str, auth_service: AuthService | None = None,
 
 
 def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig | None = None,
-                      model_catalog: ModelCatalog | None = None, config_root: Path | None = None):
-    chat_config = chat_config or ChatConfig()
+                      model_catalog: ModelCatalog | None = None, config_root: Path | None = None,
+                      system_config: SystemConfig | None = None):
+    config = system_config or SystemConfig()
+    if chat_config is not None:
+        config = config.model_copy(update={'chat': chat_config})
+    chat_config = config.chat
+    if profile_store is None:
+        profile_store = ProfileStore(config=config.profile, defaults=config.defaults)
     config_root = config_root if config_root is not None else legacy_root.parent
     legacy_preferences = UserPreferencesStore(db)
-    directories = UserDirectoryStore(profile_store, legacy_preferences, model_catalog)
+    directories = UserDirectoryStore(profile_store, legacy_preferences, model_catalog or config.models,
+                                     defaults=config.defaults)
     accounts = SQLAccountStore(db, prepare_user=directories.prepare_new)
     admin_model = AdminModelRuntime()
-    model_configuration = ModelConfigurationService(AdminModelStore(config_root / '.env', directories.models.catalog), directories.models,
-                                                    admin_model)
+    model_configuration = ModelConfigurationService(
+        AdminModelStore(config_root / '.env', directories.models.catalog), directories.models,
+        admin_model, config=config.model_runtime,
+    )
 
     def startup():
         logger.info("version:%s", VERSION)
@@ -69,8 +84,8 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             directories.ensure(admin)
         except (OSError, ValueError):
             logger.warning('无法初始化管理员的个人目录，请检查文件权限与格式')
-        # 历史原文与摘要只保留本次运行期间的数据。
-        reset_chat_history(db)
+        if chat_config.clear_history_on_startup:
+            reset_chat_history(db)
         model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
             saved.model if saved else None, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),
@@ -87,12 +102,15 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                 await application.state.chat.drain()
             finally:
                 try:
-                    await run_in_threadpool(db.close)
+                    await run_in_threadpool(model_configuration.close)
                 finally:
-                    close_account_logs(directories.paths)
+                    try:
+                        await run_in_threadpool(db.close)
+                    finally:
+                        close_account_logs(directories.paths)
 
-    application = create_app(VERSION, AuthService(account_store=accounts), profile_store, lifespan=lifespan,
-                             user_data_paths=directories.paths)
+    application = create_app(VERSION, AuthService(account_store=accounts, config=config.auth), profile_store,
+                             lifespan=lifespan, user_data_paths=directories.paths, system_config=config)
     application.state.db = db
     application.state.preferences = directories.preferences
     application.state.personal_models = directories.models
@@ -101,7 +119,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         db.connection,
         personal_models=directories.models,
         admin_model=admin_model,
-        graph_factory=create_graph,
+        graph_factory=partial(create_graph, compression_tokens=chat_config.history_compression_tokens),
         max_running=chat_config.concurrency,
         max_waiting=chat_config.queue_size,
         wait_timeout=chat_config.queue_timeout,

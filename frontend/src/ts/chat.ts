@@ -3,8 +3,7 @@ import {
     chatBox, hideTypingIndicator, inputBox, lockSendBtn, scrollToBottom, sendBtn, showAlert, showTypingIndicator, unlockSendBtn
 } from './ui.ts';
 import {addAssistantMessage, addUserMessage, showChatHistory} from './utils.ts';
-
-const maxMessageLength = 8000;
+import {inputLimits} from './global_config.ts';
 
 function showDeliveryFailure(row: HTMLDivElement, text: string, error: ChatNotStartedError) {
     const marker = document.createElement('button');
@@ -95,6 +94,7 @@ export async function sendMessage() {
     if (sendBtn.disabled) return;
     const text = inputBox.value.trim();
     if (!text) return;
+    const maxMessageLength = inputLimits.max_message_chars;
     // 先用字符串长度快速检查，超限时再按字符计数，与后端一致。
     if (text.length > maxMessageLength && [...text].length > maxMessageLength) {
         showAlert(`聊天消息最多 ${maxMessageLength} 个字符`);

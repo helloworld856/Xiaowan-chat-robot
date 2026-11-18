@@ -100,7 +100,7 @@ test('signed-out startup shows the login form silently while network failure rem
     }
 });
 
-test('registration returns to login and never opens the authenticated page', async () => {
+test('registration enforces the session password range and returns to login', async () => {
     const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
     const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
     const nodes = new Map();
@@ -115,11 +115,16 @@ test('registration returns to login and never opens the authenticated page', asy
         return nodes.get(id);
     }
     const exports = {};
+    const limits = {password_min_length: 8, password_max_length: 20, max_nickname_chars: 40, max_message_chars: 9000};
     runInNewContext(compiled, {
-        exports, require: name => name === './api.ts' ? {
-            invalidateRequests() {}, sessionAPI: async () => ({user: null}),
-            registerAPI: async (...args) => { attempts.push(args); return {user}; }
-        } : {lockSendBtn() {}, showAlert() {}},
+        exports, require: name => ({
+            './api.ts': {
+                invalidateRequests() {}, sessionAPI: async () => ({user: null, limits}),
+                registerAPI: async (...args) => { attempts.push(args); return {user}; }
+            },
+            './global_config.ts': {inputLimits: {password_min_length: 6, password_max_length: 15}},
+            './ui.ts': {lockSendBtn() {}, showAlert() {}}
+        })[name],
         document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
         window: {addEventListener() {}}
     });
@@ -127,14 +132,21 @@ test('registration returns to login and never opens the authenticated page', asy
     element('open-register').listeners.get('click')();
     assert.equal(element('register-form').hidden, false);
     element('register-username').value = user.username;
-    element('register-password').value = 'Reg!12';
-    element('register-confirm-password').value = 'Wrong!12';
     const submit = () => element('register-form').listeners.get('submit')({preventDefault() {}});
-    await submit();
-    assert.equal(attempts.length, 0);
+    element('register-password').value = 'Reg!12';
     element('register-confirm-password').value = 'Reg!12';
     await submit();
-    assert.deepEqual(attempts, [[user.username, 'Reg!12', 'Reg!12']]);
+    assert.equal(attempts.length, 0);
+    assert.match(element('register-error').textContent, /8–20/);
+    const valid = '🙂'.repeat(20);
+    element('register-password').value = valid;
+    element('register-confirm-password').value = 'Wrong!12';
+    await submit();
+    assert.equal(attempts.length, 0);
+    assert.match(element('register-error').textContent, /密码不一致/);
+    element('register-confirm-password').value = valid;
+    await submit();
+    assert.deepEqual(attempts, [[user.username, valid, valid]]);
     assert.equal(element('app-shell').hidden, true);
     assert.equal(element('register-form').hidden, true);
     assert.equal(element('login-username').value, user.username);
@@ -194,10 +206,12 @@ test('an auth change in another tab clears private state and rejects a stale sta
     assert.equal(active.element('app-shell').hidden, true);
     assert.equal(active.state.resets, 1);
     assert.equal(active.state.discarded, 1);
+    assert.equal(startedEarlier.element('login-screen').hidden, true);
     finishSession({user: alice});
     await startedEarlier.initialized;
     assert.equal(startedEarlier.state.sitsIn, 0);
     assert.equal(startedEarlier.element('app-shell').hidden, true);
+    assert.equal(startedEarlier.element('login-screen').hidden, false);
 
     let restoredUser = alice;
     const cached = tab(async () => ({user: restoredUser}));

@@ -16,14 +16,12 @@ from app.llm.admin_settings import ModelSettings
 from app.llm.model_catalog import ModelEndpoint
 from app.llm.personal_models import PersonalModel, PersonalModelStore
 from app.llm.public_endpoint import PublicEndpointError
+from app.system_config import ModelRuntimeConfig
 
 
-MODEL_VALIDATION_CAPACITY = 2
 VALIDATION_TIMEOUT_SECONDS = 20
 MODEL_SWITCH_TIMEOUT_SECONDS = 25
 
-_validation_pool = ThreadPoolExecutor(max_workers=MODEL_VALIDATION_CAPACITY, thread_name_prefix='model-test')
-_validation_slots = BoundedSemaphore(MODEL_VALIDATION_CAPACITY)
 AgentSet = tuple[Runnable, Runnable, Runnable]
 
 
@@ -51,37 +49,6 @@ class AdminModelRuntime:
             self._active = (model, agents)
 
 
-def _validate_connection(client) -> None:
-    if not _validation_slots.acquire(blocking=False):
-        raise ModelValidationBusy
-
-    def invoke():
-        logger.info('模型连接测试开始')
-        client.invoke('hi')
-        logger.info('模型连接测试完成')
-
-    try:
-        future = _validation_pool.submit(copy_context().run, invoke)
-    except Exception:
-        _validation_slots.release()
-        raise
-    # 请求超时也要等探测线程退出，再归还验证名额。
-    future.add_done_callback(lambda _: _validation_slots.release())
-    try:
-        future.result(timeout=VALIDATION_TIMEOUT_SECONDS)
-    except TimeoutError:
-        future.cancel()
-        raise TimeoutError('模型连接测试超时') from None
-
-
-def _verify_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint, *, public_only: bool) -> None:
-    client = factory.create_model(
-        merchant, key, name, 0.1, max_tokens=10, base_url=endpoint.base_url,
-        validation_timeout=8, adapter=endpoint.adapter, public_only=public_only,
-    )
-    _validate_connection(client)
-
-
 def _connection_failure(error: Exception) -> ModelConfigResponse:
     logger.warning('模型配置失败: %s', type(error).__name__)
     for cause in (error, error.__cause__):
@@ -102,10 +69,39 @@ def _connection_failure(error: Exception) -> ModelConfigResponse:
 
 
 class ModelConfigurationService:
-    def __init__(self, admin_models: AdminModelStore, personal_models: PersonalModelStore, admin_runtime: AdminModelRuntime):
+    def __init__(self, admin_models: AdminModelStore, personal_models: PersonalModelStore, admin_runtime: AdminModelRuntime,
+                 *, config: ModelRuntimeConfig | None = None):
         self.admin_models = admin_models
         self.personal_models = personal_models
         self.admin_runtime = admin_runtime
+        capacity = (config or ModelRuntimeConfig()).validation_concurrency
+        self._validation_pool = ThreadPoolExecutor(max_workers=capacity, thread_name_prefix='model-test')
+        self._validation_slots = BoundedSemaphore(capacity)
+
+    def close(self) -> None:
+        self._validation_pool.shutdown(cancel_futures=True)
+
+    def _validate_connection(self, client) -> None:
+        if not self._validation_slots.acquire(blocking=False):
+            raise ModelValidationBusy
+
+        def invoke():
+            logger.info('模型连接测试开始')
+            client.invoke('hi')
+            logger.info('模型连接测试完成')
+
+        try:
+            future = self._validation_pool.submit(copy_context().run, invoke)
+        except Exception:
+            self._validation_slots.release()
+            raise
+        # 请求超时也要等探测线程退出，再归还验证名额。
+        future.add_done_callback(lambda _: self._validation_slots.release())
+        try:
+            future.result(timeout=VALIDATION_TIMEOUT_SECONDS)
+        except TimeoutError:
+            future.cancel()
+            raise TimeoutError('模型连接测试超时') from None
 
     def _admin_endpoint(self, model: ModelSettings) -> ModelEndpoint:
         provider = self.personal_models.catalog.providers.get(model.model_merchant)
@@ -210,10 +206,13 @@ class ModelConfigurationService:
         except Exception as error:
             return _connection_failure(error)
 
-    @staticmethod
-    def _prepare_model(merchant: str, key: str, name: str, endpoint: ModelEndpoint, *,
+    def _prepare_model(self, merchant: str, key: str, name: str, endpoint: ModelEndpoint, *,
                        activate: bool, public_only: bool = False) -> AgentSet | None:
-        _verify_model(merchant, key, name, endpoint, public_only=public_only)
+        client = factory.create_model(
+            merchant, key, name, 0.1, max_tokens=10, base_url=endpoint.base_url,
+            validation_timeout=8, adapter=endpoint.adapter, public_only=public_only,
+        )
+        self._validate_connection(client)
         if not activate:
             return None
         return factory.create_agents(merchant, key, name, base_url=endpoint.base_url, adapter=endpoint.adapter,
