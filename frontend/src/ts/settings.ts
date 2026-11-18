@@ -3,7 +3,7 @@ import type {SavedSettings} from './api.ts';
 import {modelConfig} from './global_config.ts';
 import {preferences} from './preferences.ts';
 import type {Preferences} from './preferences.ts';
-import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect, themeInput} from './ui.ts';
+import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect} from './ui.ts';
 import {switchTheme} from './utils.ts';
 
 const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
@@ -23,9 +23,7 @@ function updateModelDisplay() {
 
 function renderPreferences() {
     select('send-shortcut').value = preferences.send_shortcut;
-    themeInput.forEach(radio => {
-        radio.checked = radio.value === preferences.theme;
-    });
+    select('theme-select').value = preferences.theme;
     switchTheme(preferences.theme);
 }
 
@@ -205,10 +203,9 @@ export function initSettings() {
     async function savePreferences() {
         if (fields().disabled) return;
         const generation = getRequestGeneration();
-        const selectedTheme = Array.from(themeInput).find(radio => radio.checked);
         const next: Preferences = {
             send_shortcut: select('send-shortcut').value as Preferences['send_shortcut'],
-            theme: selectedTheme ? selectedTheme.value as Preferences['theme'] : preferences.theme
+            theme: select('theme-select').value as Preferences['theme']
         };
         switchTheme(next.theme);
         if (preferencesSave?.generation === generation) {
@@ -244,9 +241,5 @@ export function initSettings() {
     }
 
     select('send-shortcut').addEventListener('change', () => { void savePreferences(); });
-    themeInput.forEach(radio => {
-        radio.addEventListener('change', () => {
-            if (radio.checked) void savePreferences();
-        });
-    });
+    select('theme-select').addEventListener('change', () => { void savePreferences(); });
 }

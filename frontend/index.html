@@ -222,13 +222,14 @@
                 <section id="preferences-panel">
                     <fieldset id="preferences-fields" disabled>
                         <legend>偏好</legend>
-                        <div class="preference-row" id="theme-label">主题</div>
-                        <div class="theme-select" role="radiogroup" aria-labelledby="theme-label">
-                            <label><input type="radio" class="theme" name="themeRadio" value="theme0" checked><span>默认白</span></label>
-                            <label><input type="radio" class="theme" name="themeRadio" value="theme1"><span>海阔天空</span></label>
-                            <label><input type="radio" class="theme" name="themeRadio" value="theme2"><span>夏日海岸</span></label>
-                            <label><input type="radio" class="theme" name="themeRadio" value="theme3"><span>樱雨绵绵</span></label>
-                        </div>
+                        <label class="preference-row" for="theme-select"><span>主题</span>
+                            <select id="theme-select">
+                                <option value="theme0">默认白</option>
+                                <option value="theme1">海阔天空</option>
+                                <option value="theme2">夏日海岸</option>
+                                <option value="theme3">樱雨绵绵</option>
+                            </select>
+                        </label>
                         <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
                             <select id="send-shortcut"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
                         </label>

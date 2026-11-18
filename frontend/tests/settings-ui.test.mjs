@@ -45,9 +45,7 @@ test('preferences auto-save the latest selections in order and restore saved val
     const before = {model_merchant: 'deepseek', model_name: 'deepseek-v4-flash', base_url: ''};
     const modelConfig = {model_valid: true, model: before};
     const preferences = {send_shortcut: 'enter', theme: 'theme0'};
-    const themeRadio = element('theme-radio');
-    themeRadio.value = 'theme2';
-    themeRadio.checked = true;
+    const themeSelect = element('theme-select');
     const documentElement = {className: 'theme0'};
     const themeUtils = {};
     const utils = fs.readFileSync(new URL('../src/ts/utils.ts', import.meta.url), 'utf8');
@@ -79,8 +77,7 @@ test('preferences auto-save the latest selections in order and restore saved val
             },
             './global_config.ts': {modelConfig},
             './preferences.ts': {preferences},
-            './ui.ts': {openPopup() {}, resetPopup() {}, closePopup: async () => true, menuSelect: [null, element('settings')],
-                themeInput: [themeRadio]},
+            './ui.ts': {openPopup() {}, resetPopup() {}, closePopup: async () => true, menuSelect: [null, element('settings')]},
             './utils.ts': themeUtils
         })[name],
         document: {getElementById: element, querySelector: element, querySelectorAll: () => []}
@@ -97,9 +94,9 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(element('display-model').textContent, 'qwen-plus');
     assert.equal(element('send-shortcut').value, 'ctrl_enter');
     assert.equal(documentElement.className, 'theme3');
-    assert.equal(themeRadio.checked, false);
-    themeRadio.checked = true;
-    themeRadio.listeners.get('change')();
+    assert.equal(themeSelect.value, 'theme3');
+    themeSelect.value = 'theme2';
+    themeSelect.listeners.get('change')();
     assert.equal(documentElement.className, 'theme2');
     assert.deepEqual(saves.map(save => save.preferences), [{theme: 'theme2', send_shortcut: 'ctrl_enter'}]);
     const shortcut = element('send-shortcut');
@@ -124,4 +121,5 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(element('preferences-status').textContent, '测试保存失败');
     exports.resetSettings();
     assert.equal(documentElement.className, 'theme0');
+    assert.equal(themeSelect.value, 'theme0');
 });

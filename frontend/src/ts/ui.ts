@@ -10,7 +10,6 @@ export const sidebar = document.querySelector<HTMLDivElement>('#sidebar-zone .si
 export const menuBtn = document.getElementById('menuBtn') as HTMLButtonElement;//菜单唤起按钮
 export const menu = document.getElementById('menu') as HTMLDivElement;//菜单
 export const menuSelect = document.querySelectorAll<HTMLButtonElement>('#menu .value')!;//获得菜单里所有选项
-export const themeInput = document.querySelectorAll<HTMLInputElement>('#preferences-fields input[name="themeRadio"]');//偏好里的主题选择
 export const windowAlertContainer = document.querySelector<HTMLDialogElement>('#alert-window-container')!;//提示弹窗
 export const windowAlertP = document.querySelector<HTMLParagraphElement>('.alert-window .alert-window-content p')!;//提示弹窗内容
 
