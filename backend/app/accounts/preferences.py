@@ -59,11 +59,10 @@ class FilePreferencesStore:
             self.paths.ensure_directory(user_id)
             if protect_file(path):
                 return
-        # Registration holds a database connection while creating files. Never query
-        # the old preferences table while holding a file lock.
-        # 旧库读取完成后重新检查文件，优先保留等待期间发生的保存。
+        # 注册时会先占用数据库连接再创建文件。这里先释放文件锁，再查询旧库，避免互相等待。
         initial = defaults or self.legacy.find(user_id) or Preferences()
         with self.paths.lock(user_id):
+            # 重新拿到锁后检查文件，优先保留查询期间已经保存的设置。
             if not protect_file(path):
                 self.update(user_id, initial)
 

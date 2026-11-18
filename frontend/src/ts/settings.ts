@@ -209,6 +209,7 @@ export function initSettings() {
         };
         switchTheme(next.theme);
         if (preferencesSave?.generation === generation) {
+            // 每次提交整组偏好，当前请求结束后只补交最新一组选择。
             preferencesSave.pending = next;
             return;
         }

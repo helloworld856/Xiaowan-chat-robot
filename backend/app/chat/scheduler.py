@@ -124,8 +124,7 @@ class ChatSessions:
         work = asyncio.create_task(self._execute(entry, user, text))
         entry.worker = work
         work.add_done_callback(self._consume_error)
-        # The worker owns both permits until graph execution and saving finish.
-        # Cancelling this HTTP request must not allow another turn to overlap it.
+        # HTTP 请求取消后，后台任务仍持有账号锁和执行位，直到本轮处理和保存结束。
         result = await asyncio.shield(work)
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
         return result

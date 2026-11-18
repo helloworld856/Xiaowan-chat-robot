@@ -29,6 +29,7 @@ class AuthenticationMiddleware:
             return
         request = Request(scope)
         path, method = scope['path'], scope['method']
+        # 浏览器发来的跨站写请求在路由执行前拒绝，同源判断包含协议、主机和端口。
         if method not in ('GET', 'HEAD', 'OPTIONS') and (origin := request.headers.get('origin')):
             try:
                 same_origin = origin_key(origin) == origin_key(str(request.base_url))
@@ -60,8 +61,9 @@ class AuthenticationMiddleware:
 
         async def send_private(message):
             if message['type'] == 'http.response.start' and not public_static:
+                # 登录状态和账号数据不会写入 HTTP 缓存。
                 MutableHeaders(scope=message)['Cache-Control'] = 'no-store'
-                # Log only a route template, never the raw URL or a submitted body.
+                # 只记录路由模板和状态码，避免记录 URL 参数或请求正文。
                 route = getattr(scope.get('route'), 'path', None)
                 if self.user_data_paths is not None and route is not None:
                     logger.info('请求 %s %s 返回 %d', method, route, message['status'])

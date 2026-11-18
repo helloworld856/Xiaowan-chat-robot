@@ -141,6 +141,7 @@ class AuthService:
         return self._account_locks[hash(username_key) % len(self._account_locks)]
 
     def _prune_sessions(self, now: float) -> None:
+        # 会话按创建顺序插入，有效期相同，遇到首个未到期的会话即可停止。
         while self._sessions:
             oldest = next(iter(self._sessions))
             if self._sessions[oldest].expires > now:
@@ -207,6 +208,7 @@ class AuthService:
                 try:
                     self.account_store.save_password(account, hash_password(new_password))
                 except PasswordCommitUnknown:
+                    # 密码可能已经写入，先撤销旧会话，要求账号重新登录。
                     self._revoke_user_sessions(user.id)
                     raise
                 except (AccountStorageError, OSError):

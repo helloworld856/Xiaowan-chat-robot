@@ -63,6 +63,7 @@ class UserDataPaths:
         self._locks = tuple(RLock() for _ in range(64))
 
     def directory(self, user_id: int) -> Path:
+        # 个人目录以数据库账号 ID 命名，路径中不会使用用户名。
         if type(user_id) is not int or user_id < 1:
             raise ValueError('账号 ID 无效')
         return self.root / str(user_id)

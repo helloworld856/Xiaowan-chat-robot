@@ -73,6 +73,7 @@ async function initializeChat() {
     } catch (error) {
         if (!(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) throw error;
     } finally {
+        // 旧账号的加载结束后，由当前账号自己的初始化流程恢复界面交互。
         if (generation === getRequestGeneration()) {
             unlockSendBtn();
             loading.classList.add('close');
