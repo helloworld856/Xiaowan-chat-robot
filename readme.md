@@ -2,8 +2,6 @@
 
 版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
 
-开发分支、服务器更新命令和已确认的行为约定见[项目交接](docs/HANDOFF.md)。
-
 ## 主要功能
 
 - 根据用户意图和情绪生成角色化回复
@@ -69,7 +67,7 @@ PASSWORD=your-mysql-password
 
 登录 Cookie 有效期为 8 小时，刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
 
-菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`，制作提示词见 `docs/superpowers/avatars-prompts.md`。
+菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`。
 
 终端显示 Uvicorn 的启动进度和监听地址。已认证账号的运行日志只写入各自目录中的 `logs/app.log`，记录请求结果、回复条数、Token 和耗时。启动、匿名请求等系统日志写入 `backend/log_config/app.log`。运行 `run_serve.py` 启动时会清空系统和账号的当前日志。每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
 

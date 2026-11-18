@@ -1,3 +1,6 @@
+# 本地开发文档和截图
+/docs/
+
 # Python 缓存与虚拟环境
 __pycache__/
 *.py[cod]
