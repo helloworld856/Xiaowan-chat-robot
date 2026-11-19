@@ -37,7 +37,7 @@ class ConfigFileTests(unittest.TestCase):
         from app.llm.admin_settings import SettingsStore
         from app.system_config import SystemConfig
 
-        password = 'test pass ${UNEXPANDED}'
+        password = 'a ${UNEXPANDED}'
         env_file = self.root / '.env'
         env_file.write_text(f"ADMIN_INITIAL_PASSWORD='{password}'\nADMIN_PROVIDERS='{{}}'\n", encoding='utf-8')
         admin = User(12, 'admin', 'admin')
@@ -57,6 +57,44 @@ class ConfigFileTests(unittest.TestCase):
                 env_file.write_text("ADMIN_PROVIDERS='{}'\n", encoding='utf-8')
         store.initialize_admin.assert_called_once()
         self.assertTrue(_verify_password(password, store.initialize_admin.call_args.args[0]))
+
+    def test_initial_admin_password_accepts_six_to_eighteen_characters(self):
+        from fastapi.testclient import TestClient
+        from app.accounts.profile import ProfileStore
+        from app.accounts.repository import Account, User
+        from app.application import build_application
+        from app.llm.admin_settings import SettingsStore
+        from app.system_config import SystemConfig
+
+        admin = User(12, 'admin', 'admin')
+        config = SystemConfig(chat={'clear_history_on_startup': False})
+        for length, allowed in ((5, False), (6, True), (18, True), (19, False)):
+            with (self.subTest(length=length),
+                  patch('app.application.SQLAccountStore') as accounts,
+                  patch('app.application.initialize_schema'),
+                  patch('app.application.settings_store', SettingsStore(self.root / 'settings.json')),
+                  patch('app.accounts.preferences.UserPreferencesStore.find', return_value=None)):
+                password = '密' * length
+                (self.root / '.env').write_text(f"ADMIN_INITIAL_PASSWORD='{password}'\n", encoding='utf-8')
+                store = accounts.return_value
+                store.get_admin.return_value = None
+
+                def initialize_admin(password_hash):
+                    store.find.return_value = Account(admin, password_hash)
+                    return admin
+
+                store.initialize_admin.side_effect = initialize_admin
+                app = build_application(MagicMock(), ProfileStore(self.root / 'users'),
+                                        self.root / 'auth_config', system_config=config)
+                if allowed:
+                    with TestClient(app) as client:
+                        response = client.post('/auth/login', json={'username': 'admin', 'password': password})
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.json()['user']['role'], 'admin')
+                else:
+                    with self.assertRaisesRegex(RuntimeError, '6–18.*ADMIN_INITIAL_PASSWORD'), TestClient(app):
+                        self.fail('超出长度范围的初始密码不应启动服务')
+                    store.initialize_admin.assert_not_called()
 
     def test_older_global_config_is_extended_with_comments_and_keeps_existing_values(self):
         from app.system_config import load_system_config

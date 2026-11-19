@@ -25,7 +25,11 @@ from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import ModelSettings, settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.model_catalog import ModelCatalog
-from app.system_config import MAX_PASSWORD_INPUT_LENGTH, ChatConfig, SystemConfig, legacy_environment
+from app.system_config import ChatConfig, SystemConfig, legacy_environment
+
+
+INITIAL_ADMIN_PASSWORD_MIN_LENGTH = 6
+INITIAL_ADMIN_PASSWORD_MAX_LENGTH = 18
 
 
 # 装配通用认证与资料接口，测试可以注入不依赖真实 MySQL 的存储。
@@ -78,8 +82,10 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             except (OSError, UnicodeError):
                 raise RuntimeError('无法读取 backend/.env 中的 ADMIN_INITIAL_PASSWORD') from None
             password = env.get('ADMIN_INITIAL_PASSWORD') or ''
-            if not password.strip() or not 12 <= len(password) <= MAX_PASSWORD_INPUT_LENGTH:
-                raise RuntimeError(f'尚未初始化管理员，请在 backend/.env 中填写 12–{MAX_PASSWORD_INPUT_LENGTH} '
+            if (not password.strip()
+                    or not INITIAL_ADMIN_PASSWORD_MIN_LENGTH <= len(password) <= INITIAL_ADMIN_PASSWORD_MAX_LENGTH):
+                raise RuntimeError('尚未初始化管理员，请在 backend/.env 中填写 '
+                                   f'{INITIAL_ADMIN_PASSWORD_MIN_LENGTH}–{INITIAL_ADMIN_PASSWORD_MAX_LENGTH} '
                                    '个字符的 ADMIN_INITIAL_PASSWORD，再启动后端')
             admin = accounts.initialize_admin(hash_password(password))
         try:
