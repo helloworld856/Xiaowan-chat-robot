@@ -44,9 +44,3 @@ dist/
 .claude/
 .DS_Store
 Thumbs.db
-
-# 本地软著准备材料
-/THIRD_PARTY_NOTICES.md
-/docs/用户使用说明书.md
-/docs/images/
-

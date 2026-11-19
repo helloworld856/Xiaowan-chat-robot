@@ -27,7 +27,6 @@
 }
 .login-heading { margin-bottom: 28px; }
 .login-heading h1 { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -0.5px; }
-.login-description { margin-top: 6px; font-size: 14px; line-height: 1.5; color: #71717a; }
 .login-fields { display: grid; gap: 20px; }
 .login-field { display: grid; gap: 8px; }
 .login-field label { font-size: 13px; line-height: 1.4; font-weight: 500; }
