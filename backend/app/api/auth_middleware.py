@@ -10,6 +10,12 @@ from app.account_logging import account_log_context
 from app.accounts.files import UserDataPaths
 
 
+PAGE_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+
+
 def origin_key(value: str):
     parsed = urlsplit(value)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
@@ -59,20 +65,26 @@ class AuthenticationMiddleware:
         state['username'] = user.username if user is not None else None
         tracked_user = user if user is not None and path not in ('/auth/login', '/auth/register') and not public_static else None
 
-        async def send_private(message):
-            if message['type'] == 'http.response.start' and not public_static:
-                # 登录状态和账号数据不会写入 HTTP 缓存。
-                MutableHeaders(scope=message)['Cache-Control'] = 'no-store'
-                # 只记录路由模板和状态码，避免记录 URL 参数或请求正文。
-                route = getattr(scope.get('route'), 'path', None)
-                if self.user_data_paths is not None and route is not None:
-                    logger.info('请求 %s %s 返回 %d', method, route, message['status'])
+        async def send_response(message):
+            if message['type'] == 'http.response.start':
+                headers = MutableHeaders(scope=message)
+                if public_static:
+                    if headers.get('Content-Type', '').partition(';')[0] == 'text/html':
+                        headers['Content-Security-Policy'] = PAGE_CONTENT_SECURITY_POLICY
+                        headers['X-Frame-Options'] = 'DENY'
+                else:
+                    # 登录状态和账号数据不会写入 HTTP 缓存。
+                    headers['Cache-Control'] = 'no-store'
+                    # 只记录路由模板和状态码，避免记录 URL 参数或请求正文。
+                    route = getattr(scope.get('route'), 'path', None)
+                    if self.user_data_paths is not None and route is not None:
+                        logger.info('请求 %s %s 返回 %d', method, route, message['status'])
             await send(message)
 
         # 认证完成后绑定账号日志上下文，其余请求使用系统日志上下文。
         with account_log_context(self.user_data_paths, tracked_user.id if tracked_user else None):
             try:
-                await self.app(scope, receive, send_private)
+                await self.app(scope, receive, send_response)
             except Exception as error:
                 logger.warning('请求处理异常（%s）', type(error).__name__)
                 raise

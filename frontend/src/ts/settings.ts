@@ -46,11 +46,19 @@ function updateApiKeyPrompt(apiKey: HTMLInputElement, hasSavedKey: boolean) {
     apiKey.placeholder = hasSavedKey ? '********' : '';
 }
 
+function setApiKeyVisibility(apiKey: HTMLInputElement, toggle: HTMLButtonElement, visible: boolean) {
+    apiKey.type = visible ? 'text' : 'password';
+    const action = visible ? '隐藏' : '显示';
+    toggle.textContent = action;
+    toggle.ariaLabel = `${action} API Key`;
+}
+
 export function updateSettingsPermissions() {
     const admin = canManageModel();
     const apiKey = input('model-api-key');
     apiKey.disabled = false;
     apiKey.value = '';
+    setApiKeyVisibility(apiKey, document.getElementById('toggle-model-key') as HTMLButtonElement, false);
     updateApiKeyPrompt(apiKey, false);
     document.getElementById('model-address-help')!.textContent = admin
         ? '自定义地址须经服务器批准，并兼容 OpenAI 接口。更换地址时请重新填写 API Key。'
@@ -107,6 +115,7 @@ export function initSettings() {
     const name = select('modelName');
     const address = input('model-base-url');
     const apiKey = input('model-api-key');
+    const toggleKey = document.getElementById('toggle-model-key') as HTMLButtonElement;
     let loadedAddress = '';
     let apiKeyEdited = false;
     let modelOperation: number | null = null;
@@ -115,6 +124,12 @@ export function initSettings() {
     function resetApiKey() {
         apiKey.value = '';
         apiKeyEdited = false;
+        setApiKeyVisibility(apiKey, toggleKey, false);
+    }
+
+    function clearAutofilledApiKey() {
+        // 浏览器填充的登录密码不能显示，也不能用于测试或替换模型密钥。
+        if (!apiKeyEdited || apiKey.matches?.(':is(:autofill, :-webkit-autofill)')) apiKey.value = '';
     }
 
     function loadProvider(preferredModel?: string) {
@@ -166,7 +181,11 @@ export function initSettings() {
     apiKey.addEventListener('input', event => {
         const {isTrusted, inputType} = event as InputEvent;
         apiKeyEdited = isTrusted && Boolean(inputType) && inputType !== 'insertReplacementText';
-        if (!apiKeyEdited) apiKey.value = '';
+        if (!apiKeyEdited) resetApiKey();
+    });
+    toggleKey.addEventListener('click', () => {
+        clearAutofilledApiKey();
+        setApiKeyVisibility(apiKey, toggleKey, apiKey.type === 'password' && apiKey.value.length > 0);
     });
     form.addEventListener('input', () => { modelStatus.textContent = ''; });
 
@@ -174,8 +193,8 @@ export function initSettings() {
         const generation = getRequestGeneration();
         if (modelOperation === generation) return;
         const admin = canManageModel();
-        // 自动填充的登录密码不能用于测试或替换已保存的 API Key。
-        if (!apiKeyEdited || apiKey.matches?.(':is(:autofill, :-webkit-autofill)')) apiKey.value = '';
+        clearAutofilledApiKey();
+        setApiKeyVisibility(apiKey, toggleKey, false);
         const key = apiKey.value.trim() || undefined;
         if (!key && apiKey.required) {
             apiKey.focus();

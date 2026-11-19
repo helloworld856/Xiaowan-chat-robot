@@ -116,6 +116,7 @@ class AuthHTTPTests(unittest.TestCase):
     def setUp(self):
         self.auth = auth_module()
         from app.application import create_app
+        from starlette.responses import HTMLResponse
         self.now = 100.0
         self.service = fixture_admin_auth(clock=lambda: self.now)
         self.app = create_app('test', auth_service=self.service)
@@ -126,8 +127,9 @@ class AuthHTTPTests(unittest.TestCase):
         for path in ['/chat', '/history', '/settings', '/model', '/model/test', '/persona', '/version']:
             self.app.add_api_route(path, business, methods=['GET', 'POST'])
         async def homepage():
-            return {'login': True}
-        self.app.add_api_route('/', homepage)
+            return HTMLResponse('<h1>登录小晚</h1>')
+        for path in ('/', '/index.html'):
+            self.app.add_api_route(path, homepage, methods=['GET', 'HEAD'])
 
     def login(self, scheme='http', cookie=None):
         status, headers, body = request(self.app, '/auth/login', 'POST',
@@ -144,6 +146,20 @@ class AuthHTTPTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(request(self.app, path, 'POST' if path in ['/chat', '/model/test'] else 'GET')[0], 401)
         self.assertEqual(self.business_calls, [])
+
+    def test_login_page_has_a_same_origin_content_policy_and_cannot_be_framed(self):
+        for path in ('/', '/index.html'):
+            for method in ('GET', 'HEAD'):
+                with self.subTest(path=path, method=method):
+                    status, headers, _ = request(self.app, path, method)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(headers.get('x-frame-options'), 'DENY')
+                    directives = dict(part.strip().split(maxsplit=1)
+                                      for part in headers['content-security-policy'].split(';') if part.strip())
+                    self.assertEqual(directives['frame-ancestors'], "'none'")
+                    self.assertEqual(directives['default-src'], "'none'")
+                    for kind in ('script', 'style', 'img', 'connect'):
+                        self.assertEqual(directives[kind + '-src'], "'self'")
 
     def test_session_probe_returns_normal_signed_out_state_without_valid_cookie(self):
         for cookie in (None, f'{self.auth.COOKIE_NAME}=' + 'x' * 43):

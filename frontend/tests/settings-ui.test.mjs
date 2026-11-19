@@ -7,11 +7,14 @@ import {runInNewContext} from 'node:vm';
 const source = fs.readFileSync(new URL('../src/ts/settings.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
 
-test('the model API key control opts out of autocomplete without using a password input', () => {
+test('the model API key starts masked, opts out of autocomplete and has a reveal button', () => {
     const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
     const field = html.match(/<input\b[^>]*\bid="model-api-key"[^>]*>/)?.[0] ?? '';
-    assert.match(field, /\btype="text"/);
+    assert.match(field, /\btype="password"/);
     assert.match(field, /\bautocomplete="off"/);
+    const button = html.match(/<button\b[^>]*\bid="toggle-model-key"[^>]*>/)?.[0] ?? '';
+    assert.match(button, /\btype="button"/);
+    assert.match(button, /\baria-controls="model-api-key"/);
 });
 
 test('only the relevant model fields are visible and active for each role', () => {
@@ -154,6 +157,11 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(key.required, false);
     assert.equal(key.placeholder, '********');
     assert.equal(key.value, '');
+    const toggleKey = element('toggle-model-key').listeners.get('click');
+    key.value = 'browser-login-password';
+    toggleKey();
+    assert.equal(key.type, 'password');
+    assert.equal(key.value, '');
     const testConnection = element('test-model-btn').listeners.get('click');
     key.value = 'browser-login-password';
     testConnection();
@@ -183,8 +191,20 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(key.value, '');
     key.value = 'typed-api-key';
     key.listeners.get('input')({isTrusted: true, inputType: 'insertText'});
+    assert.equal(key.type, 'password');
+    toggleKey();
+    assert.equal(key.type, 'text');
+    assert.equal(key.value, 'typed-api-key');
+    toggleKey();
+    assert.equal(key.type, 'password');
+    toggleKey();
     address.value = 'https://custom.example/v1';
     testConnection();
     await new Promise(resolve => setImmediate(resolve));
+    assert.equal(key.type, 'password');
     assert.deepEqual(submittedModels.at(-1), {address: 'https://custom.example/v1', key: 'typed-api-key', personal: true, testOnly: true});
+    toggleKey();
+    element('cancel-modify-btn').listeners.get('click')();
+    assert.equal(key.type, 'password');
+    assert.equal(key.value, '');
 });
