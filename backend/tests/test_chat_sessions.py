@@ -198,8 +198,8 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(user, text):
             self.assertEqual(user.id, 42)
-            self.assertEqual(text, ' 😀晚 ')
-            return {'ai_response': ['回复'], 'message': {'conversation_round': 1}, 'saved': True}
+            self.assertIn(text, (' 😀晚 ', '晚'))
+            return {'ai_response': ['回复'], 'message': {'conversation_round': 1}, 'saved': text != '晚'}
 
         app = FastAPI()
         app.state.system_config = SystemConfig(chat={'max_message_chars': 4})
@@ -219,3 +219,6 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(response.json()['detail']['code'], 'CHAT_NOT_STARTED')
             response = await client.post('/chat', json={'user_input': ' 😀晚 '})
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['conversation_round'], 1)
+            response = await client.post('/chat', json={'user_input': '晚'})
+            self.assertEqual(response.json(), {'response': ['回复'], 'conversation_round': None, 'saved': False})

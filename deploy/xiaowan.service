@@ -1,0 +1,17 @@
+[Unit]
+Description=Xiaowan chat service
+After=network-online.target mysql.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/xiaowan
+ExecStart="@XIAOWAN_PYTHON@" /home/ubuntu/xiaowan/backend/run_serve.py
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

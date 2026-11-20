@@ -11,7 +11,7 @@ from .weather_tool.weather_spec import WEATHER_SPEC
 
 def _register(spec, handler):
     function = spec["function"]
-    # JSON Schema 用于模型绑定，Python 签名校验负责拒绝不合法的调用参数。
+    # JSON Schema 用于模型绑定，Python 函数签名用于校验实际参数。
     return StructuredTool.from_function(
         func=validate_call(handler),
         name=function["name"],

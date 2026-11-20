@@ -1,6 +1,6 @@
 import json
-from app.account_logging import logger
 
+from app.account_logging import logger
 
 
 def load_history(connection, user_id: int, k: int, front: bool = True):
@@ -19,7 +19,7 @@ def _read_history(cursor, user_id: int, k: int, front: bool = True):
     params = (user_id,)
     if k != 0:
         sql += ' LIMIT %s'
-        params += (max(k, 1),)
+        params += (abs(k),)
     cursor.execute(sql, params)
     return [
         {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
@@ -51,7 +51,7 @@ class MemoryManager:
         try:
             db.commit()
         except Exception:
-            # A lost response can leave either outcome on the server.
+            # 提交响应丢失时，数据库可能已经完成提交，下次读取前先刷新缓存。
             self._stale = True
             raise
 

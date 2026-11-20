@@ -1,15 +1,14 @@
 # 读取json里的人格配置
 import json
-from pathlib import Path
 
+from app import config
 from app.account_logging import logger
-from app.config import configer
 
 # 初始化人格类，并返回人格
 class Persona:
     def __init__(self):
         try:
-            path = Path(configer.root_dir_path) / 'persona_config' / 'persona.json'
+            path = config.BACKEND_ROOT / 'persona_config' / 'persona.json'
             data = json.loads(path.read_text(encoding='utf-8'))
             required = ('name', 'avatar', 'birthday', 'birthplace', 'core_persona')
             if (not isinstance(data, dict) or any(not isinstance(data.get(field), str) for field in required)

@@ -34,7 +34,7 @@ class ChatToolTests(unittest.TestCase):
         self.assertEqual(time_schema['properties']['timezone']['default'], 'Asia/Shanghai')
 
     def test_registered_time_uses_beijing_timezone_when_omitted(self):
-        with patch('tools_config.time.ZoneInfo', return_value=timezone.utc) as zone:
+        with patch('tools_config.time_tool.time.ZoneInfo', return_value=timezone.utc) as zone:
             result = self.tools['get_current_time'].invoke({})
         zone.assert_called_once_with('Asia/Shanghai')
         self.assertRegex(result, r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$')
@@ -46,7 +46,7 @@ class ChatToolTests(unittest.TestCase):
         weather = Mock()
         weather.json.return_value = {'current': {'time': '2026-11-20T12:00', 'temperature_2m': 18,
                                                  'relative_humidity_2m': 60}}
-        with patch('tools_config.weather_tool.requests.get', side_effect=[geocoding, weather]) as request:
+        with patch('tools_config.weather_tool.weather.requests.get', side_effect=[geocoding, weather]) as request:
             with self.assertRaises(ValidationError):
                 self.tools['get_weather'].invoke({})
             with self.assertRaises(ValidationError):

@@ -1,7 +1,6 @@
 import re
 from time import time
 
-from app.config import configer
 from app.account_logging import logger
 from app.chat.memory import MemoryManager
 from app.llm.persona import persona
@@ -12,6 +11,8 @@ from app.system_config import ChatConfig
 
 
 DEFAULT_COMPRESSION_TOKENS = ChatConfig().history_compression_tokens
+DEFAULT_ANALYSIS = {'intent': '一般对话', 'emotion': '无情感波动', 'answer': '日常互动'}
+DEFAULT_REPLY = '嗯...我刚刚有点没组织好语言，你再说一遍嘛'
 
 
 def get_last_message(response: dict):
@@ -48,7 +49,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
         memorier.refresh_if_needed()
         state['message']['conversation_round'] = memorier.next_round
 
-        # 计算tokens
+        # 计算历史文本的 Token 用量。
         res = []
         o = 0
         for msg in memorier.history_cache:
@@ -57,7 +58,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
             res.extend(msg['assistant'])
         history_text = memorier.abstract_cache + ','.join(res)
         t = count_tokens(history_text) if history_text else 0
-        t += 4 * o  # 把每条对话的user,assistant,conversation_round都算上
+        t += 4 * o  # 估算每轮历史记录的字段开销。
 
         if t > compression_tokens:
             # 生成历史对话摘要
@@ -83,7 +84,6 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
                 state['total_tokens'] or '未返回', time() - state['start_time'],
                 '成功' if state['saved'] else '失败')
 
-    state['message']['conversation_round'] += 1  # 轮次加1
     return state
 
 
@@ -130,7 +130,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         last_message = get_last_message(response)
 
         # 提取出回复并转成字典格式（使用容错解析）
-        defaults = configer.ANALYSIS_DEFAULT_RESULT
+        defaults = DEFAULT_ANALYSIS
         ai_response = safe_parse_json(last_message.content, defaults, expected_keys=defaults.keys(), stage='消息分析')
 
         state['analysis_result'] = {}
@@ -195,7 +195,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
                 ai_response = {'reply': [text]}
             else:
                 logger.warning('回复生成：模型输出无法解析，使用默认回复')
-                ai_response = configer.GENERATE_DEFAULT_RESULT
+                ai_response = {'reply': [DEFAULT_REPLY], 'inner monologue': [], 'emotion': '困惑', 'action': ''}
 
         # 记录回复，情绪、动作
         reply = ai_response.get('reply', [])
@@ -206,7 +206,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         messages = [part for part in reply if isinstance(part, str) and part.strip()]
         if not messages:
             logger.warning('回复生成：模型输出缺少有效回复，使用默认回复')
-        state['ai_response'] = messages or configer.GENERATE_DEFAULT_RESULT['reply'].copy()
+        state['ai_response'] = messages or [DEFAULT_REPLY]
 
         monologue = ai_response.get('inner monologue', '')
         if not isinstance(monologue, str) and (

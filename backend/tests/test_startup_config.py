@@ -23,12 +23,12 @@ class StartupConfigTests(unittest.TestCase):
 
     def test_system_log_is_created_on_a_clean_checkout(self):
         from app.account_logging import get_logger
-        from app.config import configer
+        from app import config
 
         # 模拟刚检出的项目，系统日志目录尚不存在。
         log_path = self.root / 'log_config' / 'app.log'
         app_logger = logging.getLogger('xiaowan')
-        with (patch.object(configer, 'log_save_path', log_path),
+        with (patch.object(config, 'SYSTEM_LOG_PATH', log_path),
               patch.object(app_logger, 'handlers', []),
               patch.object(app_logger, 'level', app_logger.level),
               redirect_stderr(io.StringIO())):
@@ -41,14 +41,14 @@ class StartupConfigTests(unittest.TestCase):
                     handler.close()
 
     def test_get_logger_does_not_clear_an_existing_log(self):
-        from app.config import configer
+        from app import config
 
         log_path = self.root / 'app.log'
         log_path.write_text('previous startup\n', encoding='utf-8')
         app_logger = logging.getLogger('xiaowan')
         original_level = app_logger.level
         console = io.StringIO()
-        with (patch.object(configer, 'log_save_path', log_path), patch.object(app_logger, 'handlers', []),
+        with (patch.object(config, 'SYSTEM_LOG_PATH', log_path), patch.object(app_logger, 'handlers', []),
               redirect_stderr(console)):
             try:
                 from app.account_logging import get_logger
@@ -73,10 +73,9 @@ from pathlib import Path
 
 import uvicorn
 from app.accounts import files
-from app.config import configer
-from app import system_config
+from app import config, system_config
 
-configer.log_save_path = sys.argv[1]
+config.SYSTEM_LOG_PATH = Path(sys.argv[1])
 files.BACKEND_ROOT = Path(sys.argv[1]).parent
 system_config.BACKEND_ROOT = files.BACKEND_ROOT
 
@@ -103,7 +102,7 @@ def start_server(app, **options):
 
 uvicorn.run = start_server
 launcher = runpy.run_path('run_serve.py')
-assert Path(configer.log_save_path).read_text(encoding='utf-8') == 'previous system run'
+assert config.SYSTEM_LOG_PATH.read_text(encoding='utf-8') == 'previous system run'
 launcher['main']()
 '''
         log_path = self.root / 'app.log'
@@ -155,7 +154,7 @@ launcher['main']()
             self.assertEqual(token_counter.count_tokens('多条回复\n123 😀'), 11)
 
     def test_persona_requires_string_fields_and_does_not_log_its_prompt(self):
-        from app.config import configer
+        from app import config
 
         mock_logger = Mock()
         source = {'name': '小晚', 'avatar': 'xiaowan.png', 'birthday': '2004-10-13',
@@ -165,7 +164,7 @@ launcher['main']()
         path = folder / 'persona.json'
         from app.llm import persona
 
-        with (patch.object(configer, 'root_dir_path', str(self.root)),
+        with (patch.object(config, 'BACKEND_ROOT', self.root),
               patch.object(persona, 'logger', mock_logger)):
             path.write_text(json.dumps(source), encoding='utf-8')
             self.assertIn(source['core_persona'], persona.Persona().FRIEND_PERSONA)
@@ -174,9 +173,8 @@ launcher['main']()
             self.assertEqual(persona.Persona().BOT_NAME, '无名氏')
 
     def test_launcher_reads_the_configured_listener_only_when_started(self):
-        from app import account_logging
+        from app import account_logging, config
         from app.accounts import files
-        from app.config import configer
         from app.system_config import ServerConfig, SystemConfig
 
         settings = Mock(return_value=SystemConfig(server=ServerConfig(port=8123), logging={'clear_on_startup': False}))
@@ -186,7 +184,7 @@ launcher['main']()
                 patch.object(logging.getLogger('uvicorn'), 'setLevel'), \
                 patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
                 patch.object(files, 'BACKEND_ROOT', self.root), \
-                patch.object(configer, 'log_save_path', self.root / 'app.log'), \
+                patch.object(config, 'SYSTEM_LOG_PATH', self.root / 'app.log'), \
                 patch('app.system_config.load_system_config', settings), \
                 patch('app.account_logging.reset_active_logs') as reset_logs:
             launcher = runpy.run_path(str(ROOT / 'run_serve.py'))

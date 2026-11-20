@@ -1,18 +1,17 @@
 from fastapi import APIRouter, HTTPException, Request
-
-from app.chat.scheduler import ChatNotStarted
-from app.account_logging import logger
-
 from pydantic import BaseModel
-from typing import List, Optional
+
+from app.account_logging import logger
+from app.chat.scheduler import ChatNotStarted
 
 
 class ChatRequest(BaseModel):
     user_input: str
 
+
 class ChatResponse(BaseModel):
-    response: List
-    conversation_round: Optional[int]
+    response: list
+    conversation_round: int | None
     saved: bool
 
 
@@ -40,6 +39,6 @@ async def chat(req: ChatRequest, request: Request):
 
     return ChatResponse(
         response=result['ai_response'],
-        conversation_round=result['message']['conversation_round'] - 1,
+        conversation_round=result['message']['conversation_round'] if result['saved'] else None,
         saved=result['saved'],
     )

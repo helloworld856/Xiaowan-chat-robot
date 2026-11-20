@@ -113,6 +113,38 @@ class MemoryIsolationTests(unittest.TestCase):
         self.assertEqual(load_history(self.pool.connection, 2, 0), [message(0, 'B')])
         self.assertEqual(load_history(self.pool.connection, 1, -1), [message(1, 'AA')])
 
+    def test_history_sign_controls_order_and_absolute_value_limits_count(self):
+        account = MemoryManager(1, self.pool.connection)
+        for round_id in range(3):
+            self.assertTrue(account.record_message(message(round_id, str(round_id))))
+        for count, front, expected in ((2, True, [0, 1]), (2, False, [2, 1]),
+                                       (-2, True, [2, 1]), (-2, False, [0, 1])):
+            with self.subTest(count=count, front=front):
+                rows = load_history(self.pool.connection, 1, count, front)
+                self.assertEqual([row['conversation_round'] for row in rows], expected)
+
+    def test_history_endpoint_validates_count_and_caps_unbounded_requests(self):
+        from pydantic import ValidationError
+        from app.api.history import HistoryRequest, history
+
+        for count in (-10001, 10001):
+            with self.subTest(count=count), self.assertRaises(ValidationError):
+                HistoryRequest(num=count, front=True)
+        connection = self.pool.connection
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db=SimpleNamespace(connection=connection))),
+                                  state=SimpleNamespace(user=SimpleNamespace(id=1)))
+        for count in (-10000, 10000):
+            with self.subTest(count=count), patch('app.api.history.load_history', return_value=[]) as load:
+                history(HistoryRequest(num=count, front=True), request)
+                load.assert_called_once_with(connection, 1, count, True)
+        for count in (0, None):
+            for front, expected in ((True, [0, 1]), (False, [1, 0])):
+                with (self.subTest(count=count, front=front),
+                      patch('app.api.history.load_history', return_value=[message(1, '新'), message(0, '旧')]) as load):
+                    reply = history(HistoryRequest(num=count, front=front), request)
+                    load.assert_called_once_with(connection, 1, 10000, False)
+                    self.assertEqual([row['conversation_round'] for row in reply.history_messages], expected)
+
     def test_summary_and_history_changes_are_atomic_and_scoped(self):
         account_a = MemoryManager(1, self.pool.connection)
         account_b = MemoryManager(2, self.pool.connection)
@@ -233,12 +265,16 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
             patch('app.chat.nodes.count_tokens', return_value=1),
         ):
             pool.fail_insert = True
-            self.assertFalse((await sessions.send(user, 'failed insert'))['saved'])
+            failed = await sessions.send(user, 'failed insert')
+            self.assertFalse(failed['saved'])
+            self.assertEqual(failed['message']['conversation_round'], 0)
             pool.fail_insert = False
             pool.lose_commit_ack = True
             self.assertFalse((await sessions.send(user, 'committed without acknowledgement'))['saved'])
             self.assertNotIn('failed insert', prompts[-1])
-            self.assertTrue((await sessions.send(user, 'next turn'))['saved'])
+            saved = await sessions.send(user, 'next turn')
+            self.assertTrue(saved['saved'])
+            self.assertEqual(saved['message']['conversation_round'], 1)
             self.assertIn('committed without acknowledgement', prompts[-1])
         self.assertEqual(
             [(row['conversation_round'], row['user']) for row in load_history(pool.connection, user.id, 0)],

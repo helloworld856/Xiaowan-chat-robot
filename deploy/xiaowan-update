@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+branch=codex/backend-updates
+service=xiaowan.service
+state_dir="$HOME/.local/state/xiaowan"
+python_file="$HOME/.config/xiaowan/python-path"
+
+fail() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+wait_for_app() {
+    local attempt response
+    # 会话响应可以增加字段，只检查 HTTP 200 和匿名用户状态。
+    for ((attempt = 1; attempt <= 20; attempt++)); do
+        if systemctl is-active --quiet "$service" &&
+            response=$(curl -fsS --max-time 2 --write-out '%{http_code}' \
+                http://127.0.0.1:8000/auth/session 2>/dev/null) &&
+            [[ ${response: -3} == 200 ]] &&
+            python3 -c 'import json, sys; data = json.load(sys.stdin); sys.exit(not (isinstance(data, dict) and data.get("user", False) is None))' <<< "${response::-3}" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    fail "健康检查未通过。请查看 sudo journalctl -u $service -n 80 --no-pager，修复后再运行更新。"
+}
+
+record_deployment() {
+    # 一次写入当前和上一个已验证提交，避免产生只更新了一半的记录。
+    printf '%s\n%s\n' "$1" "$2" > "$state_dir/.revisions.tmp"
+    mv -fT -- "$state_dir/.revisions.tmp" "$state_dir/revisions"
+}
+
+if (( $# > 1 )) || [[ ${1:-} != '' && $1 != --record-current ]]; then
+    fail '用法：xiaowan-update [--record-current]'
+fi
+
+cd "$HOME/xiaowan"
+mkdir -p -- "$state_dir"
+# 整次更新共用一把锁，避免两个窗口同时替换前端或写入部署记录。
+exec 9> "$state_dir/update.lock"
+flock -n 9 || fail '已有一个小晚更新正在运行。'
+
+[[ $(git branch --show-current) == "$branch" ]] || fail "请在服务器检出部署分支 $branch。"
+current=$(git rev-parse --verify HEAD)
+
+# 这些跟踪文件可能含服务器自己的设置。仅在远程也修改该文件时阻止更新。
+server_config=(backend/settings.json backend/persona_config/persona.json
+    backend/auth_config/admin.json backend/auth_config/profile.json)
+exclude_config=()
+for file in "${server_config[@]}"; do
+    exclude_config+=(":(exclude,literal)$file")
+done
+changes=$(git status --porcelain --untracked-files=no -- . "${exclude_config[@]}")
+if [[ -n $changes ]]; then
+    printf '%s\n' "$changes" >&2
+    fail '服务器有未提交的代码修改，请先处理这些文件。'
+fi
+
+if [[ ${1:-} == --record-current ]]; then
+    [[ ! -e $state_dir/revisions ]] || fail '已有部署记录，请直接运行 xiaowan-update。'
+    [[ -s frontend/dist/index.html ]] || fail '缺少已构建的前端，请先检查 frontend/dist。'
+    wait_for_app
+    record_deployment "$current" ''
+    printf '已记录当前部署 %s\n' "$current"
+    exit 0
+fi
+
+[[ -s $state_dir/revisions ]] || fail '请在 systemd 接管后先运行 xiaowan-update --record-current。'
+IFS= read -r deployed < "$state_dir/revisions"
+git merge-base --is-ancestor "$deployed" "$current" || fail '当前分支不包含上次部署的提交，请检查 Git 历史。'
+
+git -c http.version=HTTP/1.1 fetch origin "refs/heads/$branch"
+target=$(git rev-parse --verify FETCH_HEAD)
+git merge-base --is-ancestor "$current" "$target" || fail '服务器分支无法快进到远程部署分支，请检查 Git 历史。'
+
+for file in "${server_config[@]}"; do
+    if ! git diff --quiet "$current" "$target" -- "$file" &&
+        [[ -n $(git status --porcelain --untracked-files=no -- "$file") ]]; then
+        fail "远程和服务器都修改了 $file，请先合并配置。"
+    fi
+done
+
+# 上次失败可能已推进 HEAD，仍须按上次验证过的版本判断该做哪些步骤。
+build_frontend=false
+restart_backend=false
+install_python_deps=false
+if [[ ! -s frontend/dist/index.html ]] || ! git diff --quiet "$deployed" "$target" -- frontend; then
+    build_frontend=true
+fi
+if [[ -e $state_dir/pending-restart ]] ||
+    ! git diff --quiet "$deployed" "$target" -- backend ':(exclude)backend/tests' ':(exclude)backend/.env.example' requirements.txt; then
+    restart_backend=true
+fi
+if [[ -e $state_dir/pending-python-deps ]] || ! git diff --quiet "$deployed" "$target" -- requirements.txt; then
+    install_python_deps=true
+    restart_backend=true
+    [[ -s $python_file ]] || fail '找不到服务使用的 Conda Python 路径，请检查 ~/.config/xiaowan/python-path。'
+    IFS= read -r python < "$python_file"
+    [[ $python == /* && -x $python ]] || fail '配置的 Conda Python 路径无效。'
+fi
+
+git merge --ff-only "$target"
+
+work_dir=''
+restore_dist=false
+had_dist=false
+cleanup() {
+    local status=$?
+    trap - EXIT
+    if [[ -n $work_dir ]]; then
+        if $restore_dist; then
+            # 发布或健康检查失败时，放回上次在提供服务的前端目录。
+            if [[ -e $work_dir/old-dist ]]; then
+                if [[ -e frontend/dist ]] && ! mv -T -- frontend/dist "$work_dir/failed-dist"; then
+                    fail "恢复前端失败，原构建产物位于 $work_dir/old-dist。"
+                fi
+                mv -T -- "$work_dir/old-dist" frontend/dist ||
+                    fail "恢复前端失败，原构建产物位于 $work_dir/old-dist。"
+            elif ! $had_dist && [[ ! -d $work_dir/new-dist && -d frontend/dist ]]; then
+                mv -T -- frontend/dist "$work_dir/failed-dist" || fail '无法移走未验证的新前端产物。'
+            fi
+        fi
+        rm -rf -- "$work_dir"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if $build_frontend; then
+    if [[ ! -x frontend/node_modules/.bin/vite || -e $state_dir/pending-npm-ci ]] ||
+        ! git diff --quiet "$deployed" "$target" -- frontend/package.json frontend/package-lock.json frontend/.npmrc; then
+        touch -- "$state_dir/pending-npm-ci"
+        npm --prefix frontend ci
+    fi
+    # 和 dist 放在同一文件系统，构建完成后用重命名发布目录。
+    work_dir=$(mktemp -d "$PWD/frontend/.xiaowan-update.XXXXXXXX")
+    npm --prefix frontend run build -- --outDir "$work_dir/new-dist"
+    [[ -s $work_dir/new-dist/index.html ]] || fail '前端构建未生成 index.html。'
+fi
+
+if $install_python_deps; then
+    # 即使修复提交撤回依赖修改，也要重试可能执行了一半的安装。
+    touch -- "$state_dir/pending-python-deps"
+    "$python" -m pip install -r requirements.txt
+fi
+
+if $build_frontend; then
+    if [[ -e frontend/dist ]]; then
+        had_dist=true
+    fi
+    restore_dist=true
+    if $had_dist; then
+        mv -T -- frontend/dist "$work_dir/old-dist"
+    fi
+    mv -T -- "$work_dir/new-dist" frontend/dist
+fi
+
+if $restart_backend; then
+    touch -- "$state_dir/pending-restart"
+    sudo systemctl restart "$service"
+fi
+
+wait_for_app
+if [[ $target != "$deployed" ]]; then
+    record_deployment "$target" "$deployed"
+fi
+restore_dist=false
+rm -f -- "$state_dir/pending-python-deps" "$state_dir/pending-restart"
+if $build_frontend; then
+    rm -f -- "$state_dir/pending-npm-ci"
+fi
+if $build_frontend && $had_dist; then
+    # 通过健康检查后才轮换上一份备份。
+    previous_dist=frontend/.xiaowan-previous-dist
+    if { [[ ! -e $previous_dist ]] || mv -T -- "$previous_dist" "$work_dir/older-dist"; } &&
+        mv -T -- "$work_dir/old-dist" "$previous_dist"; then
+        true
+    else
+        printf '前端备份未移动到常用位置，可在 %s 查找。\n' "$work_dir" >&2
+        work_dir=''
+    fi
+fi
+printf '部署检查通过，当前版本 %s\n' "$target"

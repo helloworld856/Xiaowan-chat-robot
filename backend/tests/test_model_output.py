@@ -68,15 +68,12 @@ class ModelOutputTests(unittest.TestCase):
     def test_reply_generation_logs_stage_when_json_is_incomplete(self):
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, _ = self.generate('结果：{"reply":["私密回复"')
-        from app.config import configer
-        self.assertEqual(result['ai_response'], configer.GENERATE_DEFAULT_RESULT['reply'])
+        self.assertEqual(result['ai_response'], [nodes.DEFAULT_REPLY])
         self.assertIn('回复生成', logs.output[0])
         self.assertNotIn('私密回复', logs.output[0])
 
     def test_reply_generation_drops_unclosed_reasoning(self):
-        from app.config import configer
-
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, _ = self.generate('<think>未结束的推理')
-        self.assertEqual(result['ai_response'], configer.GENERATE_DEFAULT_RESULT['reply'])
+        self.assertEqual(result['ai_response'], [nodes.DEFAULT_REPLY])
         self.assertNotIn('未结束的推理', logs.output[0])

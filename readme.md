@@ -37,10 +37,11 @@
 │   ├── public/                     # 头像、网站图标等静态资源
 │   ├── tests/                      # 前端测试
 │   └── vite.config.mts             # Vite 构建和开发代理配置
-└── requirements.txt                # Python 依赖
+├── deploy/                        # 更新脚本与 systemd 服务模板
+└── requirements.txt               # Python 依赖
 ```
 
-实际运行配置 `backend/.env`、`backend/system_config.json`，账号目录 `backend/user_data/`，以及生成的日志 `backend/log_config/` 和前端产物 `frontend/dist/` 由各环境自行维护。部署手册 `docs/DEPLOY.md`、配置说明 `docs/CONFIG.md` 和 `deploy/` 下的部署脚本也在本地工作区维护。
+实际运行配置 `backend/.env`、`backend/system_config.json`，账号目录 `backend/user_data/`，以及生成的日志 `backend/log_config/` 和前端产物 `frontend/dist/` 由各环境自行维护。部署手册 `docs/DEPLOY.md` 和配置说明 `docs/CONFIG.md` 在本地工作区维护。
 
 ## 环境要求
 
@@ -86,6 +87,8 @@ npm --prefix frontend run build
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 
 侧边栏中的聊天回顾搜索当前页面已显示的对话，并支持点击定位原消息；不另外保存聊天记录，沿用原有启动清理和摘要压缩规则。
+
+`POST /history` 的 `num` 接受 `-10000` 到 `10000` 的整数或 `null`。`front: true` 的基础顺序是最早到最新，`front: false` 则相反。正数按基础顺序读取，负数反向读取 `abs(num)` 条。例如 `{"num": -3, "front": true}` 从最新一轮开始读取三条。`0` 或 `null` 取最新的至多 10000 条，再按 `front` 指定的顺序返回。
 
 检查命令：`python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck`、`npm --prefix frontend run build`。测试不调用真实模型或业务数据库。
 

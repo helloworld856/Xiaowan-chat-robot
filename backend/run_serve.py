@@ -1,9 +1,8 @@
 import logging
-from pathlib import Path
 
 import uvicorn
 
-from app.config import configer
+from app import config as app_config
 from app.account_logging import configure_logging, logger, reset_active_logs
 from app.accounts.files import UserDataPaths
 from app.system_config import load_system_config
@@ -23,7 +22,7 @@ def main():
     configure_logging(config.logging)
     # 启用清理时，在 Uvicorn 写出启动消息之前处理上次运行的日志。
     if config.logging.clear_on_startup:
-        reset_active_logs(Path(configer.log_save_path), UserDataPaths())
+        reset_active_logs(app_config.SYSTEM_LOG_PATH, UserDataPaths())
     logging.basicConfig(handlers=logger.handlers, level=logging.WARNING, force=True)
     logging.captureWarnings(True)
     logging.getLogger('uvicorn').setLevel(logging.INFO)

@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from app.config import configer
+from app import config
 from app.accounts.files import UserDataPaths, protect_file, require_directory, require_file
 from app.system_config import LoggingConfig
 
@@ -159,7 +159,7 @@ def get_logger():
     logger.propagate = False
     formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    log_path = Path(configer.log_save_path)
+    log_path = config.SYSTEM_LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handler = AccountFileHandler(log_path)
     handler.setFormatter(formatter)
