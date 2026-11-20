@@ -80,7 +80,7 @@ class FakeAgent:
     def __init__(self, handler):
         self.handler = handler
 
-    def invoke(self, request):
+    def invoke(self, request, config=None):
         text = self.handler(request['messages'][0]['content'])
         return {'messages': [SimpleNamespace(content=text)]}
 

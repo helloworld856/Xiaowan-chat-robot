@@ -182,7 +182,8 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 
         _, _, reply_agent = agents
         response = reply_agent.invoke(
-            {"messages": [{"role": "user", "content": user_prompt}]}
+            {"messages": [{"role": "user", "content": user_prompt}]},
+            config={"recursion_limit": 6}
         )
         last_message = get_last_message(response)
         text = model_text(last_message.content)

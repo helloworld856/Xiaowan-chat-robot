@@ -9,6 +9,7 @@ from app.llm.model_catalog import ModelAdapter
 from app.llm.persona import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
 from app.llm.public_endpoint import public_http_clients
 from app.account_logging import logger
+from tools_config.registry import CHAT_TOOLS
 
 CHAT_MODEL_TIMEOUT_SECONDS = 45
 
@@ -60,18 +61,25 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_ur
         logger.info('初始化模型代理')
         # 分析和摘要使用较低温度，角色回复留更多表达空间。
         agent_options = (
-            (ANALYSIS_PERSONA, 0.1),
-            (TEXT_COMPRESS_PERSONA, 0.1),
-            (persona.FRIEND_PERSONA, 1.5),
+            (ANALYSIS_PERSONA, 0.1, []),
+            (TEXT_COMPRESS_PERSONA, 0.1, []),
+            (persona.FRIEND_PERSONA, 0.8, CHAT_TOOLS),
         )
         agents = tuple(
             create_agent(
-                model=create_model(model_merchant, api_key, model_name, temperature, base_url=base_url,
-                                   validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS, adapter=adapter,
-                                   public_only=public_only),
+                model=create_model(
+                    model_merchant,
+                    api_key,
+                    model_name,
+                    temperature,
+                    base_url=base_url,
+                    validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS, adapter=adapter,
+                    public_only=public_only
+                ),
+                tools=tools,
                 system_prompt=system_prompt,
             )
-            for system_prompt, temperature in agent_options
+            for system_prompt, temperature, tools in agent_options
         )
 
         logger.info('模型代理初始化成功')
