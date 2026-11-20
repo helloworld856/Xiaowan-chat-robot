@@ -5,10 +5,42 @@
 ## 主要功能
 
 - 根据用户意图和情绪生成角色化回复
-- 通过管理员账号配置 DeepSeek 或通义模型
+- 管理员和普通账号可分别配置自己的 DeepSeek 或通义模型
 - 保存对话、加载本次运行的历史并自动生成历史摘要
-- 支持三套前端主题，人设通过 `backend/persona_config/persona.json` 修改
+- 支持默认白和三套彩色主题，人设通过 `backend/persona_config/persona.json` 修改
 - 加载失败或超时会显示提示；对话保存失败时仍显示回复并告知未保存
+
+## 项目结构
+
+```text
+小晚/
+├── backend/
+│   ├── run_serve.py                # 后端启动入口
+│   ├── app/
+│   │   ├── main.py                 # 创建应用并托管前端构建产物
+│   │   ├── application.py          # 装配路由、账号服务和启动流程
+│   │   ├── system_config.py         # 全局配置校验和迁移
+│   │   ├── api/                    # HTTP 路由与认证中间件
+│   │   ├── accounts/               # 账号、会话、个人资料与偏好
+│   │   ├── chat/                   # 聊天调度、LangGraph 工作流和历史摘要
+│   │   ├── database/               # MySQL 连接池和表结构初始化
+│   │   └── llm/                    # 厂商目录、模型配置、连接验证和模型客户端
+│   ├── persona_config/             # 小晚的人设配置
+│   ├── utils/deepseek_tokenizer/    # 本地 Token 计数资源
+│   ├── tests/                      # 后端测试
+│   ├── .env.example                # 运行环境变量模板
+│   └── system_config.example.json  # 全局配置模板
+├── frontend/
+│   ├── index.html                  # 前端页面入口
+│   ├── src/ts/                     # TypeScript 逻辑，入口为 main.ts
+│   ├── src/styles/                 # 页面样式和主题
+│   ├── public/                     # 头像、网站图标等静态资源
+│   ├── tests/                      # 前端测试
+│   └── vite.config.mts             # Vite 构建和开发代理配置
+└── requirements.txt                # Python 依赖
+```
+
+实际运行配置 `backend/.env`、`backend/system_config.json`，账号目录 `backend/user_data/`，以及生成的日志 `backend/log_config/` 和前端产物 `frontend/dist/` 由各环境自行维护。部署手册 `docs/DEPLOY.md`、配置说明 `docs/CONFIG.md` 和 `deploy/` 下的部署脚本也在本地工作区维护。
 
 ## 环境要求
 
@@ -69,7 +101,7 @@ npm --prefix frontend run build
 
 菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`。
 
-终端显示 Uvicorn 的启动进度和监听地址。已认证账号的运行日志只写入各自目录中的 `logs/app.log`，记录请求结果、回复条数、Token 和耗时。启动、匿名请求等系统日志写入 `backend/log_config/app.log`。运行 `run_serve.py` 启动时会清空系统和账号的当前日志。每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
+终端显示 Uvicorn 的启动进度和监听地址。已认证账号的运行日志写入各自目录中的 `logs/app.log`，记录请求结果、回复条数、Token 和耗时。启动、匿名请求等系统日志写入 `backend/log_config/app.log`。默认每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
 
 聊天、历史、人设、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
 
@@ -99,7 +131,7 @@ python run_serve.py
 
 然后访问 `http://127.0.0.1:8000`。首次打开后，在页面设置中选择模型。
 
-> 当前设计会在每次启动后端时清空历史对话和历史摘要。
+> 默认启动时清空历史对话、摘要和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup` 和 `logging.clear_on_startup`。
 
 后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`system_config.json` 的 `chat.concurrency`、`chat.queue_size` 和 `chat.queue_timeout` 控制最多同时执行数、等待名额和排队秒数，默认分别为 4、8、2。排队失败时可以从原消息重试。
 
