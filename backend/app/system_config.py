@@ -34,7 +34,7 @@ class DatabaseConfig(_ConfigSection):
 
 class ServerConfig(_ConfigSection):
     host: str = Field(default='127.0.0.1', min_length=1, description='后端监听地址。使用本机反向代理时通常填 127.0.0.1。')
-    port: int = Field(default=8000, ge=1, le=65535, description='后端监听端口。修改后同步调整反向代理和健康检查。')
+    port: int = Field(default=8000, ge=1, le=65535, description='后端监听端口。修改后同步调整反向代理。')
 
 
 class ChatConfig(_ConfigSection):

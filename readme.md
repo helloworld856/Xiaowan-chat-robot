@@ -20,6 +20,7 @@
 │   │   ├── main.py                 # 创建应用并托管前端构建产物
 │   │   ├── application.py          # 装配路由、账号服务和启动流程
 │   │   ├── system_config.py         # 全局配置校验和迁移
+│   │   ├── static_assets.py         # 前端静态资源缓存策略
 │   │   ├── api/                    # HTTP 路由与认证中间件
 │   │   ├── accounts/               # 账号、会话、个人资料与偏好
 │   │   ├── chat/                   # 聊天调度、LangGraph 工作流和历史摘要
@@ -38,7 +39,8 @@
 │   ├── tests/                      # 前端测试
 │   └── vite.config.mts             # Vite 构建和开发代理配置
 ├── deploy/                        # 更新脚本与 systemd 服务模板
-└── requirements.txt               # Python 依赖
+├── requirements.in                # Python 直接依赖
+└── requirements.txt               # Python 依赖锁，供本地、CI 和部署安装
 ```
 
 实际运行配置 `backend/.env`、`backend/system_config.json`，账号目录 `backend/user_data/`，以及生成的日志 `backend/log_config/` 和前端产物 `frontend/dist/` 由各环境自行维护。部署手册 `docs/DEPLOY.md` 和配置说明 `docs/CONFIG.md` 在本地工作区维护。
@@ -59,6 +61,8 @@ python -m pip install -r requirements.txt
 npm --prefix frontend ci
 npm --prefix frontend run build
 ```
+
+修改 Python 依赖时，编辑 `requirements.in`，再运行 `uv pip compile --universal --python-version 3.10 --no-annotate requirements.in -o requirements.txt` 生成锁文件。升级整个锁文件时加 `--upgrade`。部署根据 `requirements.txt` 的变化重新安装依赖。
 
 首次运行需要构建一次：后端启动时会检查 `frontend/dist`，即使使用Vite开发也需要该目录。构建产物不随仓库提交。
 
@@ -88,9 +92,11 @@ npm --prefix frontend run build
 
 侧边栏中的聊天回顾搜索当前页面已显示的对话，并支持点击定位原消息；不另外保存聊天记录，沿用原有启动清理和摘要压缩规则。
 
-`POST /history` 的 `num` 接受 `-10000` 到 `10000` 的整数或 `null`。`front: true` 的基础顺序是最早到最新，`front: false` 则相反。正数按基础顺序读取，负数反向读取 `abs(num)` 条。例如 `{"num": -3, "front": true}` 从最新一轮开始读取三条。`0` 或 `null` 取最新的至多 10000 条，再按 `front` 指定的顺序返回。
+`POST /history` 的 `num` 接受 `-10000` 到 `10000` 的整数或 `null`。`front: true` 的基础顺序是最早到最新，`front: false` 则相反。正数按基础顺序读取，负数反向读取 `abs(num)` 条。例如 `{"num": -3, "front": true}` 从最新一轮开始读取三条。`0` 或 `null` 取最新的至多 10000 条，再按 `front` 指定的顺序返回。响应中的 `num` 原样回显请求参数，实际返回条数以 `history_messages` 数组长度为准。
 
-检查命令：`python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck`、`npm --prefix frontend run build`。测试不调用真实模型或业务数据库。
+聊天时模型最多使用每账号最近 256 轮原文和更早的摘要。超过 `chat.history_compression_tokens` 或仍有更早原文时，系统从数据库按轮次读取最早的记录，每次最多压缩 32 轮。摘要与对应原文的删除在同一事务内提交。
+
+检查命令为 `python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck` 和 `npm --prefix frontend run build`。CI 使用独立的 MySQL 8.4 容器运行数据库集成测试。本地运行数据库用例时，将 `XIAOWAN_TEST_MYSQL_PORT` 和 `XIAOWAN_TEST_MYSQL_PASSWORD` 指向 `127.0.0.1` 上的独立测试实例及其 `root` 密码。未配置端口时本地跳过这组用例。
 
 ## 账户和启动
 

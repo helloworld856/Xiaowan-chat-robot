@@ -16,12 +16,21 @@ def get_weather(city: str) -> str:
             timeout=8,
         )
         geo.raise_for_status()
-        places = geo.json().get("results") or []
+        locations = geo.json()
+        if not isinstance(locations, dict) or locations.get('error'):
+            raise ValueError('地理编码响应无效')
+        places = locations.get('results', [])
+        if not isinstance(places, list):
+            raise ValueError('地理编码结果无效')
 
         if not places:
             return f"找不到城市：{city}"
 
         place = places[0]
+        if not isinstance(place, dict):
+            raise ValueError('城市记录无效')
+        country = place.get('country')
+        country_suffix = f'，{country.strip()}' if isinstance(country, str) and country.strip() else ''
 
         weather = requests.get(
             "https://api.open-meteo.com/v1/forecast",
@@ -38,7 +47,7 @@ def get_weather(city: str) -> str:
 
         logger.info("天气查询成功!")
         return (
-            f"地点：{place['name']}，{place.get('country', '')}；"
+            f"地点：{place['name']}{country_suffix}；"
             f"数据时间：{current['time']}；"
             f"气温：{current['temperature_2m']}°C；"
             f"相对湿度：{current['relative_humidity_2m']}%"

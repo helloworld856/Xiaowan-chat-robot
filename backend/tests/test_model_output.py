@@ -43,7 +43,8 @@ class ModelOutputTests(unittest.TestCase):
         state = create_initial_state()
         state['user_input'] = '测试消息'
         state['total_tokens'] = 23
-        memory = SimpleNamespace(history_cache=[], abstract_cache='', next_round=1, refresh_if_needed=lambda: None)
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=1,
+                                 refresh_if_needed=lambda: None)
         agent = Mock()
         agent.invoke.return_value = {'messages': [SimpleNamespace(content=content, usage_metadata={'total_tokens': 7})]}
 

@@ -60,7 +60,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
         t = count_tokens(history_text) if history_text else 0
         t += 4 * o  # 估算每轮历史记录的字段开销。
 
-        if t > compression_tokens:
+        if memorier.has_older_history or t > compression_tokens:
             # 生成历史对话摘要
             _, summary_agent, _ = agents
             memorier.compress_history(summary_agent)
@@ -153,11 +153,11 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         user_input = state.get('user_input', '')
 
         if memorier.abstract_cache:
-            user_prompt = f"""【历史对话（用户对应'user'）和{persona.BOT_NAME}对应'assistant'）】{memorier.history_cache}
+            user_prompt = f"""【历史对话（用户对应 'user'，{persona.BOT_NAME} 对应 'assistant'）】{memorier.history_cache}
 【更早的历史对话摘要】{memorier.abstract_cache}
 ---以上是之前的历史对话及更早的历史对话摘要，请保持连贯性---"""
         else:
-            user_prompt = f"""【历史对话（用户对应'user'）和{persona.BOT_NAME}对应'assistant'）】{memorier.history_cache}
+            user_prompt = f"""【历史对话（用户对应 'user'，{persona.BOT_NAME} 对应 'assistant'）】{memorier.history_cache}
 ---以上是之前的历史对话，请保持连贯性---
 """
         # 构建提示词

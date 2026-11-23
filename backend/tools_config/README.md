@@ -11,7 +11,7 @@
 | `type` | 声明外层工具的类型。这里使用 `function`，表示通过函数名和参数调用。 | `"function"` |
 | `function` | 函数定义对象，包含工具名、用途和参数规格。 | 下方的 `get_weather` 定义 |
 | `function.name` | 模型调用时使用的工具名。在同一个代理的工具列表中应唯一。 | `get_weather` |
-| `function.description` | 告诉模型工具做什么、在什么场景使用，以及结果的范围。 | 查询指定城市当前的气温和相对湿度 |
+| `function.description` | 告诉模型工具做什么、在什么场景使用，以及结果的范围。 | 用户询问指定城市的当前天气时，查询气温和相对湿度 |
 | `function.parameters` | 描述整组输入参数的 JSON Schema。 | 天气工具的输入规格 |
 | `parameters.type` | 指定整组参数的数据类型。`object` 表示按参数名传值。 | `{"city": "杭州"}` |
 | `parameters.properties` | 列出工具接受的参数。键名应与 Python 函数的参数名一致。 | `city`、`timezone` |
@@ -29,7 +29,7 @@
   "type": "function",
   "function": {
     "name": "get_weather",
-    "description": "查询指定城市当前的气温和相对湿度。",
+    "description": "用户询问指定城市的当前天气时，查询气温和相对湿度。仅支持当前天气，询问天气预报或历史天气时说明无法提供。",
     "parameters": {
       "type": "object",
       "properties": {

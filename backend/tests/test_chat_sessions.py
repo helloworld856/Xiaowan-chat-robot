@@ -196,9 +196,11 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         from app.api.chat import router
         from app.system_config import SystemConfig
 
+        calls = []
+
         async def send(user, text):
             self.assertEqual(user.id, 42)
-            self.assertIn(text, (' 😀晚 ', '晚'))
+            calls.append(text)
             return {'ai_response': ['回复'], 'message': {'conversation_round': 1}, 'saved': text != '晚'}
 
         app = FastAPI()
@@ -222,3 +224,4 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.json()['conversation_round'], 1)
             response = await client.post('/chat', json={'user_input': '晚'})
             self.assertEqual(response.json(), {'response': ['回复'], 'conversation_round': None, 'saved': False})
+        self.assertEqual(calls, [' 😀晚 ', '晚'])

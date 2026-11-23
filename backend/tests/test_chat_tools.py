@@ -56,3 +56,23 @@ class ChatToolTests(unittest.TestCase):
         self.assertIn('地点：杭州', result)
         self.assertIn('气温：18°C', result)
         self.assertEqual(request.call_args_list[0].kwargs['params']['name'], '杭州')
+
+    def test_weather_distinguishes_malformed_responses_and_missing_cities(self):
+        for payload, expected in (([], '天气服务暂时不可用，请稍后再试。'),
+                                  ({'results': None}, '天气服务暂时不可用，请稍后再试。'),
+                                  ({}, '找不到城市：杭州')):
+            with self.subTest(payload=payload), patch('tools_config.weather_tool.weather.requests.get') as request:
+                request.return_value.json.return_value = payload
+                self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州'}), expected)
+                request.assert_called_once()
+
+    def test_weather_omits_empty_country(self):
+        location = Mock(json=Mock(return_value={'results': [
+            {'name': '杭州', 'country': None, 'latitude': 30.2, 'longitude': 120.1},
+        ]}))
+        conditions = Mock(json=Mock(return_value={'current': {
+            'time': '2026-11-20T12:00', 'temperature_2m': 18, 'relative_humidity_2m': 60,
+        }}))
+        with patch('tools_config.weather_tool.weather.requests.get', side_effect=[location, conditions]):
+            result = self.tools['get_weather'].invoke({'city': '杭州'})
+        self.assertTrue(result.startswith('地点：杭州；'))

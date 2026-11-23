@@ -10,6 +10,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/xiaowan
 ExecStart="@XIAOWAN_PYTHON@" /home/ubuntu/xiaowan/backend/run_serve.py
+NoNewPrivileges=true
 Restart=on-failure
 RestartSec=5s
 

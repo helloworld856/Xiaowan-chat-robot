@@ -1,6 +1,13 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, codex/backend-updates]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -8,6 +15,18 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: xiaowan-ci-only
+        ports:
+          - 3306/tcp
+        options: >-
+          --health-cmd="mysql --protocol=tcp -h 127.0.0.1 -uroot -pxiaowan-ci-only -e 'SELECT 1'"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -16,7 +35,12 @@ jobs:
         with:
           python-version: '3.10'
       - run: python -m pip install -r requirements.txt
-      - run: python -m unittest discover -s backend/tests -v
+      - run: |
+          test -n "$XIAOWAN_TEST_MYSQL_PORT"
+          python -m unittest discover -s backend/tests -v
+        env:
+          XIAOWAN_TEST_MYSQL_PORT: ${{ job.services.mysql.ports['3306'] }}
+          XIAOWAN_TEST_MYSQL_PASSWORD: xiaowan-ci-only
       - run: bash -n deploy/xiaowan-update
 
   frontend:

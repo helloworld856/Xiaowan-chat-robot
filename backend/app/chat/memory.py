@@ -3,6 +3,10 @@ import json
 from app.account_logging import logger
 
 
+HISTORY_CACHE_LIMIT = 256
+HISTORY_COMPRESSION_BATCH_SIZE = 32
+
+
 def load_history(connection, user_id: int, k: int, front: bool = True):
     """Read committed history for one authenticated account."""
     with connection() as db, db.cursor() as cursor:
@@ -36,14 +40,20 @@ class MemoryManager:
         self._stale = True
         self.refresh_if_needed()
 
+    def _read_recent_history(self, cursor):
+        newest_first = _read_history(cursor, self.user_id, HISTORY_CACHE_LIMIT + 1, front=False)
+        has_older_history = len(newest_first) > HISTORY_CACHE_LIMIT
+        return list(reversed(newest_first[:HISTORY_CACHE_LIMIT])), has_older_history
+
     def refresh_if_needed(self):
         if not self._stale:
             return
         with self._connection() as db, db.cursor() as cursor:
-            history = _read_history(cursor, self.user_id, 0)
+            history, has_older_history = self._read_recent_history(cursor)
             cursor.execute('SELECT abstract FROM abstract_messages WHERE user_id = %s', (self.user_id,))
             row = cursor.fetchone()
         self.history_cache = history
+        self.has_older_history = has_older_history
         self.abstract_cache = row[0] if row else ''
         self._stale = False
 
@@ -76,26 +86,37 @@ class MemoryManager:
 
         # 只把提交成功的轮次放进记忆，模型不会参考已知保存失败的消息。
         self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
+        if len(self.history_cache) > HISTORY_CACHE_LIMIT:
+            del self.history_cache[0]
+            self.has_older_history = True
         return True
 
     def compress_history(self, summary_agent):
         from app.llm.persona import persona
         from app.llm.output_parser import model_text
 
-        # 摘要压缩最早的一半对话，最近的轮次保持原文。
-        count = len(self.history_cache) // 2
+        # 从数据库读取最早的记录，缓存之外的旧对话也会被摘要。
+        count = min(len(self.history_cache) // 2, HISTORY_COMPRESSION_BATCH_SIZE)
         if count == 0:
             return
-        older = self.history_cache[:count]
-        prompt = f"""请你对用户（对应user）和{persona.BOT_NAME}（对应assistant）的历史对话及更早的历史对话摘要进行缩减，保留重点，返回精确的重点摘要。
+        try:
+            with self._connection() as db, db.cursor() as cursor:
+                older = _read_history(cursor, self.user_id, count)
+            if len(older) != count:
+                self._stale = True
+                return
+
+            prompt = f"""请你对用户（对应user）和{persona.BOT_NAME}（对应assistant）的历史对话及更早的历史对话摘要进行缩减，保留重点，返回精确的重点摘要。
 历史对话：{older}。
 更早的历史对话摘要：{self.abstract_cache}。"""
-        try:
             result = summary_agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})
             messages = result.get('messages', [])
             summary = model_text(messages[-1].content) if messages else ''
             if not summary.strip():
                 raise ValueError('模型返回的摘要为空')
+            cutoff = older[-1]['conversation_round']
+            history = [row for row in self.history_cache if row['conversation_round'] > cutoff]
+            has_older_history = self.has_older_history
             with self._connection() as db:
                 with db.cursor() as cursor:
                     cursor.execute(
@@ -106,14 +127,18 @@ class MemoryManager:
                     # 摘要写入与旧原文删除同事务提交，受影响范围始终绑定当前账号。
                     removed = cursor.execute(
                         'DELETE FROM history_messages WHERE user_id = %s AND conversation_round <= %s',
-                        (self.user_id, older[-1]['conversation_round']),
+                        (self.user_id, cutoff),
                     )
                     if removed != count:
+                        self._stale = True
                         raise ValueError('历史对话在压缩时发生变化')
+                    if has_older_history:
+                        history, has_older_history = self._read_recent_history(cursor)
                 self._commit(db)
         except Exception as error:
             logger.warning('history compression failed: %s', type(error).__name__)
             return
 
         self.abstract_cache = summary
-        del self.history_cache[:count]
+        self.history_cache = history
+        self.has_older_history = has_older_history

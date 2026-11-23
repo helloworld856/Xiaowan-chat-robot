@@ -15,9 +15,10 @@ class HistoryRequest(BaseModel):
     )
     front: bool = Field(description='为 true 时基础顺序是从最早到最新，否则从最新到最早。')
 
+
 class HistoryResponse(BaseModel):
-    num: int | None
-    history_messages: list[dict | None]
+    num: int | None = Field(description='原样回显请求的 num，实际返回条数为 history_messages 的长度。')
+    history_messages: list[dict]
 
 
 router = APIRouter()

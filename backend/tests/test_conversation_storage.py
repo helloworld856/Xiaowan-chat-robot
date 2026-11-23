@@ -143,7 +143,51 @@ class MemoryIsolationTests(unittest.TestCase):
                       patch('app.api.history.load_history', return_value=[message(1, '新'), message(0, '旧')]) as load):
                     reply = history(HistoryRequest(num=count, front=front), request)
                     load.assert_called_once_with(connection, 1, 10000, False)
+                    self.assertEqual(reply.num, count)
                     self.assertEqual([row['conversation_round'] for row in reply.history_messages], expected)
+
+    def test_bounded_cache_compresses_oldest_database_rows_and_recovers_after_commit(self):
+        with (
+            patch('app.chat.memory.HISTORY_CACHE_LIMIT', 4),
+            patch('app.chat.memory.HISTORY_COMPRESSION_BATCH_SIZE', 2),
+        ):
+            account = MemoryManager(1, self.pool.connection)
+            other = MemoryManager(2, self.pool.connection)
+            self.assertTrue(other.record_message(message(0, 'another account')))
+            for round_id in range(7):
+                self.assertTrue(account.record_message(message(round_id, f'private-{round_id}')))
+            self.assertEqual([row['conversation_round'] for row in account.history_cache], [3, 4, 5, 6])
+            self.assertTrue(account.has_older_history)
+
+            restored = MemoryManager(1, self.pool.connection)
+            self.assertEqual(restored.history_cache, account.history_cache)
+            prompts = []
+
+            def summarize(prompt):
+                prompts.append(prompt)
+                return f'summary-{len(prompts)}'
+
+            agent = FakeAgent(summarize)
+            self.pool.lose_commit_ack = True
+            restored.compress_history(agent)
+            restored.refresh_if_needed()
+            self.assertEqual(restored.abstract_cache, 'summary-1')
+            self.assertTrue(restored.has_older_history)
+            restored.compress_history(agent)
+
+            self.assertIn('private-0', prompts[0])
+            self.assertIn('private-1', prompts[0])
+            self.assertNotIn('private-2', prompts[0])
+            self.assertNotIn('another account', prompts[0])
+            self.assertIn('summary-1', prompts[1])
+            self.assertIn('private-2', prompts[1])
+            self.assertIn('private-3', prompts[1])
+            self.assertNotIn('private-4', prompts[1])
+            self.assertFalse(restored.has_older_history)
+            self.assertEqual(restored.next_round, 7)
+            self.assertEqual([row['conversation_round'] for row in restored.history_cache], [4, 5, 6])
+            self.assertEqual(load_history(self.pool.connection, 1, 0), restored.history_cache)
+            self.assertEqual(load_history(self.pool.connection, 2, 0), [message(0, 'another account')])
 
     def test_summary_and_history_changes_are_atomic_and_scoped(self):
         account_a = MemoryManager(1, self.pool.connection)

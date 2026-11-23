@@ -12,19 +12,20 @@ fail() {
 }
 
 wait_for_app() {
-    local attempt response
+    local attempt response health_url
+    health_url=$("$python" backend/run_serve.py --health-url) || fail '无法读取后端健康检查地址，请检查服务配置和 Python 环境。'
     # 会话响应可以增加字段，只检查 HTTP 200 和匿名用户状态。
     for ((attempt = 1; attempt <= 20; attempt++)); do
         if systemctl is-active --quiet "$service" &&
-            response=$(curl -fsS --max-time 2 --write-out '%{http_code}' \
-                http://127.0.0.1:8000/auth/session 2>/dev/null) &&
+            response=$(curl -fsS --max-time 2 --globoff --noproxy '*' --write-out '%{http_code}' \
+                -- "$health_url" 2>/dev/null) &&
             [[ ${response: -3} == 200 ]] &&
-            python3 -c 'import json, sys; data = json.load(sys.stdin); sys.exit(not (isinstance(data, dict) and data.get("user", False) is None))' <<< "${response::-3}" 2>/dev/null; then
+            "$python" -c 'import json, sys; data = json.load(sys.stdin); sys.exit(not (isinstance(data, dict) and data.get("user", False) is None))' <<< "${response::-3}" 2>/dev/null; then
             return 0
         fi
         sleep 1
     done
-    fail "健康检查未通过。请查看 sudo journalctl -u $service -n 80 --no-pager，修复后再运行更新。"
+    fail "健康检查未通过（$health_url）。请查看 sudo journalctl -u $service -n 80 --no-pager，修复后再运行更新。"
 }
 
 record_deployment() {
@@ -45,6 +46,9 @@ flock -n 9 || fail '已有一个小晚更新正在运行。'
 
 [[ $(git branch --show-current) == "$branch" ]] || fail "请在服务器检出部署分支 $branch。"
 current=$(git rev-parse --verify HEAD)
+[[ -s $python_file ]] || fail '找不到服务使用的 Conda Python 路径，请检查 ~/.config/xiaowan/python-path。'
+IFS= read -r python < "$python_file"
+[[ $python == /* && -x $python ]] || fail '配置的 Conda Python 路径无效。'
 
 # 这些跟踪文件可能含服务器自己的设置。仅在远程也修改该文件时阻止更新。
 server_config=(backend/settings.json backend/persona_config/persona.json
@@ -97,19 +101,20 @@ fi
 if [[ -e $state_dir/pending-python-deps ]] || ! git diff --quiet "$deployed" "$target" -- requirements.txt; then
     install_python_deps=true
     restart_backend=true
-    [[ -s $python_file ]] || fail '找不到服务使用的 Conda Python 路径，请检查 ~/.config/xiaowan/python-path。'
-    IFS= read -r python < "$python_file"
-    [[ $python == /* && -x $python ]] || fail '配置的 Conda Python 路径无效。'
 fi
-
-git merge --ff-only "$target"
 
 work_dir=''
 restore_dist=false
 had_dist=false
+backend_restart='未尝试'
 cleanup() {
     local status=$?
     trap - EXIT
+    if (( status != 0 )); then
+        printf '更新失败。当前 Git HEAD：%s；上次通过健康检查：%s。\n' \
+            "$(git rev-parse --verify HEAD || printf '未知')" "$deployed" >&2
+        printf '本次后端重启：%s。脚本不会回退后端代码、Python 依赖或数据库。\n' "$backend_restart" >&2
+    fi
     if [[ -n $work_dir ]]; then
         if $restore_dist; then
             # 发布或健康检查失败时，放回上次在提供服务的前端目录。
@@ -130,6 +135,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+git merge --ff-only "$target"
 
 if $build_frontend; then
     if [[ ! -x frontend/node_modules/.bin/vite || -e $state_dir/pending-npm-ci ]] ||
@@ -162,7 +169,9 @@ fi
 
 if $restart_backend; then
     touch -- "$state_dir/pending-restart"
+    backend_restart='已尝试'
     sudo systemctl restart "$service"
+    backend_restart='重启命令已成功返回'
 fi
 
 wait_for_app

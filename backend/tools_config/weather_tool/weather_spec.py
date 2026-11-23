@@ -4,7 +4,7 @@ WEATHER_SPEC = {
     "type": "function",
     "function": {
         "name": "get_weather",
-        "description": "查询指定城市当前的气温和相对湿度。",
+        "description": "用户询问指定城市的当前天气时，查询气温和相对湿度。仅支持当前天气，询问天气预报或历史天气时说明无法提供。",
         "parameters": {
             "type": "object",
             "properties": {

@@ -1,4 +1,5 @@
 import logging
+import sys
 
 import uvicorn
 
@@ -15,6 +16,14 @@ STARTUP_MESSAGES = (
     'Application startup failed.',
     'Uvicorn running on ',
 )
+
+
+def health_check_url() -> str:
+    server = load_system_config().server
+    host = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(server.host, server.host)
+    if ':' in host:
+        host = f'[{host}]'
+    return f'http://{host}:{server.port}/auth/session'
 
 
 def main():
@@ -34,4 +43,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if sys.argv[1:] == ['--health-url']:
+        print(health_check_url())
+    else:
+        main()

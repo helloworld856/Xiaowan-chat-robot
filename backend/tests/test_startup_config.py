@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -20,6 +20,22 @@ class StartupConfigTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
+
+    def test_health_url_uses_server_config_without_migrating_it(self):
+        from app import system_config
+
+        config_file = self.root / 'system_config.json'
+        for host, expected_host in (('127.0.0.1', '127.0.0.1'), ('0.0.0.0', '127.0.0.1'), ('::', '[::1]')):
+            original = json.dumps({'server': {'host': host, 'port': 8765}})
+            config_file.write_text(original, encoding='utf-8')
+            output = io.StringIO()
+            with (
+                self.subTest(host=host), patch.object(system_config, 'BACKEND_ROOT', self.root),
+                patch.object(sys, 'argv', ['run_serve.py', '--health-url']), redirect_stdout(output),
+            ):
+                runpy.run_path(str(ROOT / 'run_serve.py'), run_name='__main__')
+                self.assertEqual(output.getvalue().strip(), f'http://{expected_host}:8765/auth/session')
+                self.assertEqual(config_file.read_text(encoding='utf-8'), original)
 
     def test_system_log_is_created_on_a_clean_checkout(self):
         from app.account_logging import get_logger

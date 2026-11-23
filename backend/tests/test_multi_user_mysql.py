@@ -34,6 +34,47 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(pool.close)
         return pool, database, db_options
 
+    def test_compression_summarizes_oldest_rows_outside_the_cache(self):
+        from app.chat.memory import MemoryManager, load_history
+        from app.database.mysql import initialize_schema
+
+        pool, _, _ = self.make_database()
+        initialize_schema(pool)
+        prompts = []
+
+        def summarize(request):
+            prompts.append(request['messages'][0]['content'])
+            return {'messages': [SimpleNamespace(content='最早两轮的摘要')]}
+
+        with (
+            patch('app.chat.memory.HISTORY_CACHE_LIMIT', 4),
+            patch('app.chat.memory.HISTORY_COMPRESSION_BATCH_SIZE', 2),
+        ):
+            account = MemoryManager(1, pool.connection)
+            other = MemoryManager(2, pool.connection)
+            for round_id in range(6):
+                self.assertTrue(account.record_message({
+                    'conversation_round': round_id, 'user': f'private-{round_id}', 'assistant': ['回复'],
+                }))
+            self.assertTrue(other.record_message({
+                'conversation_round': 0, 'user': 'another account', 'assistant': ['回复'],
+            }))
+
+            account = MemoryManager(1, pool.connection)
+            self.assertTrue(account.has_older_history)
+            self.assertEqual([row['conversation_round'] for row in account.history_cache], [2, 3, 4, 5])
+            account.compress_history(SimpleNamespace(invoke=summarize))
+
+            self.assertIn('private-0', prompts[0])
+            self.assertIn('private-1', prompts[0])
+            self.assertNotIn('private-2', prompts[0])
+            self.assertNotIn('another account', prompts[0])
+            self.assertFalse(account.has_older_history)
+            self.assertEqual(account.next_round, 6)
+            self.assertEqual(MemoryManager(1, pool.connection).abstract_cache, '最早两轮的摘要')
+            self.assertEqual(load_history(pool.connection, 1, 0), account.history_cache)
+            self.assertEqual(load_history(pool.connection, 2, 0), other.history_cache)
+
     async def test_corrupt_legacy_profile_does_not_prevent_startup(self):
         import httpx
 
@@ -150,7 +191,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(key, (admin_key, personal_key))
                 self.assertEqual(adapter, 'openai')
                 return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
-                        SimpleNamespace(invoke=lambda payload: reply(payload, name)))
+                        SimpleNamespace(invoke=lambda payload, *, config: reply(payload, name)))
 
             with patch.object(main, 'settings_store', model_settings), \
                     patch.dict(os.environ, {'DEEPSEEK_API_KEY': admin_key}), \
