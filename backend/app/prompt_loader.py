@@ -1,20 +1,19 @@
-"""通用的prompt文件加载器"""
+"""读取并渲染聊天提示词模板。"""
+
 from string import Template
-from app.config import PROMPTS_PATH
+
 from app.account_logging import logger
+from app.config import PROMPTS_PATH
 
 
 def load_prompt(name: str, **kwargs) -> str:
-    logger.info(f'加载提示词文件{name}...')
+    path = PROMPTS_PATH / f'{name}.txt'
     try:
-        path = PROMPTS_PATH / f"{name}.txt"
+        template = Template(path.read_text(encoding='utf-8'))
+        prompt = template.substitute(**kwargs)
+    except (OSError, KeyError, ValueError) as error:
+        logger.error('提示词文件 %s 加载失败（%s）', name, type(error).__name__)
+        raise
 
-        template = Template(
-            path.read_text(encoding="utf-8")
-        )
-
-        logger.info(f"提示词文件{name}加载成功!!!")
-        return template.substitute(**kwargs)
-
-    except Exception as e:
-        logger.error(f'提示词文件{name}加载失败：{e}')
+    logger.info('提示词文件 %s 加载成功', name)
+    return prompt
