@@ -37,7 +37,7 @@ class ModelOutputTests(unittest.TestCase):
 
     @staticmethod
     # 用可控的模型回复进入真实生成节点，检查解析与降级。
-    def generate(content):
+    def generate(content, *, finish_reason='stop'):
         from app.chat.state import create_initial_state
 
         state = create_initial_state()
@@ -46,7 +46,9 @@ class ModelOutputTests(unittest.TestCase):
         memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=1,
                                  refresh_if_needed=lambda: None)
         agent = Mock()
-        agent.invoke.return_value = {'messages': [SimpleNamespace(content=content, usage_metadata={'total_tokens': 7})]}
+        message = SimpleNamespace(content=content, usage_metadata={'total_tokens': 7},
+                                  response_metadata={'finish_reason': finish_reason})
+        agent.invoke.return_value = {'messages': [message]}
 
         result = nodes.generate(nodes.start_node(state, memory, ()), memory, (None, None, agent))
         return result, agent
@@ -60,7 +62,10 @@ class ModelOutputTests(unittest.TestCase):
         prompt = agent.invoke.call_args.args[0]['messages'][0]['content']
         self.assertRegex(prompt, r'1\s*至\s*5\s*条')
         schema_example = json.loads(prompt.splitlines()[-1])
+        self.assertEqual(set(schema_example), {'reply', 'inner monologue', 'emotion', 'action'})
         self.assertIsInstance(schema_example['reply'], list)
+        self.assertTrue(schema_example['reply'])
+        self.assertTrue(all(isinstance(part, str) and part.strip() for part in schema_example['reply']))
 
     def test_reply_generation_keeps_visible_plain_text_without_exposing_reasoning(self):
         with self.assertNoLogs(parser.logger, level='WARNING'):
@@ -70,13 +75,16 @@ class ModelOutputTests(unittest.TestCase):
 
     def test_reply_generation_logs_stage_when_json_is_incomplete(self):
         with self.assertLogs(parser.logger, level='WARNING') as logs:
-            result, _ = self.generate('结果：{"reply":["私密回复"')
+            result, agent = self.generate('结果：{"reply":["私密回复"', finish_reason='length')
         self.assertEqual(result['ai_response'], [nodes.DEFAULT_REPLY])
         self.assertIn('回复生成', logs.output[0])
+        self.assertIn('truncated_output', logs.output[0])
         self.assertNotIn('私密回复', logs.output[0])
+        agent.invoke.assert_called_once()
 
     def test_reply_generation_drops_unclosed_reasoning(self):
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, _ = self.generate('<think>未结束的推理')
         self.assertEqual(result['ai_response'], [nodes.DEFAULT_REPLY])
+        self.assertIn('empty_visible_text', logs.output[0])
         self.assertNotIn('未结束的推理', logs.output[0])

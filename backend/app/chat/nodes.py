@@ -133,7 +133,6 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
 
-        # 构建回府提示词
         answer_prompt = load_prompt(
             "answer_prompt",
             history=memorier.history_cache,
@@ -158,7 +157,11 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
             if text and not text.startswith(('{', '[', '```')) and not structured_field:
                 ai_response = {'reply': [text]}
             else:
-                logger.warning('回复生成：模型输出无法解析，使用默认回复')
+                metadata = getattr(last_message, 'response_metadata', None)
+                reason = 'invalid_json_or_missing_reply' if text else 'empty_visible_text'
+                if isinstance(metadata, dict) and metadata.get('finish_reason') == 'length':
+                    reason = 'truncated_output'
+                logger.warning('回复生成：模型输出无法解析，使用默认回复 reason=%s', reason)
                 ai_response = {'reply': [DEFAULT_REPLY], 'inner monologue': [], 'emotion': '困惑', 'action': ''}
 
         # 记录回复，情绪、动作

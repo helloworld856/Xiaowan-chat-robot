@@ -15,7 +15,8 @@ CHAT_MODEL_TIMEOUT_SECONDS = 45
 
 
 def create_model(model_merchant, api_key, model_name, temperature, max_tokens=None, *, base_url: str,
-                 adapter: ModelAdapter, validation_timeout=None, public_only: bool = False):
+                 adapter: ModelAdapter, validation_timeout=None, public_only: bool = False,
+                 json_output: bool = False):
     if public_only and adapter != 'openai':
         raise ValueError('公网自定义地址须使用 OpenAI 兼容接口')
     options = {"temperature": temperature}
@@ -24,6 +25,12 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
 
     if adapter == 'openai':
         from langchain_openai import ChatOpenAI
+        # 仅向已支持 JSON 模式的 DeepSeek 官方接口传该参数。
+        if json_output and model_merchant == 'deepseek' and base_url.rstrip('/') in (
+            'https://api.deepseek.com', 'https://api.deepseek.com/v1',
+        ):
+            # 由 SDK 合并进 HTTP 请求体，沿用现有工具调用与本地回复解析。
+            options['extra_body'] = {'response_format': {'type': 'json_object'}}
         if validation_timeout is not None:
             options.update(timeout=validation_timeout, max_retries=0)
         timeout = validation_timeout or CHAT_MODEL_TIMEOUT_SECONDS
@@ -61,9 +68,9 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_ur
         logger.info('初始化模型代理')
         # 分析和摘要使用较低温度，角色回复留更多表达空间。
         agent_options = (
-            (ANALYSIS_PERSONA, 0.1, []),
-            (TEXT_COMPRESS_PERSONA, 0.1, []),
-            (persona.FRIEND_PERSONA, 0.8, CHAT_TOOLS),
+            (ANALYSIS_PERSONA, 0.1, [], False),
+            (TEXT_COMPRESS_PERSONA, 0.1, [], False),
+            (persona.FRIEND_PERSONA, 0.8, CHAT_TOOLS, True),
         )
         agents = tuple(
             create_agent(
@@ -74,12 +81,12 @@ def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_ur
                     temperature,
                     base_url=base_url,
                     validation_timeout=CHAT_MODEL_TIMEOUT_SECONDS, adapter=adapter,
-                    public_only=public_only
+                    public_only=public_only, json_output=json_output,
                 ),
                 tools=tools,
                 system_prompt=system_prompt,
             )
-            for system_prompt, temperature, tools in agent_options
+            for system_prompt, temperature, tools, json_output in agent_options
         )
 
         logger.info('模型代理初始化成功')
