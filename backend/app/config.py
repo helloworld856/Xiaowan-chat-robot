@@ -7,4 +7,6 @@ PROJECT_ROOT = BACKEND_ROOT.parent
 SOFTWARE_NAME = "小晚 AI 角色对话软件"
 VERSION = "1.0.0"
 SYSTEM_LOG_PATH = BACKEND_ROOT / 'log_config' / 'app.log'
-TOKENIZER_PATH = BACKEND_ROOT / 'utils' / 'deepseek_tokenizer' / 'tokenizer.json'
+UTILS_PATH = BACKEND_ROOT / 'utils'
+PROMPTS_PATH = BACKEND_ROOT / 'app' / 'prompts'
+

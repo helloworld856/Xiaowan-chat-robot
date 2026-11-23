@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.config import TOKENIZER_PATH
+from app.config import UTILS_PATH
 
 if TYPE_CHECKING:
     from tokenizers import Tokenizer
@@ -18,7 +18,7 @@ def _get_tokenizer() -> Tokenizer:
     if _TOKENIZER_CACHE is None:
         from tokenizers import Tokenizer
 
-        _TOKENIZER_CACHE = Tokenizer.from_file(str(TOKENIZER_PATH))
+        _TOKENIZER_CACHE = Tokenizer.from_file(str(UTILS_PATH / 'deepseek_tokenizer' / 'tokenizer.json'))
     return _TOKENIZER_CACHE
 
 

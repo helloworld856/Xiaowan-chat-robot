@@ -3,11 +3,11 @@ from time import time
 
 from app.account_logging import logger
 from app.chat.memory import MemoryManager
-from app.llm.persona import persona
 from app.chat.state import AIChatState
 from app.llm.token_counter import count_tokens
 from app.llm.output_parser import model_text, parse_model_json, safe_parse_json
 from app.system_config import ChatConfig
+from app.prompt_loader import load_prompt
 
 
 DEFAULT_COMPRESSION_TOKENS = ChatConfig().history_compression_tokens
@@ -95,31 +95,12 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         user_input = state.get('user_input')
 
         # 构建分析提示
-        if memorier.abstract_cache:
-            analysis_prompt = f"""请根据用户（对应'user'）和{persona.BOT_NAME}（对应'assistant'）的历史对话及更早的历史对话摘要，分析用户输入，直接返回 JSON，不要有其他内容。
-历史对话：'{memorier.history_cache}'。更早的历史对话摘要：'{memorier.abstract_cache}'"""
-        else:
-            analysis_prompt = f"""请根据用户（对应'user'）和{persona.BOT_NAME}（对应'assistant'）的历史对话，分析用户输入，直接返回 JSON，不要有其他内容。
-历史对话：'{memorier.history_cache}'"""
-
-        analysis_prompt += f"""用户说："{user_input}"
-
-分析维度：
-1. intent（意图）：用户想要什么？
-
-2. emotion（情感）：用户的情感，从以下选择，可多选用逗号分隔
-   - 积极：开心、感激、期待、自豪、爱
-   - 消极：难过、生气、焦虑、失望、孤独、内疚、恐惧
-   - 中性：平静、好奇、疑惑
-   - 特殊：无明显情感（仅在无法判断时使用）
-
-3. answer（回复类型）：小晚的回复，从以下选择一个主要类型（必要时可补充次要类型）
-   - 情感支持：安慰、鼓励、共情
-   - 信息提供：解答问题、提供建议
-   - 日常互动：闲聊、打招呼、告别
-
-返回格式：
-{{"intent": "...", "emotion": "...", "answer": "..."}}"""
+        analysis_prompt = load_prompt(
+            "analysis_prompt",
+            history=memorier.history_cache,
+            abstract=memorier.abstract_cache or '无',
+            user_input=user_input
+        )
 
         analysis_agent, _, _ = agents
         response = analysis_agent.invoke(
@@ -152,37 +133,20 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
 
-        if memorier.abstract_cache:
-            user_prompt = f"""【历史对话（用户对应 'user'，{persona.BOT_NAME} 对应 'assistant'）】{memorier.history_cache}
-【更早的历史对话摘要】{memorier.abstract_cache}
----以上是之前的历史对话及更早的历史对话摘要，请保持连贯性---"""
-        else:
-            user_prompt = f"""【历史对话（用户对应 'user'，{persona.BOT_NAME} 对应 'assistant'）】{memorier.history_cache}
----以上是之前的历史对话，请保持连贯性---
-"""
-        # 构建提示词
-        user_prompt += f"""【用户说】{user_input}
-【分析结果，仅供参考】
-- 用户意图：{state['analysis_result'].get('intent', '一般对话')}
-- 用户情绪：{state['analysis_result'].get('emotion', '无情绪波动')}
-- 建议回复：{state['analysis_result'].get('answer', '日常互动')}
-
-情绪分析和建议回复可能不准确，以用户原话和最近的对话为准，不必把情绪标签说出来。
-以你的人设回应用户当前说的事，不必为了符合分析结果而强行安慰、提问或转移话题。
-像发聊天消息一样，自然地回复 1 至 5 条。简短回应一条即可；有几个可以独立发送的意思时，按顺序分成多条。用户认真提问时，按内容需要展开。
-请直接返回标准 JSON，所有键名和字符串都使用双引号，不要用代码块包裹，也不要输出额外文字。
-回答维度:
-1、"reply":你要回复给用户的话（非空字符串列表）。每个元素会显示为一个气泡，有自然停顿时用单独的元素。
-2、"inner monologue":保留列表字段，默认返回空列表，不需要编写内心独白。
-3、"emotion":简短的情绪描述（字符串），没有明显变化时可写“平静”，不必刻意制造情绪。
-4、"action":保留字符串字段，默认返回空字符串，不需要编写动作。
-优先保证 reply 自然、连贯，不要为了补充其他字段而表演情绪或编造情节。
-回复格式:
-{{"reply":["我也会先把最麻烦的那件事做了。","剩下的就慢慢来。"],"inner monologue":[],"emotion":"平静","action":""}}"""
+        # 构建回府提示词
+        answer_prompt = load_prompt(
+            "answer_prompt",
+            history=memorier.history_cache,
+            abstract=memorier.abstract_cache,
+            user_input=user_input,
+            intent=state['analysis_result'].get('intent', '一般对话'),
+            emotion=state['analysis_result'].get('emotion', '无情绪波动'),
+            answer=state['analysis_result'].get('answer', '日常互动')
+        )
 
         _, _, reply_agent = agents
         response = reply_agent.invoke(
-            {"messages": [{"role": "user", "content": user_prompt}]},
+            {"messages": [{"role": "user", "content": answer_prompt}]},
             config={"recursion_limit": 6}
         )
         last_message = get_last_message(response)
