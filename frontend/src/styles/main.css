@@ -326,8 +326,8 @@ body {
     color: #878787;
 }
 
-#userInput:focus-visible {
-    outline: 2px solid var(--input-border);
+:is(#userInput, #review-search):focus {
+    outline: 2px solid var(--select-accent);
     outline-offset: 2px;
 }
 
@@ -339,7 +339,9 @@ html.theme0 #userInput {
 }
 
 html.theme0 #userInput::placeholder { color: #5d6b7c; }
-html.theme0 #userInput:focus-visible { outline-color: var(--input-focus); }
+html.theme0 :is(#userInput, #review-search):focus {
+    outline-color: #737373;
+}
 
 textarea#userInput {
     min-width: 0;
@@ -361,6 +363,11 @@ textarea#userInput {
     font-weight: 500;
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+html.theme0 .sendbtn {
+    --btn-bg: #000;
+    --btn-hover: #262626;
 }
 
 .sendbtn:hover:not(:disabled) {

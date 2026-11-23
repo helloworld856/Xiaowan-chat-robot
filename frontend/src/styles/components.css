@@ -143,6 +143,7 @@
     cursor: pointer;
 }
 
+html.theme1 .review-item { border-color: var(--input-border); }
 .review-item:hover { background: var(--menu-hover); }
 .review-item-user, .review-item-reply {
     display: -webkit-box;
@@ -156,12 +157,12 @@
 .review-item-reply { font-size: 0.75rem; opacity: 0.7; }
 .review-empty { padding: 1rem 0; font-size: 0.85rem; opacity: 0.7; }
 .review-selected { outline: 2px solid var(--menu-text); outline-offset: 4px; }
-.review-item:focus-visible, #review-search:focus-visible {
+.review-item:focus-visible {
     outline: 2px solid var(--menu-text);
     outline-offset: 2px;
 }
 
-html.theme0 :is(.review-item:focus-visible, #review-search:focus-visible, .review-selected) {
+html.theme0 :is(.review-item:focus-visible, .review-selected) {
     outline-color: var(--input-focus);
 }
 
