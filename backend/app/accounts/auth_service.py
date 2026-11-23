@@ -12,7 +12,7 @@ from typing import Callable
 
 from app.system_config import AuthConfig, PasswordConfig, RateLimitConfig
 
-from .repository import (HASH_ITERATIONS, USERNAME_PATTERN, AccountStorageError, AccountStore,
+from .repository import (HASH_ITERATIONS, USERNAME_PATTERN, Account, AccountDeleteUnknown, AccountStorageError, AccountStore,
                        LocalAccountStore, PasswordCommitUnknown, ReservedUsername, User, unpack_hash)
 
 COOKIE_NAME = 'xiaowan_session'
@@ -32,6 +32,10 @@ class InvalidPassword(Exception):
 
 
 class PasswordSaveFailed(Exception):
+    pass
+
+
+class AdminDeletionForbidden(Exception):
     pass
 
 
@@ -124,8 +128,12 @@ def _token_digest(token: str | None) -> str | None:
 
 class AuthService:
     def __init__(self, credentials_path: Path | None = None, clock: Callable[[], float] = time.monotonic,
-                 *, account_store: AccountStore | None = None, config: AuthConfig | None = None):
+                 *, account_store: AccountStore | None = None, config: AuthConfig | None = None,
+                 delete_account: Callable[[Account], None] | None = None,
+                 restore_user: Callable[[User], None] | None = None):
         self.account_store = account_store if account_store is not None else LocalAccountStore(credentials_path)
+        self._delete_account = delete_account
+        self._restore_user = restore_user
         self.config = config if config is not None else AuthConfig()
         self.clock = clock
         self._session_lock = Lock()
@@ -138,6 +146,15 @@ class AuthService:
 
     def _account_lock(self, username_key: str):
         return self._account_locks[hash(username_key) % len(self._account_locks)]
+
+    def _verify_current_password(self, user: User, token: str | None, password: str) -> Account:
+        # 等待账号锁期间会话可能已失效，拿到锁后再次核对。
+        if self.get_user(token) != user:
+            raise InvalidSession()
+        account = self.account_store.find(user.username.lower())
+        if account is None or account.user != user or not _verify_password(password, account.password_hash):
+            raise InvalidCredentials()
+        return account
 
     def _prune_sessions(self, now: float) -> None:
         # 会话按创建顺序插入，有效期相同，遇到首个未到期的会话即可停止。
@@ -159,7 +176,9 @@ class AuthService:
         _validate_new_password(password, self.config.password)
         attempt = self._registrations.reserve(client)
         try:
-            return self.account_store.register(username, hash_password(password))
+            password_hash = hash_password(password)
+            with self._account_lock(username.lower()):
+                return self.account_store.register(username, password_hash)
         except AccountStorageError:
             self._registrations.release(client, attempt)
             raise
@@ -174,6 +193,8 @@ class AuthService:
                 valid = _verify_password(password, account.password_hash if account else None)
                 if account is None or not valid:
                     raise InvalidCredentials()
+                if self._restore_user is not None:
+                    self._restore_user(account.user)
                 token = secrets.token_urlsafe(32)
                 token_hash = hashlib.sha256(token.encode('ascii')).hexdigest()
                 previous_digest = _token_digest(previous_token)
@@ -184,9 +205,9 @@ class AuthService:
                     if previous_digest is not None:
                         self._sessions.pop(previous_digest, None)
                     self._sessions[token_hash] = _Session(account.user, now + self.config.session_ttl_seconds)
-        except AccountStorageError:
+        except (AccountStorageError, OSError):
             self._login_attempts.release(client, attempt)
-            raise
+            raise AccountStorageError() from None
         self._login_attempts.release(client, attempt)
         return token, account.user
 
@@ -196,12 +217,7 @@ class AuthService:
         attempt = self._login_attempts.reserve(client)
         try:
             with self._account_lock(username_key):
-                # 等待账号锁期间会话可能已失效，拿到锁后再次核对。
-                if self.get_user(token) != user:
-                    raise InvalidSession()
-                account = self.account_store.find(username_key)
-                if account is None or account.user != user or not _verify_password(current_password, account.password_hash):
-                    raise InvalidCredentials()
+                account = self._verify_current_password(user, token, current_password)
                 if secrets.compare_digest(current_password.encode('utf-8'), new_password.encode('utf-8')):
                     raise InvalidPassword('新密码不能与当前密码相同')
                 try:
@@ -226,6 +242,28 @@ class AuthService:
             self._prune_sessions(self.clock())
             session = self._sessions.get(digest)
             return session.user if session is not None else None
+
+    def delete_account(self, user: User, token: str | None, current_password: str, client: str) -> None:
+        if user.role != 'user':
+            raise AdminDeletionForbidden()
+        username_key = user.username.lower()
+        attempt = self._login_attempts.reserve(client)
+        try:
+            with self._account_lock(username_key):
+                account = self._verify_current_password(user, token, current_password)
+                try:
+                    delete = self._delete_account or self.account_store.delete
+                    delete(account)
+                except AccountDeleteUnknown:
+                    self._revoke_user_sessions(user.id)
+                    raise
+                self._revoke_user_sessions(user.id)
+        except (AccountStorageError, InvalidSession, AccountDeleteUnknown, OSError) as error:
+            self._login_attempts.release(client, attempt)
+            if isinstance(error, OSError):
+                raise AccountStorageError() from None
+            raise
+        self._login_attempts.release(client, attempt)
 
     def logout(self, token: str | None):
         digest = _token_digest(token)

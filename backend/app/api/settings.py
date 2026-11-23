@@ -88,4 +88,4 @@ def save_settings(preferences: Preferences, request: Request):
         request.app.state.preferences.update(request.state.user.id, preferences)
         return result
     except (OSError, ValueError, pymysql.MySQLError):
-        raise HTTPException(500, '无法确认设置是否保存，请重新读取设置') from None
+        raise HTTPException(500, '无法确认偏好是否保存，请重试') from None

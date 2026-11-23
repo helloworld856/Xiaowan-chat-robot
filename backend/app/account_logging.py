@@ -148,10 +148,10 @@ class AccountFileHandler(logging.Handler):
             fallback.account_label = ''
             self._system.handle(fallback)
 
-    def close_accounts(self, paths: UserDataPaths | None = None) -> None:
+    def close_accounts(self, paths: UserDataPaths | None = None, user_id: int | None = None) -> None:
         with self.lock:
             for key in list(self._personal):
-                if paths is None or key[0] == paths.root:
+                if (paths is None or key[0] == paths.root) and (user_id is None or key[1] == user_id):
                     self._close_personal(self._personal.pop(key))
 
     def close(self):
@@ -178,10 +178,10 @@ def get_logger():
     return logger
 
 
-def close_account_logs(paths: UserDataPaths) -> None:
+def close_account_logs(paths: UserDataPaths, user_id: int | None = None) -> None:
     for handler in logger.handlers:
         if isinstance(handler, AccountFileHandler):
-            handler.close_accounts(paths)
+            handler.close_accounts(paths, user_id)
 
 
 def configure_logging(settings: LoggingConfig) -> None:

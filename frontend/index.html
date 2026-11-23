@@ -143,6 +143,10 @@
                 <div class="profile-avatar-heading"><span class="profile-label">系统头像</span><button id="profile-default-avatar" class="profile-text-button" type="button">恢复默认</button></div>
                 <div id="profile-avatars" role="group" aria-label="系统头像"></div>
                 <button id="profile-open-password" class="profile-password-link" type="button">修改密码 <span aria-hidden="true">›</span></button>
+                <div class="profile-account-actions">
+                    <button id="profile-delete-account" class="danger-button" type="button">注销账户</button>
+                    <p id="profile-delete-help" class="profile-account" hidden>内置管理员账号不能注销。</p>
+                </div>
             </fieldset>
             <p id="profile-status" class="profile-status" role="status"></p>
             <div class="profile-actions">
@@ -167,13 +171,27 @@
         </form>
     </dialog>
 
-    <dialog id="logout-dialog" role="alertdialog" aria-labelledby="logout-title" aria-describedby="logout-description">
+    <dialog id="logout-dialog" class="confirm-dialog" role="alertdialog" aria-labelledby="logout-title" aria-describedby="logout-description">
         <h2 id="logout-title">确认退出登录？</h2>
         <p id="logout-description">退出后需要重新登录才能继续聊天。</p>
-        <div class="logout-actions">
+        <div class="confirm-actions">
             <button id="logout-cancel" type="button" autofocus>取消</button>
-            <button id="logout-confirm" type="button">退出登录</button>
+            <button id="logout-confirm" class="confirm-primary" type="button">退出登录</button>
         </div>
+    </dialog>
+    <dialog id="data-confirm-dialog" class="confirm-dialog" role="alertdialog" aria-labelledby="data-confirm-title" aria-describedby="data-confirm-description">
+        <h2 id="data-confirm-title"></h2>
+        <p id="data-confirm-description"></p>
+        <form method="dialog">
+            <label id="data-confirm-password-field" hidden>
+                <span>当前密码</span>
+                <input id="data-confirm-password" class="profile-input" name="current_password" type="password" autocomplete="current-password" maxlength="512" required disabled>
+            </label>
+            <div class="confirm-actions">
+                <button id="data-confirm-cancel" type="button" autofocus>取消</button>
+                <button id="data-confirm-submit" class="confirm-primary confirm-destructive" type="submit" value="confirm"></button>
+            </div>
+        </form>
     </dialog>
 
     <!-- 设置界面 -->
@@ -181,7 +199,7 @@
         <div class="setting">
             <div class="setting-head">
                 <span id="settings-title">设置</span>
-                <button type="button" class="close-setting" aria-label="关闭设置" autofocus>
+                <button type="button" class="settings-button close-setting" aria-label="关闭设置" autofocus>
                     <svg viewBox="0 0 17 17" height="17" width="17">
                         <line x1="0" y1="0" x2="17" y2="17" stroke="currentColor" stroke-width="2"/>
                         <line x1="17" y1="0" x2="0" y2="17" stroke="currentColor" stroke-width="2"/>
@@ -208,26 +226,33 @@
                         <label>模型状态：</label>
                         <span id="display-model-status">未就绪</span>
                     </div>
-                    <button type="button" id="open-modify-btn" class="modify-btn">修改模型配置</button>
+                    <button type="button" id="open-modify-btn" class="settings-button settings-section-action">修改模型配置</button>
                 </div>
 
                 <section id="preferences-panel">
-                    <fieldset id="preferences-fields" disabled>
-                        <legend>偏好</legend>
-                        <label class="preference-row" for="theme-select"><span>主题</span>
-                            <select id="theme-select" class="settings-select">
-                                <option value="theme0">默认白</option>
-                                <option value="theme1">海阔天空</option>
-                                <option value="theme2">夏日海岸</option>
-                                <option value="theme3">樱雨绵绵</option>
-                            </select>
-                        </label>
-                        <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
-                            <select id="send-shortcut" class="settings-select"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
-                        </label>
-                    </fieldset>
-                    <p id="preferences-status" role="status"></p>
-                    <button type="button" id="reload-settings">重新读取设置</button>
+                    <form id="preferences-form">
+                        <fieldset id="preferences-fields" disabled>
+                            <legend>偏好</legend>
+                            <label class="preference-row" for="theme-select"><span>主题</span>
+                                <select id="theme-select" class="settings-select">
+                                    <option value="theme0">默认白</option>
+                                    <option value="theme1">海阔天空</option>
+                                    <option value="theme2">夏日海岸</option>
+                                    <option value="theme3">樱雨绵绵</option>
+                                </select>
+                            </label>
+                            <label class="preference-row" for="send-shortcut"><span>发送快捷键</span>
+                                <select id="send-shortcut" class="settings-select"><option value="enter">Enter 发送</option><option value="ctrl_enter">Ctrl+Enter 发送</option></select>
+                            </label>
+                            <button type="submit" id="save-preferences" class="settings-button settings-section-action">保存偏好</button>
+                        </fieldset>
+                    </form>
+                </section>
+
+                <section id="chat-settings-panel" aria-labelledby="chat-settings-title">
+                    <h2 id="chat-settings-title">聊天设置</h2>
+                    <button id="clear-chat-history" class="settings-button settings-button-danger settings-section-action" type="button">清空聊天记录</button>
+                    <p id="chat-settings-status" role="status"></p>
                 </section>
 
                 <!-- 修改模型配置的弹窗 -->
@@ -253,15 +278,15 @@
                                 <label for="model-api-key">API Key</label>
                                 <div class="model-key-field">
                                     <input id="model-api-key" type="password" maxlength="1024" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-                                    <button type="button" id="toggle-model-key" aria-controls="model-api-key" aria-label="显示 API Key">显示</button>
+                                    <button type="button" id="toggle-model-key" class="settings-button" aria-controls="model-api-key" aria-label="显示 API Key">显示</button>
                                 </div>
                             </div>
                             <p class="settings-help" id="model-address-help"></p>
                             <p id="model-test-status" role="status"></p>
                             <div class="modal-btns">
-                                <button type="button" id="cancel-modify-btn">取消</button>
-                                <button type="button" id="test-model-btn">测试连接</button>
-                                <button type="submit" id="submit-model-btn" class="model-submit">保存并切换</button>
+                                <button type="button" id="cancel-modify-btn" class="settings-button">取消</button>
+                                <button type="button" id="test-model-btn" class="settings-button">测试连接</button>
+                                <button type="submit" id="submit-model-btn" class="settings-button settings-button-primary">保存并切换</button>
                             </div>
                         </form>
                         <!-- 验证过程中的加载动画 -->

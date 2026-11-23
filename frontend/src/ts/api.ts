@@ -74,6 +74,16 @@ export function historyAPI(num: number, front = true) {
     }, '历史对话加载失败');
 }
 
+export function clearHistoryAPI() {
+    return requestJSON<{ok: boolean}>('/history', {method: 'DELETE'}, '清空聊天记录失败，请稍后重试');
+}
+
+export function deleteAccountAPI(current_password: string) {
+    return requestJSON<{ok: boolean}>('/auth/account', {
+        method: 'DELETE', body: JSON.stringify({current_password})
+    }, '注销账户失败，请稍后重试');
+}
+
 export function personaAPI() {
     return requestJSON<import('./global_config.ts').PersonaInfo>('/persona', {
         method: 'GET', signal: AbortSignal.timeout(15000)
@@ -114,7 +124,7 @@ export function settingsAPI(preferences?: Preferences): Promise<SavedSettings> {
     return requestJSON('/settings', {
         method: preferences ? 'POST' : 'GET', signal: AbortSignal.timeout(15000),
         ...(preferences ? {body: JSON.stringify(preferences)} : {})
-    }, preferences ? '设置保存失败，请检查后端和配置文件。' : '设置读取失败，可在设置页重新读取。');
+    }, preferences ? '设置保存失败，请检查后端和配置文件。' : '设置读取失败，请稍后重试。');
 }
 
 export interface AuthUser { id: number; username: string; role: 'admin' | 'user'; }

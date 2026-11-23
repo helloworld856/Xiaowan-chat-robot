@@ -41,7 +41,7 @@ test('only the relevant model fields are visible and active for each role', () =
 });
 
 // 改变异步返回顺序，验证先完成的模型切换不会被旧读取覆盖。
-test('preferences auto-save the latest selections in order and restore saved values on failure', async () => {
+test('preferences apply only when manually saved and show the result in an alert', async () => {
     const nodes = new Map();
     function element(id) {
         if (!nodes.has(id)) nodes.set(id, {
@@ -66,6 +66,7 @@ test('preferences auto-save the latest selections in order and restore saved val
     let finishSettings;
     let admin = true;
     const saves = [];
+    const alerts = [];
     const submittedModels = [];
     const exports = {};
     runInNewContext(compiled, {
@@ -93,7 +94,11 @@ test('preferences auto-save the latest selections in order and restore saved val
             },
             './global_config.ts': {modelConfig},
             './preferences.ts': {preferences},
-            './ui.ts': {openPopup() {}, resetPopup() {}, closePopup: async () => true, menuSelect: [null, element('settings')]},
+            './ui.ts': {
+                openPopup() {}, resetPopup() {}, closePopup: async () => true,
+                closeMenu() {}, menuBtn: element('menuBtn'), menuSelect: [null, element('settings')],
+                showAlert: message => alerts.push(message)
+            },
             './utils.ts': themeUtils
         })[name],
         document: {getElementById: element, querySelector: element, querySelectorAll: () => []}
@@ -112,29 +117,43 @@ test('preferences auto-save the latest selections in order and restore saved val
     assert.equal(documentElement.className, 'theme3');
     assert.equal(themeSelect.value, 'theme3');
     themeSelect.value = 'theme2';
-    themeSelect.listeners.get('change')();
-    assert.equal(documentElement.className, 'theme2');
-    assert.deepEqual(saves.map(save => save.preferences), [{theme: 'theme2', send_shortcut: 'ctrl_enter'}]);
+    themeSelect.listeners.get('change')?.();
     const shortcut = element('send-shortcut');
     shortcut.value = 'enter';
-    shortcut.listeners.get('change')();
+    shortcut.listeners.get('change')?.();
+    assert.equal(saves.length, 0);
+    assert.equal(documentElement.className, 'theme3');
+    assert.equal(preferences.send_shortcut, 'ctrl_enter');
+
+    const submitPreferences = () => element('preferences-form').listeners.get('submit')({preventDefault() {}});
+    const saved = submitPreferences();
+    assert.deepEqual(saves.map(save => save.preferences), [{theme: 'theme2', send_shortcut: 'enter'}]);
+    await submitPreferences();
     assert.equal(saves.length, 1);
     saves[0].finish();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(saves[1].preferences, {theme: 'theme2', send_shortcut: 'enter'});
-    assert.equal(shortcut.value, 'enter');
-    saves[1].finish();
-    await new Promise(resolve => setImmediate(resolve));
+    await saved;
     assert.equal(preferences.theme, 'theme2');
     assert.equal(preferences.send_shortcut, 'enter');
-
-    shortcut.value = 'ctrl_enter';
-    shortcut.listeners.get('change')();
-    saves[2].reject(new Error('测试保存失败'));
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(shortcut.value, 'enter');
     assert.equal(documentElement.className, 'theme2');
-    assert.equal(element('preferences-status').textContent, '测试保存失败');
+    assert.match(alerts.at(-1), /保存成功/);
+
+    themeSelect.value = 'theme1';
+    shortcut.value = 'ctrl_enter';
+    const failed = submitPreferences();
+    saves[1].reject(new Error('测试保存失败'));
+    await failed;
+    assert.equal(shortcut.value, 'ctrl_enter');
+    assert.equal(themeSelect.value, 'theme1');
+    assert.equal(preferences.send_shortcut, 'enter');
+    assert.equal(documentElement.className, 'theme2');
+    assert.match(alerts.at(-1), /保存失败/);
+
+    await element('.close-setting').listeners.get('click')();
+    element('settings').listeners.get('click')({stopPropagation() {}});
+    assert.equal(themeSelect.value, 'theme2');
+    assert.equal(shortcut.value, 'enter');
+    assert.equal(saves.length, 2);
+
     exports.resetSettings();
     assert.equal(documentElement.className, 'theme0');
     assert.equal(themeSelect.value, 'theme0');

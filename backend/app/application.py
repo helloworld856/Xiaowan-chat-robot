@@ -88,6 +88,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                                    f'{INITIAL_ADMIN_PASSWORD_MIN_LENGTH}–{INITIAL_ADMIN_PASSWORD_MAX_LENGTH} '
                                    '个字符的 ADMIN_INITIAL_PASSWORD，再启动后端')
             admin = accounts.initialize_admin(hash_password(password))
+        directories.recover_deletions(accounts)
         directories.migrate_legacy(accounts)
         directories.paths.bind(admin)
         try:
@@ -137,7 +138,9 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                     finally:
                         close_account_logs(directories.paths)
 
-    application = create_app(VERSION, AuthService(account_store=accounts, config=config.auth), profile_store,
+    auth = AuthService(account_store=accounts, config=config.auth,
+                       delete_account=partial(directories.delete_account, accounts), restore_user=directories.restore_user)
+    application = create_app(VERSION, auth, profile_store,
                              lifespan=lifespan, user_data_paths=directories.paths, system_config=config)
     application.state.db = db
     application.state.preferences = directories.preferences

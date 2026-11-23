@@ -68,6 +68,10 @@ class PersonalModelStore:
         self.catalog = catalog or default_model_catalog()
         self._agents = {}
 
+    def forget(self, user_id: int) -> None:
+        with self.paths.lock(user_id):
+            self._agents.pop(user_id, None)
+
     def path_for(self, user_id: int) -> Path:
         return self.paths.file(user_id, 'model.json')
 

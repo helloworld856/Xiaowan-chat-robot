@@ -42,31 +42,66 @@ function profileHarness(api, inputLimits) {
     };
     const menu = makeElement();
     const posts = [];
+    const events = [];
     class AuthRequiredError extends Error {}
     class CancelledRequestError extends Error {}
     const exports = {};
     runInNewContext(compiled, {
-        exports, window: {dispatchEvent() {}}, Event,
+        exports, window: {dispatchEvent(event) { events.push(event.type); }}, Event,
         document: {getElementById: getElement, querySelectorAll: () => []},
         require: name => ({
             './ui.ts': {menuBtn: makeElement(), menuSelect: [menu]},
+            './confirm.ts': {confirmAction: api.confirmAction},
             './global_config.ts': {inputLimits},
             './api.ts': {
                 AuthRequiredError, CancelledRequestError, getRequestGeneration: () => 0,
+                canManageModel: () => api.admin === true,
                 profileAPI: async payload => {
                     if (payload) posts.push(payload);
                     return api.profileAPI(payload);
                 },
-                changePasswordAPI: api.changePasswordAPI
+                changePasswordAPI: api.changePasswordAPI,
+                deleteAccountAPI: api.deleteAccountAPI
             }
         })[name]
     });
-    return {exports, getElement, menu, posts};
+    return {exports, getElement, menu, posts, events};
 }
 
 const savedProfile = {
     username: 'admin', nickname: 'Saved', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png', avatars: [], default_avatar_id: 'cat'
 };
+
+test('account deletion requires confirmation and is unavailable to the built-in administrator', async () => {
+    let confirmation = null;
+    const passwords = [];
+    const api = {
+        profileAPI: async () => savedProfile,
+        confirmAction: async (_, _description, _action, passwordRequired) => {
+            assert.equal(passwordRequired, true);
+            return confirmation;
+        },
+        deleteAccountAPI: async password => { passwords.push(password); }
+    };
+    const {exports, getElement, menu, events} = profileHarness(api);
+    exports.initProfile();
+    const button = getElement('profile-delete-account');
+    const click = () => button.listeners.get('click')();
+    api.admin = true;
+    await menu.listeners.get('click')();
+    assert.equal(button.disabled, true);
+    await click();
+    assert.deepEqual(passwords, []);
+    getElement('profile-dialog').close();
+    api.admin = false;
+    await menu.listeners.get('click')();
+    await click();
+    assert.deepEqual(passwords, []);
+    confirmation = 'current-test-password';
+    await click();
+    assert.deepEqual(passwords, [confirmation]);
+    assert.deepEqual(events, ['account-deleted']);
+});
 
 // 保存前需要真实资料，网络错误与取消都不能让空表单提交。
 test('a failed profile read cannot save an uninitialized or cancelled draft', async () => {

@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 from _imports import BACKEND_ROOT as ROOT
 
-from app.accounts.repository import User
+from app.accounts.repository import Account, AccountDeleteUnknown, AccountStorageError, User
 from app.account_logging import account_log_context
 from app.account_logging import AccountFileHandler, AccountLabel
 from app.llm.personal_models import PersonalModel
@@ -61,6 +61,33 @@ class UserDirectoryTests(unittest.TestCase):
         self.store.preferences.update(self.admin.id, Preferences())
         self.store.ensure(self.admin)
         self.assertEqual(self.store.preferences.get(self.admin.id).send_shortcut, 'enter')
+
+    def test_deletion_recovers_directories_according_to_the_database_outcome(self):
+        user = User(2, 'Member', 'user', uses_username_directory=True)
+        account = Account(user, 'test hash')
+        self.store.prepare_new(user)
+        original = self.store.paths.root / user.username
+        original_profile = (original / 'profile.json').read_bytes()
+        accounts = Mock()
+
+        accounts.delete.side_effect = AccountStorageError()
+        with self.assertRaises(AccountStorageError):
+            self.store.delete_account(accounts, account)
+        self.assertEqual((original / 'profile.json').read_bytes(), original_profile)
+
+        accounts.delete.side_effect = AccountDeleteUnknown()
+        with self.assertRaises(AccountDeleteUnknown):
+            self.store.delete_account(accounts, account)
+        self.assertFalse(original.exists())
+        accounts.find_user_by_id.return_value = user
+        self.store.recover_deletions(accounts)
+        self.assertEqual((original / 'profile.json').read_bytes(), original_profile)
+
+        with self.assertRaises(AccountDeleteUnknown):
+            self.store.delete_account(accounts, account)
+        accounts.find_user_by_id.return_value = None
+        self.store.recover_deletions(accounts)
+        self.assertEqual(list(self.store.paths.root.iterdir()), [])
 
     def test_configured_defaults_apply_to_new_accounts_and_preserve_existing_files(self):
         self.store.prepare_new(self.member)

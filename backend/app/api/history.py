@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.account_logging import logger
 from app.chat.memory import load_history
+from app.chat.scheduler import ChatNotStarted
+from app.database.mysql import reset_chat_history
 
 
 MAX_HISTORY_MESSAGES = 10_000
@@ -42,3 +45,17 @@ def history(req: HistoryRequest, request: Request):
         num=req.num,
         history_messages=history_messages,
     )
+
+
+@router.delete('/history')
+async def clear_history(request: Request):
+    user_id = request.state.user.id
+    try:
+        async with request.app.state.chat.maintenance(user_id):
+            await run_in_threadpool(reset_chat_history, request.app.state.db, user_id)
+    except ChatNotStarted as error:
+        raise HTTPException(error.status_code, str(error)) from None
+    except Exception as error:
+        logger.error('history clear failed: %s', type(error).__name__)
+        raise HTTPException(500, '清空聊天记录失败，请稍后重试') from None
+    return {'ok': True}

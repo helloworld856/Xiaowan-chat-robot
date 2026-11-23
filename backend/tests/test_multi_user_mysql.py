@@ -34,6 +34,70 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(pool.close)
         return pool, database, db_options
 
+    async def test_clear_chat_and_delete_account_are_scoped(self):
+        import httpx
+
+        from app import application as main
+        from app.accounts.auth_service import hash_password
+        from app.accounts.profile import ProfileStore
+        from app.accounts.repository import SQLAccountStore
+        from app.chat.memory import MemoryManager
+        from app.database.mysql import initialize_schema
+        from app.llm.admin_settings import SettingsStore
+
+        pool, _, _ = self.make_database()
+        initialize_schema(pool)
+        password = 'Private!12'
+        admin = SQLAccountStore(pool).initialize_admin(hash_password(password))
+        with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
+            folder = Path(directory)
+            profiles = ProfileStore(folder / 'users')
+            with patch.object(main, 'settings_store', SettingsStore(folder / 'settings.json')):
+                app = main.build_application(pool, profiles, folder, config_root=folder)
+                transport = httpx.ASGITransport(app=app)
+                async with (app.router.lifespan_context(app),
+                            httpx.AsyncClient(transport=transport, base_url='http://testserver') as client,
+                            httpx.AsyncClient(transport=transport, base_url='http://testserver') as other):
+                    credentials = {'username': 'DeleteMe', 'password': password}
+                    registration = {**credentials, 'confirm_password': password}
+                    response = await client.post('/auth/register', json=registration)
+                    self.assertEqual(response.status_code, 201, response.text)
+                    user = response.json()['user']
+                    user_id = user['id']
+                    for session in (client, other):
+                        self.assertEqual((await session.post('/auth/login', json=credentials)).status_code, 200)
+                    user_folder = profiles.root / 'DeleteMe'
+                    self.assertTrue((user_folder / 'profile.json').exists())
+
+                    for account_id in (user_id, admin.id):
+                        self.assertTrue(MemoryManager(account_id, pool.connection).record_message({
+                            'conversation_round': 0, 'user': 'test message', 'assistant': ['test reply'],
+                        }))
+                        with pool.connection() as db, db.cursor() as cursor:
+                            cursor.execute('INSERT INTO abstract_messages (user_id, abstract) VALUES (%s, %s)',
+                                           (account_id, 'test summary'))
+                            db.commit()
+                    self.assertEqual((await client.delete('/history')).status_code, 200)
+                    self.assertEqual((await client.post('/history', json={'num': 0, 'front': True})).json()['history_messages'], [])
+                    memory = MemoryManager(user_id, pool.connection)
+                    self.assertFalse(memory.abstract_cache)
+                    self.assertTrue(memory.record_message({'conversation_round': 0, 'user': 'new', 'assistant': ['reply']}))
+                    self.assertEqual((await client.request('DELETE', '/auth/account', json={'current_password': 'wrong'})).status_code, 400)
+                    self.assertTrue(user_folder.exists())
+                    self.assertEqual((await client.request('DELETE', '/auth/account', json={'current_password': password})).status_code, 200)
+                    self.assertEqual((await other.get('/profile')).status_code, 401)
+                    self.assertFalse(user_folder.exists())
+                    self.assertFalse(MemoryManager(user_id, pool.connection).history_cache)
+                    admin_memory = MemoryManager(admin.id, pool.connection)
+                    self.assertEqual(admin_memory.abstract_cache, 'test summary')
+                    self.assertEqual(len(admin_memory.history_cache), 1)
+                    response = await client.post('/auth/register', json=registration)
+                    self.assertEqual(response.status_code, 201, response.text)
+                    replacement = response.json()['user']
+                    self.assertNotEqual(replacement['id'], user_id)
+                    self.assertEqual((await other.post('/auth/login', json={'username': 'admin', 'password': password})).status_code, 200)
+                    self.assertEqual((await other.request('DELETE', '/auth/account', json={'current_password': password})).status_code, 403)
+
     def test_compression_summarizes_oldest_rows_outside_the_cache(self):
         from app.chat.memory import MemoryManager, load_history
         from app.database.mysql import initialize_schema

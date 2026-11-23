@@ -45,12 +45,18 @@ class PasswordCommitUnknown(Exception):
     pass
 
 
+class AccountDeleteUnknown(Exception):
+    pass
+
+
 class AccountStore(Protocol):
     def find(self, username_key: str) -> Account | None: ...
 
     def register(self, username: str, password_hash: str) -> User: ...
 
     def save_password(self, account: Account, password_hash: str) -> None: ...
+
+    def delete(self, account: Account) -> None: ...
 
 
 def unpack_hash(encoded: str) -> tuple[int, bytes, bytes]:
@@ -118,6 +124,31 @@ class SQLAccountStore:
     def register(self, username: str, password_hash: str) -> User:
         return self._insert(username, password_hash, 'user')
 
+    def find_user_by_id(self, user_id: int) -> User | None:
+        with self.pool.connection() as db, db.cursor() as cursor:
+            cursor.execute('SELECT id, username, role, uses_username_directory FROM users WHERE id = %s', (user_id,))
+            row = cursor.fetchone()
+        return User(row[0], row[1], row[2], bool(row[3])) if row is not None else None
+
+    def delete(self, account: Account) -> None:
+        from app.database.mysql import delete_user_history
+
+        user_id = account.user.id
+        commit_attempted = False
+        try:
+            with self.pool.connection() as db, db.cursor() as cursor:
+                cursor.execute("DELETE FROM users WHERE id = %s AND role = 'user' AND password_hash = %s",
+                               (user_id, account.password_hash))
+                if cursor.rowcount != 1:
+                    raise AccountStorageError()
+                delete_user_history(cursor, user_id)
+                commit_attempted = True
+                db.commit()
+        except (OSError, pymysql.MySQLError):
+            if commit_attempted:
+                raise AccountDeleteUnknown() from None
+            raise AccountStorageError() from None
+
     def users_with_id_directories(self) -> list[User]:
         with self.pool.connection() as db, db.cursor() as cursor:
             cursor.execute('SELECT id, username, role FROM users WHERE uses_username_directory = FALSE')
@@ -181,6 +212,7 @@ class LocalAccountStore:
             admin_password_hash = _read_admin_credentials(credentials_path)
         if admin_password_hash is not None:
             self.accounts['admin'] = Account(User(1, 'admin', 'admin'), admin_password_hash)
+        self.next_id = len(self.accounts) + 1
 
     def find(self, username_key: str) -> Account | None:
         with self.lock:
@@ -191,7 +223,8 @@ class LocalAccountStore:
             key = username.lower()
             if key in self.accounts:
                 raise DuplicateUsername()
-            user = User(len(self.accounts) + 1, username, 'user')
+            user = User(self.next_id, username, 'user')
+            self.next_id += 1
             self.accounts[key] = Account(user, password_hash)
             return user
 
@@ -203,6 +236,13 @@ class LocalAccountStore:
             if key == 'admin' and self.credentials_path is not None:
                 self._write_password(password_hash)
             self.accounts[key] = replace(account, password_hash=password_hash)
+
+    def delete(self, account: Account) -> None:
+        with self.lock:
+            key = account.user.username.lower()
+            if account.user.role != 'user' or self.accounts.get(key) != account:
+                raise AccountStorageError()
+            del self.accounts[key]
 
     def _write_password(self, password_hash: str) -> None:
         try:

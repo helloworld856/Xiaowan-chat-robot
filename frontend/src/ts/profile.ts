@@ -1,7 +1,8 @@
-import {AuthRequiredError, CancelledRequestError, changePasswordAPI, getRequestGeneration, profileAPI} from './api.ts';
+import {AuthRequiredError, CancelledRequestError, canManageModel, changePasswordAPI, deleteAccountAPI, getRequestGeneration, profileAPI} from './api.ts';
 import type {AvatarId, ProfileInfo} from './api.ts';
 import {inputLimits} from './global_config.ts';
 import {menuBtn, menuSelect} from './ui.ts';
+import {confirmAction} from './confirm.ts';
 
 let current: ProfileInfo | null = null;
 const element = (id: string) => document.getElementById(id)!;
@@ -52,6 +53,7 @@ export function initProfile() {
     const save = element('profile-save') as HTMLButtonElement;
     const back = element('profile-password-back') as HTMLButtonElement;
     const passwordSave = element('profile-password-save') as HTMLButtonElement;
+    const deleteAccount = element('profile-delete-account') as HTMLButtonElement;
     let selected: AvatarId = 'cat';
     let busy = false;
     // 资料成功加载后才能保存，避免读取失败时用空表单覆盖旧资料。
@@ -114,6 +116,8 @@ export function initProfile() {
         menuBtn.classList.remove('active');
         menuBtn.setAttribute('aria-expanded', 'false');
         showPassword(false);
+        deleteAccount.disabled = canManageModel();
+        element('profile-delete-help').hidden = !deleteAccount.disabled;
         ready = false;
         message('profile-status', '正在读取资料…');
         setBusy(true);
@@ -145,6 +149,25 @@ export function initProfile() {
     nickname.addEventListener('input', () => { element('profile-display-name').textContent = nickname.value.trim() || current?.username || ''; });
     element('profile-open-password').addEventListener('click', () => showPassword(true));
     back.addEventListener('click', () => showPassword(false));
+
+    deleteAccount.addEventListener('click', async () => {
+        if (busy || !ready || canManageModel()) return;
+        const generation = getRequestGeneration();
+        const password = await confirmAction('确认注销账户？', '账户、聊天记录、个人资料和模型配置将永久删除，且无法恢复。', '注销账户', true);
+        if (password === null || generation !== getRequestGeneration()) return;
+        setBusy(true);
+        message('profile-status', '正在注销…');
+        try {
+            await deleteAccountAPI(password);
+            if (generation === getRequestGeneration()) window.dispatchEvent(new Event('account-deleted'));
+        } catch (error) {
+            if (generation === getRequestGeneration() && !(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
+                message('profile-status', error instanceof Error ? error.message : '注销账户失败，请稍后重试', true);
+            }
+        } finally {
+            if (generation === getRequestGeneration()) setBusy(false);
+        }
+    });
 
     form.addEventListener('submit', async event => {
         event.preventDefault();

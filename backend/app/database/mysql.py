@@ -108,9 +108,17 @@ def initialize_schema(pool):
         connection.commit()
 
 
-# 启动时同时清空原文与摘要，账号表和个人配置保留。
-def reset_chat_history(pool):
+def delete_user_history(cursor, user_id: int) -> None:
+    cursor.execute('DELETE FROM history_messages WHERE user_id = %s', (user_id,))
+    cursor.execute('DELETE FROM abstract_messages WHERE user_id = %s', (user_id,))
+
+
+def reset_chat_history(pool, user_id: int | None = None):
+    # 同时清空原文和摘要，启动清理可覆盖全部账号。
     with pool.connection() as connection, connection.cursor() as cursor:
-        cursor.execute('DELETE FROM history_messages')
-        cursor.execute('DELETE FROM abstract_messages')
+        if user_id is None:
+            cursor.execute('DELETE FROM history_messages')
+            cursor.execute('DELETE FROM abstract_messages')
+        else:
+            delete_user_history(cursor, user_id)
         connection.commit()

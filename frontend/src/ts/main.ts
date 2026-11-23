@@ -16,6 +16,7 @@ import {personaConfig} from './global_config.ts';
 import {loadSettings, resetSettings, updateSettingsPermissions} from './settings.ts';
 import {initializeAuth} from './auth.ts';
 import {loadProfile, resetProfile} from './profile.ts';
+import {closeConfirmation} from './confirm.ts';
 
 const loading = document.getElementById('loading') as HTMLDivElement;
 const app = document.getElementById('app-shell')!;
@@ -84,6 +85,7 @@ async function initializeChat() {
 
 // 退出时清除上个账号的草稿、历史、回顾和资料展示。
 function clearChat() {
+    closeConfirmation();
     resetPopup(windowAlertContainer);
     windowAlertP.textContent = '';
     resetProfile();

@@ -1,11 +1,15 @@
+from contextlib import nullcontext
+
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.accounts.auth_service import (
     COOKIE_NAME,
     USERNAME_PATTERN,
+    AdminDeletionForbidden,
     InvalidCredentials,
     InvalidPassword,
     InvalidSession,
@@ -13,12 +17,14 @@ from app.accounts.auth_service import (
     PasswordSaveFailed,
 )
 from app.accounts.repository import (
+    AccountDeleteUnknown,
     AccountStorageError,
     DuplicateUsername,
     PasswordCommitUnknown,
     ReservedUsername,
     User,
 )
+from app.chat.scheduler import ChatNotStarted
 from app.system_config import MAX_PASSWORD_INPUT_LENGTH, PasswordConfig
 
 from .credential_route import CredentialRoute
@@ -33,9 +39,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_INPUT_LENGTH)
 
 
-class PasswordRequest(BaseModel):
+class CurrentPasswordRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_INPUT_LENGTH)
+
+
+class PasswordRequest(CurrentPasswordRequest):
     new_password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
     confirm_password: str = Field(max_length=MAX_PASSWORD_INPUT_LENGTH)
 
@@ -171,6 +180,34 @@ def change_password(credentials: PasswordRequest, request: Request):
         return _clear_session_cookie(JSONResponse({'detail': '无法确认密码是否已更改，请重新登录'}, status_code=401), request)
     except PasswordSaveFailed:
         return JSONResponse({'detail': '保存密码失败，原有密码仍有效'}, status_code=500)
+    except AccountStorageError:
+        return _unavailable()
+    return _clear_session_cookie(JSONResponse({'ok': True}), request)
+
+
+@router.delete('/account')
+async def delete_account(credentials: CurrentPasswordRequest, request: Request):
+    user = request.state.user
+    service = request.app.state.auth
+    chat = getattr(request.app.state, 'chat', None)
+    client = request.client.host if request.client else 'unknown'
+    try:
+        async with chat.maintenance(user.id) if chat is not None else nullcontext():
+            await run_in_threadpool(service.delete_account, user, request.cookies.get(COOKIE_NAME),
+                                    credentials.current_password, client)
+    except AdminDeletionForbidden:
+        return JSONResponse({'detail': '内置管理员账号不能注销'}, status_code=403)
+    except InvalidSession:
+        return JSONResponse({'detail': '请先登录'}, status_code=401)
+    except InvalidCredentials:
+        return JSONResponse({'detail': '当前密码错误'}, status_code=400)
+    except LoginThrottled as error:
+        return _throttled(error)
+    except ChatNotStarted as error:
+        return JSONResponse({'detail': str(error)}, status_code=error.status_code)
+    except AccountDeleteUnknown:
+        response = JSONResponse({'detail': '无法确认注销结果，请重新登录确认'}, status_code=401)
+        return _clear_session_cookie(response, request)
     except AccountStorageError:
         return _unavailable()
     return _clear_session_cookie(JSONResponse({'ok': True}), request)

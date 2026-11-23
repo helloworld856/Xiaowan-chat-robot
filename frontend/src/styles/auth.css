@@ -89,7 +89,7 @@
 }
 .account-info { padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--menu-text); border-bottom: 1px solid var(--chat-border); }
 #logout-btn { margin-top: 0.3rem; border-top: 1px solid var(--chat-border); }
-#logout-dialog {
+.confirm-dialog {
     width: min(360px, calc(100% - 32px));
     max-height: calc(100dvh - 48px);
     margin: auto;
@@ -102,10 +102,15 @@
     color-scheme: light;
     box-shadow: 0 12px 40px rgb(0 0 0 / 10%);
 }
-#logout-dialog::backdrop { background: rgb(0 0 0 / 28%); }
-#logout-title { font-size: 18px; font-weight: 600; }
-#logout-description { margin-top: 12px; color: #71717a; font-size: 14px; line-height: 1.6; }
-.logout-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
-.logout-actions button { min-height: 38px; padding: 0 16px; border: 1px solid #d4d4d8; border-radius: 6px; background: #fff; color: #3f3f46; font: inherit; font-size: 13px; cursor: pointer; }
-#logout-confirm { border-color: #18181b; background: #18181b; color: #fff; }
-.logout-actions button:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }
+.confirm-dialog::backdrop { background: rgb(0 0 0 / 28%); }
+.confirm-dialog h2 { font-size: 18px; font-weight: 600; }
+.confirm-dialog > p { margin-top: 12px; color: #52525b; font-size: 14px; line-height: 1.6; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.confirm-actions button, .danger-button { min-height: 38px; padding: 0 16px; border: 1px solid #d4d4d8; border-radius: 6px; background: #fff; color: #3f3f46; font: inherit; font-size: 13px; cursor: pointer; }
+.confirm-actions .confirm-primary { border-color: #18181b; background: #18181b; color: #fff; }
+.confirm-actions .confirm-destructive { border-color: #a61b1b; background: #a61b1b; }
+.confirm-actions button:focus-visible, .danger-button:focus-visible { outline: 2px solid #71717a; outline-offset: 3px; }
+#data-confirm-password-field:not([hidden]) { display: grid; gap: 6px; margin-top: 16px; font-size: 14px; }
+.danger-button { border-color: #e7b8b8; color: #a61b1b; }
+.danger-button:enabled:hover { background: #fff1f1; }
+.danger-button:disabled { cursor: not-allowed; opacity: 0.6; }

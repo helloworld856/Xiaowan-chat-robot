@@ -180,6 +180,12 @@ export async function initializeAuth(onAuthenticated: () => Promise<void>, onSig
         signedOut('密码已修改，请使用新密码登录');
         error.setAttribute('data-tone', 'success');
     });
+    window.addEventListener('account-deleted', () => {
+        notifyOtherTabs();
+        username.value = '';
+        signedOut('账户已注销');
+        error.setAttribute('data-tone', 'success');
+    });
     form.addEventListener('submit', async event => {
         event.preventDefault();
         if (busy || !form.reportValidity()) return;

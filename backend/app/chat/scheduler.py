@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ class ChatRuntime:
 class AccountChat:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     waiting: bool = False
+    maintenance: bool = False
     runtime: ChatRuntime | None = None
     worker: asyncio.Task | None = None
 
@@ -60,12 +62,28 @@ class ChatSessions:
         logger.info('chat admission rejected status=%d', status)
         raise ChatNotStarted(status, message)
 
+    @asynccontextmanager
+    async def maintenance(self, user_id: int):
+        if self._closing:
+            raise ChatNotStarted(503, '聊天服务正在关闭，请稍后重试')
+        entry = self._users.setdefault(user_id, AccountChat())
+        if entry.maintenance or entry.waiting or entry.lock.locked():
+            raise ChatNotStarted(409, '该账号还有聊天请求正在处理，请稍后重试')
+        entry.maintenance = True
+        try:
+            yield
+        finally:
+            # 丢弃缓存的历史和摘要，下一轮从数据库重新读取。
+            del self._users[user_id]
+
     async def send(self, user: User, text: str):
         start = perf_counter()
         user_id = user.id
         if self._closing:
             self._reject(503, '聊天服务正在关闭，请稍后重试')
         entry = self._users.get(user_id)
+        if entry is not None and entry.maintenance:
+            self._reject(503, '正在清理账号数据，请稍后重试')
         if entry is not None and entry.waiting:
             self._reject(429, '这个账号已有一条消息在等待，请稍后重试')
         queued = self._slots.locked() or (entry is not None and entry.lock.locked())

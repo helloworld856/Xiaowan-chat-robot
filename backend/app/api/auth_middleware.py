@@ -1,3 +1,4 @@
+from collections import Counter
 from urllib.parse import urlsplit
 
 from starlette.datastructures import MutableHeaders
@@ -28,6 +29,8 @@ class AuthenticationMiddleware:
         self.app = app
         self.service = service
         self.user_data_paths = user_data_paths
+        self.active: Counter[int] = Counter()
+        self.deleting: set[int] = set()
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
@@ -64,6 +67,12 @@ class AuthenticationMiddleware:
         state['user'] = user
         state['username'] = user.username if user is not None else None
         tracked_user = user if user is not None and path not in ('/auth/login', '/auth/register') and not public_static else None
+        deleting = (method, path) == ('DELETE', '/auth/account')
+        user_id = tracked_user.id if tracked_user is not None else None
+        if user_id is not None and (user_id in self.deleting or (deleting and self.active[user_id])):
+            await JSONResponse({'detail': '该账号还有请求正在处理，请稍后重试'}, status_code=409,
+                               headers={'Cache-Control': 'no-store'})(scope, receive, send)
+            return
 
         async def send_response(message):
             if message['type'] == 'http.response.start':
@@ -82,11 +91,26 @@ class AuthenticationMiddleware:
             await send(message)
 
         # 认证完成后绑定账号日志上下文，其余请求使用系统日志上下文。
-        if self.user_data_paths is not None and tracked_user is not None:
-            self.user_data_paths.bind(tracked_user)
-        with account_log_context(self.user_data_paths, tracked_user.id if tracked_user else None):
-            try:
-                await self.app(scope, receive, send_response)
-            except Exception as error:
-                logger.warning('请求处理异常（%s）', type(error).__name__)
-                raise
+        if user_id is not None:
+            if deleting:
+                self.deleting.add(user_id)
+            else:
+                self.active[user_id] += 1
+        try:
+            # 注销的请求日志写入系统日志，避免重新创建已注销账号的目录。
+            if self.user_data_paths is not None and tracked_user is not None and not deleting:
+                self.user_data_paths.bind(tracked_user)
+            with account_log_context(self.user_data_paths, None if deleting else user_id):
+                try:
+                    await self.app(scope, receive, send_response)
+                except Exception as error:
+                    logger.warning('请求处理异常（%s）', type(error).__name__)
+                    raise
+        finally:
+            if user_id is not None:
+                if deleting:
+                    self.deleting.remove(user_id)
+                else:
+                    self.active[user_id] -= 1
+                    if not self.active[user_id]:
+                        del self.active[user_id]

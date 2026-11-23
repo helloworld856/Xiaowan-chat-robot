@@ -1,15 +1,15 @@
-import {canManageModel, getRequestGeneration, modelAPI, settingsAPI} from './api.ts';
+import {canManageModel, clearHistoryAPI, getRequestGeneration, modelAPI, settingsAPI} from './api.ts';
 import type {ModelOptions, SavedSettings} from './api.ts';
 import {modelConfig} from './global_config.ts';
 import {preferences} from './preferences.ts';
 import type {Preferences} from './preferences.ts';
-import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect} from './ui.ts';
+import {openPopup, closePopup, resetPopup, closeMenu, menuBtn, menuSelect, chatBox, comeToBottom, sendBtn, lockSendBtn, unlockSendBtn, showAlert} from './ui.ts';
 import {switchTheme} from './utils.ts';
+import {confirmAction} from './confirm.ts';
 
 const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 const fields = () => document.getElementById('preferences-fields') as HTMLFieldSetElement;
-const status = () => document.getElementById('preferences-status')!;
 let modelRevision = 0;
 let modelOptions: ModelOptions | undefined;
 const settingsPopup = () => document.getElementById('setting-container') as HTMLDialogElement;
@@ -78,8 +78,8 @@ export function resetSettings() {
     renderPreferences();
     updateModelDisplay();
     fields().disabled = true;
-    status().textContent = '';
-    (document.getElementById('reload-settings') as HTMLButtonElement).disabled = false;
+    document.getElementById('chat-settings-status')!.textContent = '';
+    (document.getElementById('clear-chat-history') as HTMLButtonElement).disabled = false;
     const form = document.getElementById('model-config-form') as HTMLFormElement;
     form.reset();
     form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -92,18 +92,11 @@ export async function loadSettings() {
     const generation = getRequestGeneration();
     const requestedModelRevision = modelRevision;
     fields().disabled = true;
-    status().textContent = '正在读取设置…';
-    try {
-        const saved = await settingsAPI();
-        if (generation !== getRequestGeneration()) return;
-        applySettings(saved, requestedModelRevision);
-        renderPreferences();
-        fields().disabled = false;
-        status().textContent = '';
-    } catch (error) {
-        if (generation === getRequestGeneration()) status().textContent = error instanceof Error ? error.message : '设置读取失败';
-        throw error;
-    }
+    const saved = await settingsAPI();
+    if (generation !== getRequestGeneration()) return;
+    applySettings(saved, requestedModelRevision);
+    renderPreferences();
+    fields().disabled = false;
 }
 
 export function initSettings() {
@@ -119,7 +112,6 @@ export function initSettings() {
     let loadedAddress = '';
     let apiKeyEdited = false;
     let modelOperation: number | null = null;
-    let preferencesSave: {generation: number; pending?: Preferences} | undefined;
 
     function resetApiKey() {
         apiKey.value = '';
@@ -148,6 +140,7 @@ export function initSettings() {
         event.stopPropagation();
         closeMenu();
         menuBtn.focus();
+        renderPreferences();
         updateModelDisplay();
         openPopup(container);
     });
@@ -155,6 +148,46 @@ export function initSettings() {
     container.addEventListener('cancel', event => {
         event.preventDefault();
         void closePopup(container);
+    });
+    const clearHistory = document.getElementById('clear-chat-history') as HTMLButtonElement;
+    const chatStatus = document.getElementById('chat-settings-status')!;
+    function setChatStatus(message: string, error = false) {
+        chatStatus.textContent = message;
+        chatStatus.classList.toggle('is-error', error);
+    }
+    clearHistory.addEventListener('click', async () => {
+        if (clearHistory.disabled) return;
+        const generation = getRequestGeneration();
+        setChatStatus('');
+        if (sendBtn.disabled) {
+            setChatStatus('请等当前回复完成后再清空聊天记录。', true);
+            return;
+        }
+        const confirmed = await confirmAction('确认清空聊天记录？', '此账户的所有聊天记录和聊天摘要将永久删除，且无法恢复。', '清空聊天记录');
+        if (confirmed === null || generation !== getRequestGeneration() || sendBtn.disabled) return;
+        clearHistory.disabled = true;
+        lockSendBtn();
+        setChatStatus('正在清空…');
+        try {
+            await clearHistoryAPI();
+            if (generation !== getRequestGeneration()) return;
+            const search = input('review-search');
+            search.value = '';
+            chatBox.replaceChildren();
+            search.dispatchEvent(new Event('input'));
+            comeToBottom.style.display = 'none';
+            setChatStatus('');
+            showAlert('聊天记录已清空。');
+        } catch (error) {
+            if (generation === getRequestGeneration()) {
+                setChatStatus(error instanceof Error ? error.message : '清空聊天记录失败，请稍后重试', true);
+            }
+        } finally {
+            if (generation === getRequestGeneration()) {
+                clearHistory.disabled = false;
+                unlockSendBtn();
+            }
+        }
     });
     document.getElementById('open-modify-btn')!.addEventListener('click', () => {
         if (modelOperation !== getRequestGeneration()) {
@@ -248,56 +281,28 @@ export function initSettings() {
 
     form.addEventListener('submit', event => { event.preventDefault(); void configure(false); });
     document.getElementById('test-model-btn')!.addEventListener('click', () => { void configure(true); });
-    const reload = document.getElementById('reload-settings') as HTMLButtonElement;
-    reload.addEventListener('click', async () => {
+    document.getElementById('preferences-form')!.addEventListener('submit', async event => {
+        event.preventDefault();
+        const preferenceFields = fields();
+        if (preferenceFields.disabled) return;
         const generation = getRequestGeneration();
-        if (preferencesSave?.generation === generation) return;
-        reload.disabled = true;
-        try { await loadSettings(); } catch { /* 表单状态已展示错误。 */ }
-        finally { if (generation === getRequestGeneration()) reload.disabled = false; }
-    });
-
-    async function savePreferences() {
-        if (fields().disabled) return;
-        const generation = getRequestGeneration();
+        const requestedModelRevision = modelRevision;
         const next: Preferences = {
             send_shortcut: select('send-shortcut').value as Preferences['send_shortcut'],
             theme: select('theme-select').value as Preferences['theme']
         };
-        switchTheme(next.theme);
-        if (preferencesSave?.generation === generation) {
-            // 每次提交整组偏好，当前请求结束后只补交最新一组选择。
-            preferencesSave.pending = next;
-            return;
-        }
-
-        const operation: NonNullable<typeof preferencesSave> = {generation, pending: next};
-        preferencesSave = operation;
-        reload.disabled = true;
-        status().textContent = '正在保存…';
+        preferenceFields.disabled = true;
+        let message = '偏好保存成功。';
         try {
-            while (operation.pending) {
-                const selection = operation.pending;
-                operation.pending = undefined;
-                const requestedModelRevision = modelRevision;
-                try {
-                    const saved = await settingsAPI(selection);
-                    if (generation !== getRequestGeneration()) return;
-                    applySettings(saved, requestedModelRevision);
-                    if (!operation.pending) status().textContent = '偏好已自动保存';
-                } catch (error) {
-                    if (generation !== getRequestGeneration()) return;
-                    if (!operation.pending) status().textContent = error instanceof Error ? error.message : '保存失败，请重试';
-                }
-                // 较早的保存结果更新已确认的偏好，等最新选择也提交后才同步界面。
-                if (!operation.pending) renderPreferences();
-            }
+            const saved = await settingsAPI(next);
+            if (generation !== getRequestGeneration()) return;
+            applySettings(saved, requestedModelRevision);
+            renderPreferences();
+        } catch {
+            message = '偏好保存失败，请重试。';
         } finally {
-            if (preferencesSave === operation) preferencesSave = undefined;
-            if (generation === getRequestGeneration()) reload.disabled = false;
+            if (generation === getRequestGeneration()) preferenceFields.disabled = false;
         }
-    }
-
-    select('send-shortcut').addEventListener('change', () => { void savePreferences(); });
-    select('theme-select').addEventListener('change', () => { void savePreferences(); });
+        if (generation === getRequestGeneration()) showAlert(message);
+    });
 }

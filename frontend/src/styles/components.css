@@ -304,6 +304,16 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     background: transparent;
 }
 #setting-container{
+    --setting-bg: #fff;
+    --menu-text: #27272a;
+    --menu-hover: #f4f4f5;
+    --chat-border: #e4e4e7;
+    --input-bg: #fff;
+    --input-border: #d4d4d8;
+    --select-accent: #52525b;
+    --btn-bg: #18181b;
+    --btn-text: #fff;
+    color-scheme: light;
     display: none;
     justify-content: center;
     align-items: center;
@@ -327,7 +337,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     background: var(--setting-bg);
     border-radius: 20px;
     z-index: 1;
-    opacity: 0.9;
     will-change: transform;
     backface-visibility: hidden;
 }
@@ -345,20 +354,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     display: flex;
     flex:1;
     margin: 0;
-}
-
-#setting-container .setting-head button{
-    display: flex;
-    border: 0;
-    background-color: transparent;
-    margin-right: 0;
-    cursor: pointer;
-    border-radius: 50%;
-    padding: 0.5rem;
-}
-#setting-container .setting-head button:hover{
-    background-color: var(--menu-hover);
-    animation: rotate 0.5s linear;
 }
 
 /* 设置界面内容区 */
@@ -391,23 +386,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 
 /* 管理员地址与普通账号密钥字段由同一份表单按角色显示。 */
 [data-model-admin][hidden] { display: none; }
-
-.modify-btn {    
-    margin-top: 0.5rem;
-    padding: 0.8rem;
-    border: none;
-    border-radius: 12px;
-    width: 8rem;
-    max-width: 200px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    align-self: center;
-}
-
-.modify-btn:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
 
 /* --- 修改设置弹窗样式 --- */
 .modal {
@@ -513,35 +491,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     outline: none;
 }
 
-.modal-btns {
-    display: flex;
-    gap: 1rem;
-    margin-top: 2rem;
-}
-.modal-btns.close{
-    display: none;
-}
-
-.modal-btns button {
-    flex: 1;
-    padding: 0.7rem;
-    border-radius: 12px;
-    border: none;
-    cursor: pointer;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-
-#cancel-modify-btn:hover {opacity: 0.7;}
-
-.model-submit {
-    background: var(--btn-bg);
-    color: var(--btn-text);
-}
-
-.model-submit:hover { opacity: 0.9; }
-.model-submit:disabled { opacity: 0.6; cursor: not-allowed; }
-
 .valid-loader {
     display: none;
     border: 4px solid rgba(0, 0, 0, .1);
@@ -590,18 +539,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     }
     100%{
         transform: translateY(0px);
-    }
-}
-
-/* 旋转的动画 */
-@keyframes rotate{
-    0%{
-        transform:rotate(90deg);
-        animation-timing-function: ease-out;
-    }
-    100%{
-        transform: rotate(360deg);
-        animation-timing-function: ease-in; 
     }
 }
 
@@ -706,7 +643,7 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 .settings-select:disabled { cursor: not-allowed; }
 .preference-row .settings-select { width: 11rem; max-width: 62%; }
 
-/* 支持自定义选择器时，展开列表也使用主题样式。 */
+/* 支持自定义选择器时，展开列表沿用设置界面的配色。 */
 @supports (appearance: base-select) and selector(select::picker(select)) {
     .settings-select, .settings-select::picker(select) { appearance: base-select; }
     .settings-select { align-items: center; gap: 0.6rem; }
@@ -766,10 +703,41 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
         color: var(--select-accent);
     }
 }
-.settings-help, #preferences-status, #model-test-status { font-size: 0.78rem; line-height: 1.6; margin: 0.5rem 0; overflow-wrap: anywhere; }
+.settings-help, #model-test-status, #chat-settings-status { font-size: 0.78rem; line-height: 1.6; margin: 0.5rem 0; overflow-wrap: anywhere; }
+#chat-settings-panel { margin-top: 1.5rem; border-top: 1px solid var(--chat-border); }
+#chat-settings-status { text-align: center; }
+#chat-settings-status:empty { display: none; }
+#chat-settings-status.is-error { color: #a61b1b; }
+#model-edit-modal .form-group input:focus-visible { outline: 2px solid var(--select-accent); outline-offset: 2px; }
 .settings-help { opacity: 0.7; }
-#reload-settings { padding: 0.65rem 1rem; margin-top: 0.5rem; border: 1px solid var(--input-border); border-radius: 8px; cursor: pointer; background: transparent; color: inherit; font-size: 0.75rem; }
-#setting-container button:disabled, #preferences-fields:disabled { opacity: 0.6; }
+
+.settings-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--input-border);
+    border-radius: 0.5rem;
+    background: var(--setting-bg);
+    color: var(--menu-text);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    cursor: pointer;
+}
+.settings-button:enabled:hover { background: var(--menu-hover); }
+.settings-button:focus-visible { outline: 2px solid var(--select-accent); outline-offset: 2px; }
+.settings-button:disabled { opacity: 0.6; cursor: not-allowed; }
+.settings-button-primary { border-color: var(--btn-bg); background: var(--btn-bg); color: var(--btn-text); }
+.settings-button-primary:enabled:hover { border-color: #3f3f46; background: #3f3f46; }
+.settings-button-danger { border-color: #e7b8b8; color: #a61b1b; }
+.settings-button-danger:enabled:hover { background: #fff1f1; }
+.settings-button.close-setting { width: 2.5rem; padding: 0; }
+.settings-section-action { display: flex; width: min(9rem, 100%); margin: 0.5rem auto 0; }
+#preferences-fields:disabled .settings-select { opacity: 0.6; }
+
 #model-edit-modal .modal-content { max-height: 100%; overflow-y: auto; padding: 1.25rem; }
 #model-edit-modal .form-group { flex-direction: column; align-items: stretch; gap: 0.4rem; margin-bottom: 0.8rem; }
 #model-edit-modal .form-group label { width: auto; }
@@ -779,14 +747,7 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.5rem;
 }
-.model-key-field button {
-    padding-inline: 0.75rem;
-    border: 1px solid var(--input-border);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-}
 #model-api-key::-ms-reveal { display: none; }
 #model-edit-modal .settings-select { min-width: 0; width: 100%; }
-#model-edit-modal .modal-btns { margin-top: 1rem; gap: 0.5rem; flex-wrap: wrap; }
+#model-edit-modal .modal-btns { display: flex; margin-top: 1rem; gap: 0.5rem; flex-wrap: wrap; }
+#model-edit-modal .modal-btns .settings-button { flex: 1 1 6rem; }

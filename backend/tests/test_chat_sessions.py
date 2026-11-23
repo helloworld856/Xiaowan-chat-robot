@@ -62,6 +62,10 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                 first.cancel()
                 with self.assertRaises(asyncio.CancelledError):
                     await first
+                with self.assertRaises(ChatNotStarted) as busy:
+                    async with self.sessions.maintenance(FIRST_USER.id):
+                        self.fail('cannot clear while a detached chat is running')
+                self.assertEqual(busy.exception.status_code, 409)
                 with self.assertRaises(ChatNotStarted) as timed_out:
                     await self.sessions.send(FIRST_USER, 'must not run')
                 self.assertEqual(timed_out.exception.status_code, 503)
@@ -70,6 +74,25 @@ class ChatSessionTests(unittest.IsolatedAsyncioTestCase):
                 self.release.set()
             self.assertEqual(await self.sessions.send(FIRST_USER, 'next'), 'next')
             self.assertEqual(calls, ['first', 'next'])
+
+    async def test_maintenance_discards_cached_runtime_and_blocks_new_turns_for_the_account(self):
+        from app.chat.scheduler import ChatNotStarted
+
+        runtimes = []
+
+        def run(self_, entry, user, text):
+            runtimes.append(entry.runtime)
+            entry.runtime = user.username
+            return text
+
+        with patch.object(type(self.sessions), '_run', run):
+            await self.sessions.send(FIRST_USER, 'before')
+            async with self.sessions.maintenance(FIRST_USER.id):
+                with self.assertRaises(ChatNotStarted):
+                    await self.sessions.send(FIRST_USER, 'blocked')
+                self.assertEqual(await self.sessions.send(SECOND_USER, 'other'), 'other')
+            await self.sessions.send(FIRST_USER, 'after')
+        self.assertEqual(runtimes, [None, None, None])
 
     async def test_global_and_account_queue_limits(self):
         from app.chat.scheduler import ChatNotStarted, ChatSessions

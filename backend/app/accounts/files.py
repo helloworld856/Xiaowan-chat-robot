@@ -28,7 +28,9 @@ def username_directory_name(username: str) -> str:
 
 
 def require_directory(path: Path) -> None:
-    if not stat.S_ISDIR(path.lstat().st_mode):
+    details = path.lstat()
+    if (not stat.S_ISDIR(details.st_mode)
+            or getattr(details, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
         raise OSError(f'账号数据路径不是目录: {path.name}')
 
 
@@ -99,6 +101,10 @@ class UserDataPaths:
         directory = self.root / username_directory_name(user.username)
         with self.lock(user.id):
             self._directories[user.id] = directory
+
+    def unbind(self, user_id: int) -> None:
+        with self.lock(user_id):
+            self._directories.pop(user_id, None)
 
     def directory(self, user_id: int) -> Path:
         if type(user_id) is not int or user_id < 1:
