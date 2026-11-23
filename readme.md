@@ -84,9 +84,9 @@ npm --prefix frontend run build
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。每条消息最多 8000 个字符。
 
-管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<user_id>/model.json` 也按厂商保存这三个字段。后端使用对应账号的厂商配置，同厂商切换模型会共用地址和密钥，密钥留空时沿用已保存的值。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
+管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。后端使用对应账号的厂商配置，同厂商切换模型会共用地址和密钥，密钥留空时沿用已保存的值。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
 
-在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<user_id>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
+在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 
@@ -108,7 +108,7 @@ npm --prefix frontend run build
 
 登录 Cookie 默认有效期为 8 小时，可在 `auth.session_ttl_seconds` 修改。刷新页面可恢复登录，后端重启后需重新登录。退出只撤销当前登录，改密码后该账号的所有会话都会失效。同一浏览器配置下的标签页共享 Cookie。
 
-菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<user_id>/profile.json`，保存后刷新和重启都能恢复。头像素材位于 `frontend/public/avatars/system/`。
+菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<用户名>/profile.json`，目录名保留注册时的大小写。纯数字用户名和 Windows 保留设备名的目录加 `~` 前缀，例如 `~123`。后端启动时会把已有账号的数字目录整体改为用户名目录。目标目录已存在时会记录冲突并保留原来的数字目录。头像素材位于 `frontend/public/avatars/system/`。
 
 终端显示 Uvicorn 的启动进度和监听地址。已认证账号的运行日志写入各自目录中的 `logs/app.log`，记录请求结果、回复条数、Token 和耗时。启动、匿名请求等系统日志写入 `backend/log_config/app.log`。默认每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
 
@@ -148,6 +148,6 @@ python run_serve.py
 
 ## 升级已有账号的独立目录
 
-升级已有服务器时，一并备份 MySQL、`backend/user_data/` 和服务端配置。保留 MySQL 中的账号 ID 与目录名的对应关系。
+升级已有服务器时，一并备份 MySQL、`backend/user_data/` 和服务端配置。保留现有账号目录的名称。
 
 升级后正常启动后端。新注册账号会自动创建个人文件。已有账号首次读取缺失的偏好文件时，后端会从 MySQL 导入旧快捷键。已有个人文件优先使用。

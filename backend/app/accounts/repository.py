@@ -11,6 +11,7 @@ import pymysql
 from app.json_files import atomic_write_json
 
 HASH_ITERATIONS = 600_000
+USERNAME_PATTERN = r'^[a-zA-Z0-9_]{3,32}$'
 Role = Literal['admin', 'user']
 
 
@@ -19,6 +20,7 @@ class User:
     id: int
     username: str
     role: Role
+    uses_username_directory: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,24 +83,26 @@ class SQLAccountStore:
     def find(self, username_key: str) -> Account | None:
         try:
             with self.pool.connection() as db, db.cursor() as cursor:
-                cursor.execute('SELECT id, username, role, password_hash FROM users WHERE username_key = %s',
-                               (username_key,))
+                cursor.execute('''SELECT id, username, role, password_hash, uses_username_directory
+                                  FROM users WHERE username_key = %s''', (username_key,))
                 row = cursor.fetchone()
         except (OSError, pymysql.MySQLError):
             raise AccountStorageError() from None
         if row is None:
             return None
-        user_id, username, role, password_hash = row
+        user_id, username, role, password_hash, uses_username_directory = row
         if role not in ('admin', 'user'):
             raise AccountStorageError()
-        return Account(User(user_id, username, role), password_hash)
+        return Account(User(user_id, username, role, bool(uses_username_directory)), password_hash)
 
     def _insert(self, username: str, password_hash: str, role: Role) -> User:
+        uses_username_directory = role == 'user'
         try:
             with self.pool.connection() as db, db.cursor() as cursor:
-                cursor.execute('INSERT INTO users (username, username_key, password_hash, role) VALUES (%s, %s, %s, %s)',
-                               (username, username.lower(), password_hash, role))
-                user = User(cursor.lastrowid, username, role)
+                cursor.execute('''INSERT INTO users (username, username_key, password_hash, role, uses_username_directory)
+                                  VALUES (%s, %s, %s, %s, %s)''',
+                               (username, username.lower(), password_hash, role, uses_username_directory))
+                user = User(cursor.lastrowid, username, role, uses_username_directory)
                 # 账号提交前先准备个人目录，初始化失败时数据库连接池会回滚本次插入。
                 if role == 'user' and self.prepare_user is not None:
                     self.prepare_user(user)
@@ -113,6 +117,16 @@ class SQLAccountStore:
 
     def register(self, username: str, password_hash: str) -> User:
         return self._insert(username, password_hash, 'user')
+
+    def users_with_id_directories(self) -> list[User]:
+        with self.pool.connection() as db, db.cursor() as cursor:
+            cursor.execute('SELECT id, username, role FROM users WHERE uses_username_directory = FALSE')
+            return [User(*row) for row in cursor.fetchall()]
+
+    def use_username_directory(self, user_id: int) -> None:
+        with self.pool.connection() as db, db.cursor() as cursor:
+            cursor.execute('UPDATE users SET uses_username_directory = TRUE WHERE id = %s', (user_id,))
+            db.commit()
 
     def save_password(self, account: Account, password_hash: str) -> None:
         # 区分提交前失败与提交结果未知，认证层据此决定是否撤销会话。

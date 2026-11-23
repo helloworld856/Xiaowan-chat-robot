@@ -49,9 +49,13 @@ def initialize_schema(pool):
                 username VARCHAR(32) NOT NULL,
                 username_key VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
                 password_hash VARCHAR(255) NOT NULL,
-                role VARCHAR(16) NOT NULL
+                role VARCHAR(16) NOT NULL,
+                uses_username_directory BOOLEAN NOT NULL DEFAULT FALSE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ''')
+        cursor.execute("SHOW COLUMNS FROM users LIKE 'uses_username_directory'")
+        if cursor.fetchone() is None:
+            cursor.execute('ALTER TABLE users ADD COLUMN uses_username_directory BOOLEAN NOT NULL DEFAULT FALSE')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_id BIGINT UNSIGNED PRIMARY KEY,

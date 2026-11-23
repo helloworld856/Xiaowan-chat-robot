@@ -88,6 +88,8 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                                    f'{INITIAL_ADMIN_PASSWORD_MIN_LENGTH}–{INITIAL_ADMIN_PASSWORD_MAX_LENGTH} '
                                    '个字符的 ADMIN_INITIAL_PASSWORD，再启动后端')
             admin = accounts.initialize_admin(hash_password(password))
+        directories.migrate_legacy(accounts)
+        directories.paths.bind(admin)
         try:
             profile_store.import_legacy_profile(admin.id, legacy_root / 'profile.json')
         except (OSError, ValueError):

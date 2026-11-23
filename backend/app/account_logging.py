@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -7,7 +8,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app import config
-from app.accounts.files import UserDataPaths, protect_file, require_directory, require_file
+from app.accounts.files import DIRECTORY_MIGRATION_MARKER, UserDataPaths, protect_file, require_directory, require_file
+from app.accounts.repository import USERNAME_PATTERN
 from app.system_config import LoggingConfig
 
 
@@ -40,11 +42,19 @@ def reset_active_logs(system_log: Path, paths: UserDataPaths) -> None:
 
     for entry in entries:
         name = entry.name
-        if not (name.isascii() and name.isdecimal()) or name.startswith('0'):
+        legacy = name.isascii() and name.isdecimal() and not name.startswith('0')
+        if not legacy and re.fullmatch(USERNAME_PATTERN, name.removeprefix('~')) is None:
             continue
         try:
             require_directory(entry)
-            _truncate_existing_log(paths.log_directory(int(name)) / 'app.log')
+            if not legacy:
+                try:
+                    require_file(entry / 'profile.json')
+                except FileNotFoundError:
+                    require_file(entry / DIRECTORY_MIGRATION_MARKER)
+            _truncate_existing_log(entry / 'logs' / 'app.log')
+        except FileNotFoundError:
+            continue
         except OSError as error:
             logger.warning('无法清空账号 %s 的日志（%s）', name, type(error).__name__)
 

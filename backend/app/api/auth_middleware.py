@@ -82,6 +82,8 @@ class AuthenticationMiddleware:
             await send(message)
 
         # 认证完成后绑定账号日志上下文，其余请求使用系统日志上下文。
+        if self.user_data_paths is not None and tracked_user is not None:
+            self.user_data_paths.bind(tracked_user)
         with account_log_context(self.user_data_paths, tracked_user.id if tracked_user else None):
             try:
                 await self.app(scope, receive, send_response)

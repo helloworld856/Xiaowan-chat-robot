@@ -124,7 +124,7 @@ launcher['main']()
         log_path = self.root / 'app.log'
         log_path.write_text('previous system run', encoding='utf-8')
         users = self.root / 'user_data'
-        for user_id in ('1', '2', '3', 'manual'):
+        for user_id in ('1', '2', '3', 'Member', 'manual'):
             directory = users / user_id / 'logs'
             directory.mkdir(parents=True)
             (directory / 'app.log').write_text('previous account run', encoding='utf-8')
@@ -133,6 +133,8 @@ launcher['main']()
             archive.write_text('older archive', encoding='utf-8')
         profile = users / '1' / 'profile.json'
         profile.write_text('{"nickname":"旧昵称"}', encoding='utf-8')
+        named_profile = users / 'Member' / 'profile.json'
+        named_profile.write_text('{"nickname":"Member"}', encoding='utf-8')
 
         result = subprocess.run([sys.executable, '-B', '-c', script, str(log_path)],
                                 cwd=ROOT, capture_output=True, text=True, timeout=15)
@@ -154,6 +156,7 @@ launcher['main']()
             self.assertNotIn(message, contents)
             self.assertNotIn(message, result.stderr)
         self.assertEqual((users / '3' / 'logs' / 'app.log').read_bytes(), b'')
+        self.assertEqual((users / 'Member' / 'logs' / 'app.log').read_bytes(), b'')
         self.assertEqual((users / 'manual' / 'logs' / 'app.log').read_text(encoding='utf-8'), 'previous account run')
         for archive in archives:
             self.assertEqual(archive.read_text(encoding='utf-8'), 'older archive')

@@ -12,11 +12,10 @@ from typing import Callable
 
 from app.system_config import AuthConfig, PasswordConfig, RateLimitConfig
 
-from .repository import (HASH_ITERATIONS, AccountStorageError, AccountStore,
+from .repository import (HASH_ITERATIONS, USERNAME_PATTERN, AccountStorageError, AccountStore,
                        LocalAccountStore, PasswordCommitUnknown, ReservedUsername, User, unpack_hash)
 
 COOKIE_NAME = 'xiaowan_session'
-USERNAME_PATTERN = r'^[a-zA-Z0-9_]{3,32}$'
 TOKEN_PATTERN = re.compile(r'[a-zA-Z0-9_-]{43}')
 
 

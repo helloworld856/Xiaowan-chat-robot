@@ -1,5 +1,3 @@
-from dataclasses import asdict
-
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -19,6 +17,7 @@ from app.accounts.repository import (
     DuplicateUsername,
     PasswordCommitUnknown,
     ReservedUsername,
+    User,
 )
 from app.system_config import MAX_PASSWORD_INPUT_LENGTH, PasswordConfig
 
@@ -73,6 +72,10 @@ def _unavailable() -> JSONResponse:
     return JSONResponse({'detail': '暂时无法访问账户，请稍后重试'}, status_code=503)
 
 
+def _public_user(user: User) -> dict:
+    return {'id': user.id, 'username': user.username, 'role': user.role}
+
+
 def _clear_session_cookie(response: JSONResponse, request: Request) -> JSONResponse:
     response.delete_cookie(COOKIE_NAME, path='/', httponly=True,
                            secure=request.url.scheme == 'https', samesite='strict')
@@ -92,7 +95,7 @@ def login(credentials: LoginRequest, request: Request):
         return _throttled(error)
     except AccountStorageError:
         return _unavailable()
-    response = JSONResponse({'user': asdict(user)})
+    response = JSONResponse({'user': _public_user(user)})
     response.set_cookie(COOKIE_NAME, token, max_age=service.config.session_ttl_seconds, httponly=True,
                         secure=request.url.scheme == 'https', samesite='strict', path='/')
     return response
@@ -105,7 +108,7 @@ async def get_session(request: Request):
     config = request.app.state.system_config
     # 会话探测本身是公开操作；未登录是正常状态，不是资源请求失败。
     return {
-        'user': asdict(user) if user is not None else None,
+        'user': _public_user(user) if user is not None else None,
         'limits': {
             'password_min_length': password.min_length,
             'password_max_length': password.max_length,
@@ -135,7 +138,7 @@ def register(credentials: RegistrationRequest, request: Request):
         return _throttled(error)
     except AccountStorageError:
         return _unavailable()
-    return {'user': asdict(user)}
+    return {'user': _public_user(user)}
 
 
 @router.post('/logout')

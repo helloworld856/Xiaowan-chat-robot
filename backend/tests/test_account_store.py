@@ -72,7 +72,8 @@ class AccountStoreTests(unittest.TestCase):
         with self.pool.connection() as db, db.cursor() as cursor:
             cursor.execute('''CREATE TABLE users (
                 id INTEGER PRIMARY KEY, username TEXT NOT NULL, username_key TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL, role TEXT NOT NULL
+                password_hash TEXT NOT NULL, role TEXT NOT NULL,
+                uses_username_directory BOOLEAN NOT NULL DEFAULT FALSE
             )''')
             db.commit()
         self.root = Path(directory.name)
@@ -164,10 +165,76 @@ class AccountStoreTests(unittest.TestCase):
 
         with patch.object(_Connection, 'commit', lose_commit_ack):
             with self.assertRaises(AccountStorageError):
-                store.register('member', 'test credential hash')
+                store.register('Member', 'test credential hash')
         user = store.find('member').user
-        self.assertEqual(set(entry.name for entry in directories.paths.directory(user.id).iterdir()),
+        folder = directories.paths.directory(user.id)
+        self.assertEqual(folder, self.root / 'users' / 'Member')
+        self.assertEqual(set(entry.name for entry in folder.iterdir()),
                          {'profile.json', 'model.json', 'preferences.json', 'logs'})
+
+    def test_new_numeric_and_windows_device_usernames_keep_separate_directories(self):
+        from app.accounts.directory import UserDirectoryStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.profile import Profile, ProfileStore
+
+        profiles = ProfileStore(self.root / 'users')
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(self.pool))
+        profiles.update(123, Profile(nickname='已有账号', avatar_id='frog'))
+        accounts = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)
+
+        for username in ('123', 'CON'):
+            with self.subTest(username=username):
+                user = accounts.register(username, 'test credential hash')
+                self.assertEqual(directories.paths.directory(user.id), profiles.root / f'~{username}')
+                self.assertEqual(profiles.get(user.id, username).nickname, username)
+
+        self.assertEqual(profiles.get(123, 'old').nickname, '已有账号')
+
+    def test_legacy_directory_migration_resumes_when_database_commit_fails(self):
+        from app.accounts.directory import UserDirectoryStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.profile import Profile, ProfileStore
+
+        profiles = ProfileStore(self.root / 'users')
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(self.pool))
+        accounts = SQLAccountStore(self.pool)
+        user = accounts.initialize_admin(fixture_admin_hash())
+        profiles.update(user.id, Profile(nickname='原管理员', avatar_id='frog'))
+        old_path = profiles.root / str(user.id)
+        new_path = profiles.root / 'admin'
+
+        with patch.object(_Connection, 'commit', side_effect=pymysql.OperationalError(2013, 'commit failed')):
+            with self.assertRaises(pymysql.OperationalError):
+                directories.migrate_legacy(accounts)
+        self.assertFalse(old_path.exists())
+        self.assertTrue((new_path / 'profile.json').is_file())
+        self.assertFalse(accounts.get_admin().uses_username_directory)
+
+        reloaded = UserDirectoryStore(ProfileStore(profiles.root), UserPreferencesStore(self.pool))
+        reloaded.migrate_legacy(accounts)
+        self.assertTrue(accounts.get_admin().uses_username_directory)
+        self.assertEqual(reloaded.profiles.get(user.id, user.username).nickname, '原管理员')
+
+    def test_legacy_directory_migration_keeps_data_when_target_exists(self):
+        from app.accounts.directory import UserDirectoryStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.profile import Profile, ProfileStore
+
+        profiles = ProfileStore(self.root / 'users')
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(self.pool))
+        accounts = SQLAccountStore(self.pool)
+        user = accounts.initialize_admin(fixture_admin_hash())
+        profiles.update(user.id, Profile(nickname='原管理员', avatar_id='frog'))
+        target = profiles.root / 'admin'
+        target.mkdir()
+        (target / 'profile.json').write_text('{"nickname":"其他目录"}', encoding='utf-8')
+
+        with self.assertLogs('xiaowan', level='WARNING') as logs:
+            directories.migrate_legacy(accounts)
+        self.assertTrue(any('已存在' in line for line in logs.output))
+        self.assertFalse(accounts.get_admin().uses_username_directory)
+        self.assertEqual(profiles.get(user.id, user.username).nickname, '原管理员')
+        self.assertEqual(profiles.read_file(target / 'profile.json').nickname, '其他目录')
 
     def test_lost_commit_response_requires_relogin_and_revokes_only_target_account(self):
         from app.application import create_app

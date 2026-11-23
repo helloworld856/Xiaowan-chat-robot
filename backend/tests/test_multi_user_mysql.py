@@ -143,6 +143,17 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
 
         pool, database, db_options = self.make_database()
         with pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute('''CREATE TABLE users (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(32) NOT NULL,
+                username_key VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(16) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4''')
+            legacy_password = 'Legacy!2026'
+            cursor.execute('INSERT INTO users (username, username_key, password_hash, role) VALUES (%s, %s, %s, %s)',
+                           ('LegacyUser', 'legacyuser', hash_password(legacy_password), 'user'))
+            legacy_id = cursor.lastrowid
             cursor.execute('CREATE TABLE history_messages (conversation_round INT PRIMARY KEY, user MEDIUMTEXT, assistant MEDIUMTEXT) ENGINE=MyISAM')
             cursor.execute('CREATE TABLE abstract_messages (abstract MEDIUMTEXT) ENGINE=MyISAM')
             cursor.execute("INSERT INTO history_messages VALUES (0, 'legacy history', 'legacy reply')")
@@ -156,6 +167,12 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             SQLAccountStore(pool).initialize_admin(hash_password(credential))
             (folder / 'profile.json').write_text('{"nickname":"旧昵称","avatar_id":"frog"}', encoding='utf-8')
             profiles = ProfileStore(folder / 'profiles')
+            legacy_folder = profiles.root / str(legacy_id)
+            legacy_folder.mkdir(parents=True)
+            (legacy_folder / 'profile.json').write_text('{"nickname":"已有账号","avatar_id":"fox"}', encoding='utf-8')
+            logs = legacy_folder / 'logs'
+            logs.mkdir()
+            (logs / 'app.log.1').write_text('legacy archive', encoding='utf-8')
             model_settings = SettingsStore(folder / 'settings.json')
             catalog = default_model_catalog()
             catalog.providers['deepseek'].models.extend(['test-model', 'my-model'])
@@ -199,6 +216,9 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                     patch.object(model_factory, 'create_model', return_value=SimpleNamespace(invoke=lambda _: None)) as validator:
                 app = main.build_application(pool, profiles, folder, config_root=folder, model_catalog=catalog)
                 async with app.router.lifespan_context(app):
+                    self.assertFalse(legacy_folder.exists())
+                    self.assertEqual((profiles.root / 'LegacyUser' / 'logs' / 'app.log.1').read_text(encoding='utf-8'),
+                                     'legacy archive')
                     with pool.connection() as connection, connection.cursor() as cursor:
                         cursor.execute('''
                             SELECT table_name, engine FROM information_schema.tables
@@ -219,15 +239,18 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                             b.post('/auth/register', json={**registration, 'username': 'second_user'}))
                         self.assertEqual(sorted([first.status_code, second.status_code]), [201, 409])
                         winner = first if first.status_code == 201 else second
-                        personal_folder = profiles.root / str(winner.json()['user']['id'])
+                        registered_user = winner.json()['user']
+                        self.assertEqual(set(registered_user), {'id', 'username', 'role'})
+                        personal_folder = profiles.root / registered_user['username']
                         self.assertEqual({path.name for path in personal_folder.iterdir()},
                                          {'model.json', 'profile.json', 'preferences.json', 'logs'})
+                        self.assertFalse((profiles.root / str(registered_user['id'])).exists())
                         login_b = await b.post('/auth/login', json={'username': 'second_user', 'password': user_credential})
                         self.assertEqual(login_b.status_code, 200, login_b.text)
                         self.assertEqual(login_b.json()['user']['role'], 'user')
-                        personal_file = profiles.root / str(login_b.json()['user']['id']) / 'model.json'
+                        personal_file = personal_folder / 'model.json'
                         self.assertIsNone(json.loads(personal_file.read_text(encoding='utf-8'))['active_provider'])
-                        self.assertFalse((profiles.root / str(admin_info['id']) / 'model.json').exists())
+                        self.assertFalse((profiles.root / 'admin' / 'model.json').exists())
                         self.assertFalse((await b.get('/settings')).json()['model_ready'])
                         self.assertEqual(factory.call_args.args[1], admin_key)
                         rejected = await b.post('/chat', json={'user_input': 'must not use admin'})
@@ -295,7 +318,7 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                         self.assertIsNone((await a.get('/auth/session')).json()['user'])
                         self.assertEqual((await b.get('/auth/session')).json()['user']['id'], login_b.json()['user']['id'])
 
-                admin_log = (profiles.root / str(admin_info['id']) / 'logs' / 'app.log').read_text(encoding='utf-8')
+                admin_log = (profiles.root / 'admin' / 'logs' / 'app.log').read_text(encoding='utf-8')
                 personal_log = (personal_folder / 'logs' / 'app.log').read_text(encoding='utf-8')
                 self.assertIn('POST /model/test 返回 200', admin_log)
                 self.assertIn('POST /model/personal/test 返回 200', personal_log)
@@ -312,11 +335,15 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
 
                 resumed_pool = open_pool(database, **db_options)
                 self.addCleanup(resumed_pool.close)
-                resumed = main.build_application(resumed_pool, profiles, folder, config_root=folder,
+                resumed = main.build_application(resumed_pool, ProfileStore(profiles.root), folder, config_root=folder,
                                                  model_catalog=catalog)
                 async with resumed.router.lifespan_context(resumed):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=resumed), base_url='http://testserver') as b:
                         self.assertIsNone((await b.get('/auth/session')).json()['user'])
+                        legacy_login = await b.post('/auth/login', json={'username': 'LegacyUser', 'password': legacy_password})
+                        self.assertEqual(legacy_login.status_code, 200)
+                        self.assertEqual((await b.get('/profile')).json()['nickname'], '已有账号')
+                        self.assertFalse(legacy_folder.exists())
                         self.assertEqual((await b.post('/auth/login', json={'username': 'Second_User', 'password': user_credential})).status_code, 200)
                         self.assertEqual((await b.get('/profile')).json()['nickname'], '第二个账号')
                         self.assertEqual((await b.get('/settings')).json()['preferences']['send_shortcut'], 'ctrl_enter')
