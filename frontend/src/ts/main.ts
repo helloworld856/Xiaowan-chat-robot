@@ -94,7 +94,6 @@ function clearChat() {
     document.getElementById('review-list')!.replaceChildren();
     document.getElementById('current-username')!.textContent = '';
     document.getElementById('comeToBottom')!.style.display = 'none';
-    document.querySelector('#title h1')!.textContent = '你好';
     window.BOT_AVATAR = '';
     performance.clearMeasures('xiaowan.chat.first-reply');
     personaConfig.persona_valid = false;

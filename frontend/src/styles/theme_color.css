@@ -1,52 +1,47 @@
 /* ========== 主题色管理 ========== */
 
-/* 默认主题 */
 /* 组件统一读取这些颜色和阴影变量，主题只改变量值。 */
 :root{
     /* 背景 */
-    --bg-gradient: linear-gradient(rgb(255, 255, 255)100%);
+    --bg-gradient: #f4f6f9;
 
     /* 聊天容器 */
-    --chat-bg: rgba(214, 214, 214, 0.414);
-    --chat-border: rgba(173, 172, 172, 0.3);
-    --chat-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+    --chat-bg: #fff;
+    --chat-border: #dce3ec;
+    --chat-shadow: 0 4px 20px rgba(33, 51, 75, 0.07);
 
     /* 消息气泡 */
-    --user-bubble: skyblue;
-    --user-text: #fff;
-    --bot-bubble: rgba(255, 255, 255, 0.95);
-    --bot-text: #333;
+    --user-bubble: #e2edfc;
+    --user-text: #18375c;
+    --bot-bubble: #eff2f6;
+    --bot-text: #242e3a;
 
     /* 输入区域 */
-    --input-bg: rgba(227, 227, 227, 0.9);
-    --input-border: rgba(42, 42, 43, 0.3);
-    --input-focus: rgba(204, 204, 207, 0.5);
+    --input-bg: #fff;
+    --input-border: #8293a8;
+    --input-focus: #315e98;
 
     /* 发送按钮 */
-    --btn-bg: linear-gradient(rgba(245, 249, 249, 0.949));
-    --btn-hover: linear-gradient(rgba(153, 153, 153, 0.804));
-    --btn-text: #282727;
+    --btn-bg: #315e98;
+    --btn-hover: #264c7e;
+    --btn-text: #fff;
 
     /* 滚动条 */
     --scroll-track: rgba(0, 0, 0, 0.05);
-    --scroll-thumb: rgba(102, 126, 234, 0.3);
-    --scroll-thumb-hover: rgba(102, 126, 234, 0.5);
+    --scroll-thumb: #b8c7d8;
+    --scroll-thumb-hover: #8399b3;
 
     /* 菜单 */
-    --menu-bg: rgba(255, 255, 255, 0.95);
-    --menu-hover: rgba(102, 126, 234, 0.1);
+    --menu-bg: #fff;
+    --menu-hover: #edf3fb;
     --menu-text: #333;
 
     /* 提示弹窗按钮 */
-    --alert-color: #9ea2a29d;
-
-    /* 标题 */
-    --title-color: #3c3c3c;
-    --title-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    --alert-color: #e2edfc;
 
     /* 设置界面 */
-    --setting-bg: rgb(245, 244, 244);
-    --select-accent: #435b79;
+    --setting-bg: #fff;
+    --select-accent: #315e98;
     
 }
 
@@ -89,10 +84,6 @@ html.theme1 {
     /* 提示弹窗按钮 */
     --alert-color: #32ceed9d;
     
-    /* 标题 */
-    --title-color: #fff;
-    --title-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-
     /* 设置界面 */
     --setting-bg: white;
     --select-accent: #285fc3;
@@ -127,7 +118,6 @@ html.theme2 {
     --menu-hover: rgba(245, 175, 25, 0.15);
     
     --alert-color: #f5af19;
-    --title-color: #fff;
 
     /* 设置界面 */
     --setting-bg: white;
@@ -162,8 +152,6 @@ html.theme3 {
     --menu-hover: rgba(255, 154, 158, 0.15);
     
     --alert-color: #ff9a9e;
-    --title-color: #5a3e4b;
-    --title-shadow: 0 2px 10px rgba(255, 154, 158, 0.3);
 
     /* 设置界面 */
     --setting-bg: white;

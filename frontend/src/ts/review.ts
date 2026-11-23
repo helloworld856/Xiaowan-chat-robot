@@ -52,13 +52,10 @@ export function initChatReview() {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'review-item';
-            const number = document.createElement('span');
-            number.className = 'review-item-number';
-            number.textContent = `对话 ${index + 1}`;
             const preview = document.createElement('span');
             preview.className = 'review-item-user';
             preview.textContent = userText;
-            button.append(number, preview);
+            button.appendChild(preview);
             const reply = matchingReply || entry.replies[0];
             if (reply) {
                 const replyPreview = document.createElement('span');
@@ -79,11 +76,11 @@ export function initChatReview() {
             fragment.appendChild(button);
         }
 
-        count.textContent = query ? `找到 ${matches} 条对话` : `共 ${entries.length} 条对话 · 最近在前`;
+        count.textContent = query ? `找到 ${matches} 条匹配记录` : '';
         if (!matches) {
             const empty = document.createElement('p');
             empty.className = 'review-empty';
-            empty.textContent = query ? '没有找到相关对话，试试其他关键词。' : '还没有对话，聊几句后再来看看吧。';
+            empty.textContent = query ? '没有找到匹配的聊天记录。' : '暂无聊天记录。';
             fragment.appendChild(empty);
         }
         // 重建列表时保留键盘焦点位置，避免气泡追加后焦点丢失。

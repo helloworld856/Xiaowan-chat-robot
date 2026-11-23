@@ -221,23 +221,13 @@ body {
     gap: 1rem;
 }
 
-/* --- 顶部标题区 --- */
-#title {
-    flex-shrink: 0;
-    text-align: center;
-    padding: 0.5rem 0;
+/* 窄屏时，聊天内容从两侧操作按钮下方开始。 */
+@media (max-width: 900px) {
+    .chat-layout { padding-top: 4.25rem; }
 }
 
-#title h1{
-    font-size: 1.3rem;
-    font-weight: 500;
-    color: var(--title-color);
-    text-shadow: var(--title-shadow);
-    letter-spacing: 0.5px;
-}
-
-#title h1.loading{
-    content: '对方正在输入中...';
+@media (max-width: 600px) {
+    .chat-layout { padding: 3.5rem 0.5rem 0.75rem; gap: 0.75rem; }
 }
 
 /* --- 聊天容器 --- */
@@ -317,7 +307,6 @@ body {
     display: flex;
     flex-shrink: 0;
     gap: 1rem;
-    margin-top: 1rem;
 }
 
 #userInput {
@@ -341,6 +330,16 @@ body {
     outline: 2px solid var(--input-border);
     outline-offset: 2px;
 }
+
+html.theme0 #userInput {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--bot-text);
+    box-shadow: none;
+}
+
+html.theme0 #userInput::placeholder { color: #5d6b7c; }
+html.theme0 #userInput:focus-visible { outline-color: var(--input-focus); }
 
 textarea#userInput {
     min-width: 0;

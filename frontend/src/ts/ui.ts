@@ -22,15 +22,11 @@ export function closeMenu() {
 export function lockSendBtn() {//锁住发送按钮
     sendBtn.disabled = true;
     sendBtn.innerText = '......';
-    var h = document.querySelector('#title h1') as HTMLHeadingElement;
-    h.classList.add('loading');
 }
 
 export function unlockSendBtn() {//解锁发送按钮
     sendBtn.disabled = false;
     sendBtn.innerText = '发送';
-    var h = document.querySelector('#title h1') as HTMLHeadingElement;
-    h.classList.remove('loading');
 }
 
 export function scrollToBottom(smooth = true) {// 启用平滑滚动
@@ -117,9 +113,6 @@ export function updateUi(persona: PersonaInfo){
     if(persona.BOT_NAME){
         document.title = persona.BOT_NAME;
     }
-
-    const welcome = document.querySelector('#title h1') as HTMLHeadingElement;
-    welcome.innerText = persona.BOT_NAME;
 
     //助手头像（保存到全局，后面用）
     window.BOT_AVATAR= persona.BOT_AVATAR;

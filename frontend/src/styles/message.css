@@ -74,6 +74,8 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+html.theme0 .user_bubble { box-shadow: none; }
+
 /* 用户气泡三角形（指向右边头像） */
 .user_triangle {
     width: 0;

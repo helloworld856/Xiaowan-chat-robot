@@ -38,14 +38,19 @@ test('startup does not read or write browser theme preferences', async () => {
     assert.equal(storageAccesses, 0);
 });
 
-test('loading the persona preserves the user avatar that their profile already supplied', async () => {
+test('loading the persona works without a chat heading and preserves the saved user avatar', async () => {
     const globals = {
         exports: {},
-        document: {getElementById: () => ({}), querySelector: () => ({}), querySelectorAll: () => []},
+        document: {
+            getElementById: () => ({}),
+            querySelector: selector => selector === '#title h1' ? null : {},
+            querySelectorAll: () => []
+        },
         window: {USER_AVATAR: '/avatars/system/fox.png'}
     };
     await runModule('ui.ts', {...globals});
     globals.exports.updateUi({BOT_NAME: '小晚', BOT_AVATAR: '/avatars/xiaowan.png', USER_AVATAR: '/avatars/system/cat.png'});
+    assert.equal(globals.document.title, '小晚');
     assert.equal(globals.window.USER_AVATAR, '/avatars/system/fox.png');
     assert.equal(globals.window.BOT_AVATAR, '/avatars/xiaowan.png');
 });

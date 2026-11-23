@@ -99,16 +99,18 @@
 
 .review-header h2 { font-size: 1.1rem; font-weight: 600; }
 
-.review-description, #review-count {
+#review-count {
     font-size: 0.75rem;
     opacity: 0.7;
     margin: 0.5rem 0 0.75rem;
 }
 
-.review-search-label { font-size: 0.8rem; margin: 0.5rem 0; }
+#review-count:empty { margin: 0; }
+
 #review-search {
     width: 100%;
     min-width: 0;
+    margin: 0.75rem 0;
     padding: 0.65rem;
     border: 1px solid var(--input-border);
     border-radius: 9px;
@@ -142,7 +144,6 @@
 }
 
 .review-item:hover { background: var(--menu-hover); }
-.review-item-number { font-size: 0.7rem; opacity: 0.6; }
 .review-item-user, .review-item-reply {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -151,12 +152,17 @@
     overflow-wrap: anywhere;
     font-size: 0.85rem;
 }
+.review-item-user { font-weight: 600; }
 .review-item-reply { font-size: 0.75rem; opacity: 0.7; }
 .review-empty { padding: 1rem 0; font-size: 0.85rem; opacity: 0.7; }
 .review-selected { outline: 2px solid var(--menu-text); outline-offset: 4px; }
 .review-item:focus-visible, #review-search:focus-visible {
     outline: 2px solid var(--menu-text);
     outline-offset: 2px;
+}
+
+html.theme0 :is(.review-item:focus-visible, #review-search:focus-visible, .review-selected) {
+    outline-color: var(--input-focus);
 }
 
 /* 打开时从左侧滑入，时长与按钮移动一致 */
@@ -209,6 +215,13 @@
 #menuBtn.active {
     background: var(--menu-bg);
 }
+
+html.theme0 :is(.sidebar-btn, #menuBtn) {
+    background: var(--menu-bg);
+    border: 1px solid var(--chat-border);
+}
+
+html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 
 /* 菜单面板 */
 #menu {
