@@ -19,4 +19,4 @@
 4、"action":保留字符串字段，默认返回空字符串，不需要编写动作。
 优先保证reply自然、连贯，不要为了补充其他字段而表演情绪或编造情节。
 回复格式:
-{{"reply":[],"inner monologue":[],"emotion":"平静","action":""}}
+{"reply":[],"inner monologue":[],"emotion":"平静","action":""}

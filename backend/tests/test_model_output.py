@@ -58,7 +58,9 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(result['message']['assistant'], result['ai_response'])
         self.assertEqual(result['total_tokens'], 7)
         prompt = agent.invoke.call_args.args[0]['messages'][0]['content']
-        self.assertIn('1 至 5 条', prompt)
+        self.assertRegex(prompt, r'1\s*至\s*5\s*条')
+        schema_example = json.loads(prompt.splitlines()[-1])
+        self.assertIsInstance(schema_example['reply'], list)
 
     def test_reply_generation_keeps_visible_plain_text_without_exposing_reasoning(self):
         with self.assertNoLogs(parser.logger, level='WARNING'):
