@@ -106,9 +106,14 @@ class MemoryManager:
                 self._stale = True
                 return
 
-            prompt = f"""请你对用户（对应user）和{persona.BOT_NAME}（对应assistant）的历史对话及更早的历史对话摘要进行缩减，保留重点，返回精确的重点摘要。
-历史对话：{older}。
-更早的历史对话摘要：{self.abstract_cache}。"""
+            prompt = f"""【已有摘要】
+{self.abstract_cache or '无'}
+
+【这次归入摘要的对话，按时间顺序】
+user 是用户，assistant 是{persona.BOT_NAME}。
+{older}
+
+请合并已有摘要和这批对话，输出完整的更新摘要。两部分都没有值得保留的信息时，写「暂无需要延续的对话信息。」"""
             result = summary_agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})
             messages = result.get('messages', [])
             summary = model_text(messages[-1].content) if messages else ''
