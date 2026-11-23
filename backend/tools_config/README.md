@@ -44,7 +44,20 @@
 }
 ```
 
-用户问「杭州现在多少度？」时，模型可以选择 `get_weather` 并传入 `{"city": "杭州"}`。时间工具使用 `{"timezone": "America/New_York"}` 可以查询纽约时间，传 `{}` 则使用北京时间。
+用户问「杭州现在多少度？」时，模型可以选择 `get_weather` 并传入 `{"city": "杭州"}`。
+
+## 示例：时间工具
+
+`get_current_time` 使用本机时钟和 IANA 时区数据。日期使用公历，默认时区为 `Asia/Shanghai`。
+
+| 用途 | 参数示例 |
+| --- | --- |
+| 查询纽约现在几点 | `{"timezone": "America/New_York"}` |
+| 计算今天起 30 天后的日期和星期 | `{"operation": "add_days", "days": 30}` |
+| 计算距离指定日期还有几天 | `{"operation": "days_between", "end_date": "2027-01-01"}` |
+| 将北京时间换算为伦敦时间 | `{"operation": "convert_timezone", "local_datetime": "2026-11-23T20:00", "target_timezone": "Europe/London"}` |
+
+日期间隔按结束日期减起始日期计算，同一天返回 0。转换时遇到夏令时导致的重复时刻时，工具会列出两个候选偏移量供确认。
 
 ## 修改规格时一起检查什么
 
