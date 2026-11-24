@@ -1,7 +1,7 @@
 import {AuthRequiredError, CancelledRequestError, canManageModel, changePasswordAPI, deleteAccountAPI, getRequestGeneration, profileAPI} from './api.ts';
 import type {AvatarId, ProfileInfo} from './api.ts';
 import {inputLimits} from './global_config.ts';
-import {menuBtn, menuSelect} from './ui.ts';
+import {menuBtn, menuSelect, showAlert} from './ui.ts';
 import {confirmAction} from './confirm.ts';
 
 let current: ProfileInfo | null = null;
@@ -49,7 +49,6 @@ export function initProfile() {
     const preview = element('profile-preview') as HTMLImageElement;
     const avatars = element('profile-avatars');
     const close = element('profile-close') as HTMLButtonElement;
-    const cancel = element('profile-cancel') as HTMLButtonElement;
     const save = element('profile-save') as HTMLButtonElement;
     const back = element('profile-password-back') as HTMLButtonElement;
     const passwordSave = element('profile-password-save') as HTMLButtonElement;
@@ -67,7 +66,7 @@ export function initProfile() {
         busy = value;
         fields.disabled = value;
         passwordFields.disabled = value;
-        for (const button of [close, cancel, save, back, passwordSave]) button.disabled = value;
+        for (const button of [close, save, back, passwordSave]) button.disabled = value;
     }
     function showPassword(show: boolean) {
         form.hidden = show;
@@ -139,7 +138,7 @@ export function initProfile() {
             }
         }
     });
-    for (const button of [close, cancel]) button.addEventListener('click', () => { if (!busy) popup.close(); });
+    close.addEventListener('click', () => { if (!busy) popup.close(); });
     popup.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
     popup.addEventListener('close', () => {
         passwordForm.reset();
@@ -173,25 +172,31 @@ export function initProfile() {
         event.preventDefault();
         if (busy || !ready || !current || !form.reportValidity()) return;
         const value = nickname.value.trim();
-        if (!value) { message('profile-status', '请输入昵称', true); return; }
+        if (!value) { showAlert('请输入昵称'); return; }
         const maxNicknameLength = inputLimits.max_nickname_chars;
         if ([...value].length > maxNicknameLength) {
-            message('profile-status', `昵称最多为 ${maxNicknameLength} 个字符`, true);
+            showAlert(`昵称最多为 ${maxNicknameLength} 个字符`);
             return;
         }
         const generation = getRequestGeneration();
         setBusy(true);
         message('profile-status', '正在保存…');
+        let feedback = '个人资料已保存。';
         try {
             const profile = await profileAPI({nickname: value, avatar_id: selected});
             if (generation !== getRequestGeneration()) return;
             applyProfile(profile);
             popup.close();
         } catch (error) {
-            if (generation === getRequestGeneration() && !(error instanceof AuthRequiredError || error instanceof CancelledRequestError)) {
-                message('profile-status', error instanceof Error ? error.message : '保存失败，请重试', true);
+            if (generation !== getRequestGeneration() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
+            feedback = error instanceof Error ? error.message : '保存失败，请重试';
+        } finally {
+            if (generation === getRequestGeneration()) {
+                message('profile-status');
+                setBusy(false);
             }
-        } finally { if (generation === getRequestGeneration()) setBusy(false); }
+        }
+        showAlert(feedback);
     });
 
     passwordForm.addEventListener('submit', async event => {

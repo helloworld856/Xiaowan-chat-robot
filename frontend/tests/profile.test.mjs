@@ -43,14 +43,15 @@ function profileHarness(api, inputLimits) {
     const menu = makeElement();
     const posts = [];
     const events = [];
+    const alerts = [];
     class AuthRequiredError extends Error {}
     class CancelledRequestError extends Error {}
     const exports = {};
     runInNewContext(compiled, {
-        exports, window: {dispatchEvent(event) { events.push(event.type); }}, Event,
+        exports, window: {dispatchEvent(event) { events.push(event.type); }}, Event, Error,
         document: {getElementById: getElement, querySelectorAll: () => []},
         require: name => ({
-            './ui.ts': {menuBtn: makeElement(), menuSelect: [menu]},
+            './ui.ts': {menuBtn: makeElement(), menuSelect: [menu], showAlert: message => alerts.push(message)},
             './confirm.ts': {confirmAction: api.confirmAction},
             './global_config.ts': {inputLimits},
             './api.ts': {
@@ -65,7 +66,7 @@ function profileHarness(api, inputLimits) {
             }
         })[name]
     });
-    return {exports, getElement, menu, posts, events};
+    return {exports, getElement, menu, posts, events, alerts};
 }
 
 const savedProfile = {
@@ -119,7 +120,7 @@ test('a failed profile read cannot save an uninitialized or cancelled draft', as
 });
 
 test('a configured nickname limit counts Unicode characters', async () => {
-    const {exports, getElement, menu, posts} = profileHarness({
+    const {exports, getElement, menu, posts, alerts} = profileHarness({
         profileAPI: async payload => ({...savedProfile, ...payload})
     }, {max_nickname_chars: 3});
     exports.initProfile();
@@ -129,10 +130,37 @@ test('a configured nickname limit counts Unicode characters', async () => {
     nickname.value = '🙂🙂🙂🙂';
     await submit();
     assert.equal(posts.length, 0);
-    assert.match(getElement('profile-status').textContent, /3/);
+    assert.match(alerts.at(-1), /3/);
     nickname.value = '🙂🙂🙂';
     await submit();
     assert.equal(posts[0].nickname, '🙂🙂🙂');
+});
+
+test('profile save shows its result and keeps edits available after a failed request', async () => {
+    let fail = true;
+    const {exports, getElement, menu, alerts} = profileHarness({
+        profileAPI: async payload => {
+            if (!payload) return savedProfile;
+            if (fail) throw new Error('保存个人资料失败');
+            return {...savedProfile, ...payload};
+        }
+    }, {max_nickname_chars: 32});
+    exports.initProfile();
+    await menu.listeners.get('click')();
+    const nickname = getElement('profile-nickname');
+    const submit = () => getElement('profile-form').listeners.get('submit')({preventDefault() {}});
+    nickname.value = 'New name';
+    await submit();
+    assert.deepEqual(alerts, ['保存个人资料失败']);
+    assert.equal(nickname.value, 'New name');
+    assert.equal(getElement('profile-dialog').open, true);
+    assert.equal(getElement('profile-save').disabled, false);
+
+    fail = false;
+    await submit();
+    assert.equal(alerts.at(-1), '个人资料已保存。');
+    assert.equal(getElement('profile-dialog').open, false);
+    assert.equal(getElement('current-username').textContent, 'New name');
 });
 
 test('changing a password enforces the configured length range', async () => {
