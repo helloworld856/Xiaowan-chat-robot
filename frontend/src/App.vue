@@ -15,6 +15,7 @@ import type {Preferences} from './ts/preferences.ts';
 
 const menu = ref<InstanceType<typeof AccountMenu> | null>(null);
 const dialogs = ref<InstanceType<typeof AppDialogs> | null>(null);
+const authScreen = ref<InstanceType<typeof AuthScreen> | null>(null);
 const chat = ref<InstanceType<typeof ChatWorkspace> | null>(null);
 const settings = ref<InstanceType<typeof SettingsDialog> | null>(null);
 const profileDialog = ref<InstanceType<typeof ProfileDialog> | null>(null);
@@ -102,7 +103,7 @@ function resetAccount() {
             <div v-for="index in 3" :key="`shadow-${index}`" class="typing-shadow"></div>
         </div>
     </div>
-    <AuthScreen v-if="!starting && !user && !sessionHidden" :session="session" />
+    <AuthScreen v-if="!starting && !user && !sessionHidden" ref="authScreen" :session="session" />
     <div id="app-shell" :hidden="!user || sessionHidden" :inert="!ready || sessionHidden || !user">
         <ChatWorkspace ref="chat" :ready="ready" :shortcut="preferences.send_shortcut" :profile="profile"
             :persona="persona" :clearing-history="clearingHistory" :show-alert="showAlert" @busy-change="chatBusy = $event" />
@@ -113,6 +114,8 @@ function resetAccount() {
         <SettingsDialog ref="settings" :is-admin="isAdmin" :preferences="preferences" :chat-busy="chatBusy"
             :show-alert="showAlert" :confirm-action="confirmAction" @preferences-change="applyPreferences"
             @clearing-history="clearingHistory = $event" @history-cleared="chat?.clearHistory()" />
-        <AppDialogs ref="dialogs" />
+    </div>
+    <div :hidden="sessionHidden">
+        <AppDialogs ref="dialogs" @alert-closed="authScreen?.restoreFocus()" />
     </div>
 </template>

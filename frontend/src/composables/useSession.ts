@@ -34,9 +34,6 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
     const registerPassword = ref('');
     const registerConfirmation = ref('');
     const registrationOpen = ref(false);
-    const loginMessage = ref('');
-    const loginTone = ref<'error' | 'success'>('error');
-    const registrationMessage = ref('');
     const pending = ref<'login' | 'register' | 'logout' | null>(null);
     const changingCredentials = ref(false);
     const busy = computed(() => pending.value !== null || changingCredentials.value);
@@ -56,52 +53,51 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
         password.value = '';
         registerPassword.value = '';
         registerConfirmation.value = '';
-        registrationMessage.value = '';
     }
 
     function switchForm(show: boolean) {
         if (busy.value) return false;
-        if (show) loginMessage.value = '';
         showRegistration(show);
         return true;
     }
 
-    function signedOut(message = '', tone: 'error' | 'success' = 'error') {
+    function signedOut(message = '') {
         authRevision++;
         invalidateRequests();
         user.value = null;
         sessionHidden.value = false;
         showRegistration(false);
         registerUsername.value = '';
-        loginMessage.value = message;
-        loginTone.value = tone;
         onSignedOut();
+        if (message) showAlert(message);
     }
 
     async function signedIn(account: AuthUser) {
         invalidateRequests(account);
         user.value = account;
         password.value = '';
-        loginMessage.value = '';
         await onAuthenticated(account);
     }
 
     async function login() {
         if (starting.value || user.value || busy.value) return;
+        const name = username.value.trim();
+        if (!name || !password.value) {
+            showAlert(name ? '请输入密码' : '请输入用户名');
+            return;
+        }
         const revision = authRevision;
         const tabChange = externalAuthChange;
         pending.value = 'login';
-        loginMessage.value = '';
-        loginTone.value = 'error';
         try {
-            const result = await loginAPI(username.value.trim(), password.value);
+            const result = await loginAPI(name, password.value);
             notifyOtherTabs();
             if (disposed || revision !== authRevision) return;
             if (tabChange === externalAuthChange) await signedIn(result.user);
             else signedOut(authChangeMessage);
         } catch (reason) {
             if (!disposed && revision === authRevision) {
-                loginMessage.value = reason instanceof Error ? reason.message : '登录失败，请重试';
+                showAlert(reason instanceof Error ? reason.message : '登录失败，请重试');
             }
         } finally {
             pending.value = null;
@@ -112,35 +108,41 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
     async function register(): Promise<'username' | 'password' | 'confirmation' | 'registered' | undefined> {
         if (starting.value || user.value || !registrationOpen.value || busy.value) return;
         const chosenUsername = registerUsername.value.trim();
+        if (!chosenUsername) {
+            showAlert('请输入用户名');
+            return 'username';
+        }
+        if (!/^[A-Za-z0-9_]{3,32}$/.test(chosenUsername)) {
+            showAlert('用户名须为 3–32 位英文字母、数字或下划线');
+            return 'username';
+        }
         if (chosenUsername.toLowerCase() === 'admin') {
-            registrationMessage.value = 'admin 是保留用户名';
+            showAlert('admin 是保留用户名');
             return 'username';
         }
         const length = [...registerPassword.value].length;
         const {password_min_length: min, password_max_length: max} = inputLimits;
         if (length < min || length > max) {
-            registrationMessage.value = `密码须为 ${min}–${max} 个字符`;
+            showAlert(`密码须为 ${min}–${max} 个字符`);
             return 'password';
         }
         if (registerPassword.value !== registerConfirmation.value) {
-            registrationMessage.value = '两次输入的密码不一致';
+            showAlert('两次输入的密码不一致');
             return 'confirmation';
         }
         const revision = authRevision;
         pending.value = 'register';
-        registrationMessage.value = '';
         try {
             const {user: account} = await registerAPI(chosenUsername, registerPassword.value, registerConfirmation.value);
             if (disposed || revision !== authRevision) return;
             showRegistration(false);
             registerUsername.value = '';
             username.value = account.username;
-            loginMessage.value = '注册成功，请登录';
-            loginTone.value = 'success';
+            showAlert('注册成功，请登录');
             return 'registered';
         } catch (reason) {
             if (!disposed && revision === authRevision) {
-                registrationMessage.value = reason instanceof Error ? reason.message : '注册失败，请重试';
+                showAlert(reason instanceof Error ? reason.message : '注册失败，请重试');
             }
         } finally {
             pending.value = null;
@@ -219,13 +221,13 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
 
     function onPasswordChanged() {
         notifyOtherTabs();
-        signedOut('密码已修改，请使用新密码登录', 'success');
+        signedOut('密码已修改，请使用新密码登录');
     }
 
     function onAccountDeleted() {
         notifyOtherTabs();
         username.value = '';
-        signedOut('账户已注销', 'success');
+        signedOut('账户已注销');
     }
 
     async function initializeSession() {
@@ -277,6 +279,6 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
     return {
         user, starting, sessionHidden, busy, loggingIn, registering, loggingOut,
         username, password, registerUsername, registerPassword, registerConfirmation,
-        registrationOpen, loginMessage, loginTone, registrationMessage, switchForm, login, register, logout
+        registrationOpen, switchForm, login, register, logout
     };
 }

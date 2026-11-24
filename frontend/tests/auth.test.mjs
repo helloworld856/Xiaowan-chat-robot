@@ -30,7 +30,7 @@ function tab({api = {}, tabs = [], confirmAction = async () => ''} = {}) {
     const state = {authenticated: [], signedOut: 0, invalidated: [], alerts: []};
     const exports = {};
     runInNewContext(compiled, {
-        exports, window: events, localStorage,
+        exports, window: events, localStorage, Error,
         require: name => ({
             vue,
             '../ts/api.ts': {
@@ -104,7 +104,7 @@ test('logout requires confirmation and blocks login until its cookie mutation se
 
 test('credential events retain the mutation lock until completion and clear deleted login names', async () => {
     let logins = 0;
-    const {session, emit} = tab({
+    const {session, state, emit} = tab({
         api: {
             sessionAPI: async () => ({user: alice}),
             loginAPI: async () => { logins++; return {user: alice}; }
@@ -119,13 +119,13 @@ test('credential events retain the mutation lock until completion and clear dele
     assert.equal(session.busy.value, true);
     emit('password-changed');
     assert.equal(session.user.value, null);
-    assert.match(session.loginMessage.value, /密码已修改/);
-    assert.equal(session.loginTone.value, 'success');
+    assert.match(state.alerts.at(-1), /密码已修改/);
     assert.equal(session.busy.value, true);
     emit('credential-change-end');
     assert.equal(session.busy.value, false);
     assert.equal(session.username.value, 'alice');
 
+    session.password.value = 'example password';
     await session.login();
     emit('credential-change-start');
     emit('auth-required');
@@ -135,8 +135,7 @@ test('credential events retain the mutation lock until completion and clear dele
     emit('account-deleted');
     assert.equal(session.user.value, null);
     assert.equal(session.username.value, '');
-    assert.match(session.loginMessage.value, /账户已注销/);
-    assert.equal(session.loginTone.value, 'success');
+    assert.match(state.alerts.at(-1), /账户已注销/);
     assert.equal(session.busy.value, true);
     emit('credential-change-end');
     assert.equal(session.busy.value, false);
@@ -155,8 +154,8 @@ test('signed-out startup is silent and startup network failure remains visible',
         assert.equal(session.starting.value, false);
         assert.equal(session.user.value, null);
         assert.deepEqual(state.authenticated, []);
-        if (offline) assert.match(session.loginMessage.value, /无法检查登录状态/);
-        else assert.equal(session.loginMessage.value, '');
+        if (offline) assert.match(state.alerts.at(-1), /无法检查登录状态/);
+        else assert.deepEqual(state.alerts, []);
     }
 });
 
@@ -172,18 +171,21 @@ test('registration enforces the session password range and returns to login', as
     assert.equal(session.switchForm(true), true);
     session.registerUsername.value = 'Admin';
     assert.equal(await session.register(), 'username');
-    assert.match(session.registrationMessage.value, /保留用户名/);
+    assert.match(state.alerts.at(-1), /保留用户名/);
+    session.registerUsername.value = 'bad name';
+    assert.equal(await session.register(), 'username');
+    assert.match(state.alerts.at(-1), /3–32/);
 
     session.registerUsername.value = ' new_account ';
     session.registerPassword.value = 'Reg!12';
     session.registerConfirmation.value = 'Reg!12';
     assert.equal(await session.register(), 'password');
-    assert.match(session.registrationMessage.value, /8–20/);
+    assert.match(state.alerts.at(-1), /8–20/);
     const valid = '🙂'.repeat(20);
     session.registerPassword.value = valid;
     session.registerConfirmation.value = 'Wrong!12';
     assert.equal(await session.register(), 'confirmation');
-    assert.match(session.registrationMessage.value, /密码不一致/);
+    assert.match(state.alerts.at(-1), /密码不一致/);
     assert.deepEqual(attempts, []);
 
     session.registerConfirmation.value = valid;
@@ -195,7 +197,26 @@ test('registration enforces the session password range and returns to login', as
     assert.equal(session.username.value, newUser.username);
     assert.equal(session.registerPassword.value, '');
     assert.equal(session.registerConfirmation.value, '');
-    assert.equal(session.loginTone.value, 'success');
+    assert.equal(state.alerts.at(-1), '注册成功，请登录');
+});
+
+test('login reports validation and request failures through the alert', async t => {
+    const attempts = [];
+    const {session, state, unmount} = tab({api: {
+        loginAPI: async (...args) => { attempts.push(args); throw new Error('用户名或密码错误'); }
+    }});
+    t.after(unmount);
+    await settle();
+    session.username.value = '   ';
+    await session.login();
+    session.username.value = alice.username;
+    await session.login();
+    session.password.value = 'wrong password';
+    await session.login();
+    assert.deepEqual(state.alerts, ['请输入用户名', '请输入密码', '用户名或密码错误']);
+    assert.deepEqual(attempts, [[alice.username, 'wrong password']]);
+    assert.equal(session.password.value, '');
+    assert.equal(session.busy.value, false);
 });
 
 test('another tab clears private state without reopening stale startup results', async () => {
@@ -225,7 +246,7 @@ test('another tab clears private state without reopening stale startup results',
     assert.deepEqual(earlier.state.authenticated, []);
     assert.equal(earlier.session.user.value, null);
     assert.equal(earlier.session.starting.value, false);
-    assert.match(earlier.session.loginMessage.value, /登录状态已更改/);
+    assert.match(earlier.state.alerts.at(-1), /登录状态已更改/);
 });
 
 test('back-forward cache keeps the account hidden until the cookie is revalidated', async () => {
@@ -261,6 +282,8 @@ test('a logout confirmation for an expired account cannot log out a newer sessio
     await settle();
     const stale = session.logout();
     emit('auth-required');
+    session.username.value = alice.username;
+    session.password.value = 'example password';
     await session.login();
     confirmation('');
     await stale;
@@ -277,7 +300,7 @@ test('the auth screen preserves autofill during editing and clears passwords whe
     t.after(() => { delete globalThis.document; });
     const newUser = {id: 9, username: 'new_account', role: 'user'};
     const logins = [];
-    const {session, unmount} = tab({api: {
+    const {session, state, unmount} = tab({api: {
         registerAPI: async () => ({user: newUser}),
         loginAPI: async (...args) => { logins.push(args); return {user: newUser}; }
     }});
@@ -310,8 +333,11 @@ test('the auth screen preserves autofill during editing and clears passwords whe
     await screen.act('register-form', 'submit');
     assert.equal(screen.element('register-form').props.hidden, true);
     assert.equal(screen.element('login-username').value, newUser.username);
+    screen.session.restoreFocus();
     assert.equal(screen.element('login-password').focused, true);
-    assert.equal(screen.element('login-error').props['data-tone'], 'success');
+    assert.equal(state.alerts.at(-1), '注册成功，请登录');
+    assert.throws(() => screen.element('login-error'), /missing element/);
+    assert.throws(() => screen.element('register-error'), /missing element/);
 
     screen.element('login-username').value = 'saved_account';
     screen.input('login-password', 'saved password');

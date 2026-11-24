@@ -3,6 +3,7 @@ import {nextTick, onBeforeUnmount, ref} from 'vue';
 import {closeDialog, openDialog, resetDialog} from '../ts/dialogs.ts';
 import type {ConfirmOptions} from '../ts/dialogs.ts';
 
+const emit = defineEmits<{'alert-closed': []}>();
 const logout = ref<HTMLDialogElement | null>(null);
 const confirmation = ref<HTMLDialogElement | null>(null);
 const alert = ref<HTMLDialogElement | null>(null);
@@ -52,8 +53,12 @@ function showAlert(text: string) {
     });
 }
 
-function dismissAlert() {
-    if (alert.value) void closeDialog(alert.value);
+async function dismissAlert() {
+    const dialog = alert.value;
+    if (!dialog?.open || dialog.classList.contains('closing')) return;
+    const revision = alertRevision;
+    await closeDialog(dialog);
+    if (revision === alertRevision && !dialog.open) emit('alert-closed');
 }
 
 function reset() {

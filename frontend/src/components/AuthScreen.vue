@@ -6,7 +6,7 @@ const {session} = defineProps<{session: ReturnType<typeof useSession>}>();
 const {
     user, starting, busy, loggingIn, registering, loggingOut,
     username, password, registerUsername, registerPassword, registerConfirmation,
-    registrationOpen, loginMessage, loginTone, registrationMessage, switchForm, login, register
+    registrationOpen, switchForm, login, register
 } = session;
 
 const loginUsernameInput = ref<HTMLInputElement | null>(null);
@@ -14,11 +14,20 @@ const loginPasswordInput = ref<HTMLInputElement | null>(null);
 const registerUsernameInput = ref<HTMLInputElement | null>(null);
 const registerPasswordInput = ref<HTMLInputElement | null>(null);
 const registerConfirmationInput = ref<HTMLInputElement | null>(null);
+let pendingFocus: typeof registerUsernameInput | undefined;
 
 function focusLogin() {
     if (user.value || starting.value) return;
-    const input = username.value ? loginPasswordInput : loginUsernameInput;
+    const input = username.value.trim() ? loginPasswordInput : loginUsernameInput;
     input.value?.focus();
+}
+
+function restoreFocus() {
+    const input = pendingFocus;
+    pendingFocus = undefined;
+    if (input) input.value?.focus();
+    else if (registrationOpen.value) registerUsernameInput.value?.focus();
+    else focusLogin();
 }
 
 onMounted(focusLogin);
@@ -35,21 +44,22 @@ watch(registrationOpen, () => {
 
 async function changeForm(showRegistration: boolean) {
     if (!switchForm(showRegistration)) return;
+    pendingFocus = undefined;
     await nextTick();
     const input = showRegistration ? registerUsernameInput : loginUsernameInput;
     input.value?.focus();
 }
 
-function submitLogin(event: SubmitEvent) {
-    if (busy.value || !(event.currentTarget as HTMLFormElement).reportValidity()) return;
+function submitLogin() {
+    if (busy.value) return;
     // 密码管理器可以直接填充 DOM，提交时同时读取当前输入值。
     username.value = loginUsernameInput.value!.value;
     password.value = loginPasswordInput.value!.value;
     return login();
 }
 
-async function submitRegistration(event: SubmitEvent) {
-    if (busy.value || !(event.currentTarget as HTMLFormElement).reportValidity()) return;
+async function submitRegistration() {
+    if (busy.value) return;
     registerUsername.value = registerUsernameInput.value!.value;
     registerPassword.value = registerPasswordInput.value!.value;
     registerConfirmation.value = registerConfirmationInput.value!.value;
@@ -61,15 +71,16 @@ async function submitRegistration(event: SubmitEvent) {
         confirmation: registerConfirmationInput,
         registered: loginPasswordInput
     };
-    await nextTick();
-    inputs[field].value?.focus();
+    pendingFocus = inputs[field];
 }
+
+defineExpose({restoreFocus});
 </script>
 
 <template>
     <section id="login-screen" :aria-labelledby="registrationOpen ? 'register-title' : 'login-title'">
         <!-- 输入框只随自身绑定值更新，避免其他状态的重新渲染清除自动填充。 -->
-        <form id="login-form" class="login-card" method="post" :hidden="registrationOpen" @submit.prevent="submitLogin">
+        <form id="login-form" class="login-card" method="post" novalidate :hidden="registrationOpen" @submit.prevent="submitLogin">
             <header class="login-heading">
                 <h1 id="login-title">登录小晚</h1>
             </header>
@@ -82,10 +93,9 @@ async function submitRegistration(event: SubmitEvent) {
                 <div class="login-field">
                     <label for="login-password">密码</label>
                     <input id="login-password" ref="loginPasswordInput" v-model="password" v-memo="[password]" name="password" type="password"
-                           autocomplete="current-password" maxlength="512" aria-describedby="login-error" required>
+                           autocomplete="current-password" maxlength="512" required>
                 </div>
             </div>
-            <p id="login-error" class="login-error" role="alert" :data-tone="loginTone">{{ loginMessage }}</p>
             <button id="login-submit" class="login-primary" type="submit" :disabled="busy">
                 {{ loggingIn ? '登录中…' : loggingOut ? '正在退出…' : '登录' }}
             </button>
@@ -93,27 +103,25 @@ async function submitRegistration(event: SubmitEvent) {
                 注册账号
             </button>
         </form>
-        <form id="register-form" class="login-card" method="post" :hidden="!registrationOpen" @submit.prevent="submitRegistration">
+        <form id="register-form" class="login-card" method="post" novalidate :hidden="!registrationOpen" @submit.prevent="submitRegistration">
             <header class="login-heading"><h1 id="register-title">注册账号</h1></header>
             <div class="login-fields">
                 <div class="login-field">
                     <label for="register-username">用户名</label>
                     <input id="register-username" ref="registerUsernameInput" v-model="registerUsername" v-memo="[registerUsername]" name="username"
-                           type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}"
-                           title="用户名须为 3–32 位英文字母、数字或下划线" required>
+                           type="text" autocomplete="username" maxlength="32" required>
                 </div>
                 <div class="login-field">
                     <label for="register-password">密码</label>
                     <input id="register-password" ref="registerPasswordInput" v-model="registerPassword" v-memo="[registerPassword]" name="password"
-                           type="password" autocomplete="new-password" aria-describedby="register-error" required>
+                           type="password" autocomplete="new-password" required>
                 </div>
                 <div class="login-field">
                     <label for="register-confirm-password">确认密码</label>
                     <input id="register-confirm-password" ref="registerConfirmationInput" v-model="registerConfirmation" v-memo="[registerConfirmation]"
-                           name="confirm_password" type="password" autocomplete="new-password" aria-describedby="register-error" required>
+                           name="confirm_password" type="password" autocomplete="new-password" required>
                 </div>
             </div>
-            <p id="register-error" class="login-error" role="alert">{{ registrationMessage }}</p>
             <button id="register-submit" class="login-primary" type="submit" :disabled="busy">
                 {{ registering ? '注册中…' : '注册' }}
             </button>
