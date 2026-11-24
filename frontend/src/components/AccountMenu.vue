@@ -28,7 +28,9 @@ function handleClick(event: MouseEvent) {
 }
 
 function handleEscape(event: KeyboardEvent) {
-    if (event.key !== 'Escape' || !expanded.value || !zone.value?.contains(document.activeElement)) return;
+    if (event.defaultPrevented || event.key !== 'Escape' || event.isComposing || event.keyCode === 229 ||
+        !expanded.value || !zone.value?.contains(document.activeElement)) return;
+    event.preventDefault();
     reset();
     focus();
 }

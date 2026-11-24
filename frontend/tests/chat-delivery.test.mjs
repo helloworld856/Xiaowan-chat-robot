@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {runInNewContext} from 'node:vm';
+import {mountComponent, nextTick} from './vue-harness.mjs';
 
 const sourcePath = new URL('../src/composables/useChat.ts', import.meta.url);
 const compiled = fs.existsSync(sourcePath) && ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
@@ -214,6 +215,24 @@ test('a history refresh and a successful send with the same round converge on th
     assert.equal(turns[2].id, optimisticKey);
 });
 
+test('a send confirmation stays in round order when older history arrives during the send', async () => {
+    let resolveSend;
+    let history = [saved(0)];
+    const app = await harness({
+        chatAPI: () => new Promise(resolve => { resolveSend = resolve; }),
+        async historyAPI() { return {history_messages: history}; }
+    });
+    await app.loadHistory();
+    const sending = app.sendMessage();
+    const optimisticKey = app.entries.value.at(-1).id;
+    history = [...history, saved(1), saved(2)];
+    await app.loadHistory();
+    resolveSend({response: ['最新的回复'], conversation_round: 3, saved: true});
+    await sending;
+    assert.deepEqual(Array.from(app.entries.value, turn => turn.round), [0, 1, 2, 3]);
+    assert.equal(app.entries.value.at(-1).id, optimisticKey);
+});
+
 test('clearing history keeps the draft and ignores in-flight history from before clearing', async () => {
     let resolveHistory;
     const app = await harness({historyAPI: () => new Promise(resolve => { resolveHistory = resolve; })});
@@ -223,4 +242,72 @@ test('clearing history keeps the draft and ignores in-flight history from before
     await loading;
     assert.equal(app.entries.value.length, 0);
     assert.equal(app.draft.value, '原文');
+});
+
+async function workspaceHarness(t, initialEntries = []) {
+    const {ref} = await import('vue');
+    const entries = ref(initialEntries);
+    const body = {};
+    let activeElement;
+    const globals = {
+        window: new EventTarget(),
+        document: {body, get activeElement() { return activeElement?.parent ? activeElement : body; }},
+        ResizeObserver: class { observe() {} disconnect() {} },
+        Element: class { closest(selector) { return selector === 'dialog[open]' ? this : null; } }
+    };
+    const originals = new Map();
+    for (const [name, value] of Object.entries(globals)) {
+        originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+        Object.defineProperty(globalThis, name, {configurable: true, value});
+    }
+    let app;
+    t.after(() => {
+        app?.unmount();
+        for (const [name, original] of originals) {
+            if (original) Object.defineProperty(globalThis, name, original);
+            else delete globalThis[name];
+        }
+    });
+    app = mountComponent(new URL('../src/components/ChatWorkspace.vue', import.meta.url), {
+        imports: {
+            './ChatComposer.vue': {__esModule: true, default: {render: () => null}},
+            '../composables/useChat.ts': {useChat: () => ({
+                entries, draft: ref(''), busy: ref(false), isTyping: ref(false), reset() {}
+            })}
+        },
+        props: {ready: true, shortcut: 'enter', profile: null, persona: null, clearingHistory: false, showAlert() {}}
+    });
+    const toggle = app.element('sidebar-zone').children[0];
+    toggle.props.onClick();
+    await nextTick();
+    const list = app.element('review-list');
+    list.querySelectorAll = () => list.children.filter(child => child.tag === 'button');
+    list.contains = node => node?.parent === list;
+    for (const result of list.querySelectorAll()) {
+        result.focus = () => { activeElement = result; };
+    }
+    return {entries, toggle, list, ...globals};
+}
+
+test('history search keeps keyboard focus when an optimistic result becomes uncertain', async t => {
+    const app = await workspaceHarness(t, [
+        {kind: 'turn', id: 'round-0', round: 0, user: '旧消息', replies: ['旧回复']},
+        {kind: 'turn', id: 'local-1', round: null, user: '新消息', replies: []}
+    ]);
+    const [optimistic, older] = app.list.querySelectorAll();
+    optimistic.focus();
+    app.entries.value[1] = {kind: 'notice', id: 'local-1', user: '新消息', message: '待确认'};
+    await nextTick();
+    await nextTick();
+    assert.ok(app.document.activeElement === older, 'focus should move to the remaining result');
+});
+
+test('Escape in a modal leaves the history sidebar open', async t => {
+    const app = await workspaceHarness(t);
+    const escape = Object.assign(new Event('keydown', {cancelable: true, bubbles: true}), {key: 'Escape'});
+    Object.defineProperty(escape, 'target', {value: new app.Element()});
+    assert.equal(app.toggle.props['aria-expanded'], true);
+    app.window.dispatchEvent(escape);
+    await nextTick();
+    assert.equal(app.toggle.props['aria-expanded'], true);
 });

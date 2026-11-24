@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import ChatComposer from './ChatComposer.vue';
 import {useChat} from '../composables/useChat.ts';
 import type {ProfileInfo} from '../ts/api.ts';
@@ -18,6 +18,8 @@ const emit = defineEmits<{'busy-change': [busy: boolean]}>();
 
 const chatBox = ref<HTMLDivElement | null>(null);
 const reviewToggle = ref<HTMLButtonElement | null>(null);
+const reviewSearch = ref<HTMLInputElement | null>(null);
+const reviewList = ref<HTMLDivElement | null>(null);
 const reviewOpen = ref(false);
 const search = ref('');
 const selectedBubble = ref('');
@@ -64,6 +66,23 @@ const matches = computed(() => {
         });
     }
     return results;
+});
+
+watch(matches, () => {
+    const list = reviewList.value;
+    const active = document.activeElement;
+    if (!reviewOpen.value || !list?.contains(active)) return;
+    const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>('.review-item'));
+    const index = buttons.findIndex(button => button === active);
+    const focused = buttons[index];
+    if (!focused) return;
+    void nextTick(() => {
+        if (!reviewOpen.value || reviewList.value !== list || document.activeElement !== document.body) return;
+        const remaining = list.querySelectorAll<HTMLButtonElement>('.review-item');
+        const target = list.contains(focused) ? focused
+            : remaining[Math.min(index, remaining.length - 1)] ?? reviewSearch.value;
+        target?.focus({preventScroll: true});
+    });
 });
 
 function isNearBottom(distance: number) {
@@ -124,9 +143,9 @@ function jumpToBubble(target: string) {
 }
 
 function onEscape(event: KeyboardEvent) {
-    if (!event.defaultPrevented && event.key === 'Escape' && !event.isComposing && event.keyCode !== 229 && reviewOpen.value) {
-        closeReview();
-    }
+    if (event.defaultPrevented || event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || !reviewOpen.value) return;
+    if (event.target instanceof Element && event.target.closest('dialog[open]')) return;
+    closeReview();
 }
 
 function resetReview() {
@@ -180,10 +199,10 @@ defineExpose({loadHistory, clearHistory, reset});
                 <div class="review-header">
                     <h2 id="review-title">查找聊天记录</h2>
                 </div>
-                <input :key="viewRevision" id="review-search" v-model="search" type="search" aria-label="搜索聊天内容"
+                <input :key="viewRevision" id="review-search" ref="reviewSearch" v-model="search" type="search" aria-label="搜索聊天内容"
                     placeholder="输入关键词" autocomplete="off">
                 <p id="review-count" role="status">{{ query ? `找到 ${matches.length} 条匹配记录` : '' }}</p>
-                <div id="review-list">
+                <div id="review-list" ref="reviewList">
                     <button v-for="match in matches" :key="match.id" type="button" class="review-item"
                         @click="jumpToBubble(match.target)">
                         <span class="review-item-user">{{ match.user }}</span>

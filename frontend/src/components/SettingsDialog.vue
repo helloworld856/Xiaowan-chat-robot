@@ -24,6 +24,7 @@ const settingsDialog = ref<HTMLDialogElement | null>(null);
 const modelDialog = ref<HTMLDialogElement | null>(null);
 const modelForm = ref<HTMLFormElement | null>(null);
 const keyInput = ref<HTMLInputElement | null>(null);
+const autofillSelector = ':is(:autofill, :-webkit-autofill)';
 
 const preferenceDraft = ref<Preferences>({...props.preferences});
 const preferencesDisabled = ref(true);
@@ -67,14 +68,15 @@ function resetApiKey() {
 
 function discardAutofilledApiKey() {
     const input = keyInput.value;
-    if (input && (input.value !== typedApiKey || input.matches(':is(:autofill, :-webkit-autofill)'))) resetApiKey();
+    if (input && (input.value !== typedApiKey || input.matches(autofillSelector))) resetApiKey();
 }
 
 function trackApiKey(event: Event) {
     const {isTrusted, inputType} = event as InputEvent;
+    const input = keyInput.value;
     // 浏览器填充的登录密码不能显示，也不能提交给模型接口。
-    if (isTrusted && inputType && inputType !== 'insertReplacementText' && keyInput.value) {
-        typedApiKey = keyInput.value.value;
+    if (input && isTrusted && inputType && inputType !== 'insertReplacementText' && !input.matches(autofillSelector)) {
+        typedApiKey = input.value;
     } else {
         resetApiKey();
     }

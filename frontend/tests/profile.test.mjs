@@ -16,7 +16,8 @@ function profileHarness(t, {
     save = async payload => ({...savedProfile, ...payload}),
     limits = {},
     isAdmin = false,
-    confirm = async () => null
+    confirm = async () => null,
+    remove = async () => {}
 } = {}) {
     const alerts = [];
     const posts = [];
@@ -24,10 +25,11 @@ function profileHarness(t, {
     const passwords = [];
     const deletions = [];
     const events = [];
+    let generation = 0;
     const window = new EventTarget();
     const previousWindow = globalThis.window;
     globalThis.window = window;
-    for (const type of ['password-change-start', 'password-change-end', 'password-changed', 'account-deleted']) {
+    for (const type of ['credential-change-start', 'credential-change-end', 'password-changed', 'account-deleted']) {
         window.addEventListener(type, () => events.push(type));
     }
     const view = mountComponent(new URL('../src/components/ProfileDialog.vue', import.meta.url), {
@@ -35,13 +37,13 @@ function profileHarness(t, {
             '../ts/api.ts': {
                 AuthRequiredError: class extends Error {},
                 CancelledRequestError: class extends Error {},
-                getRequestGeneration: () => 0,
+                getRequestGeneration: () => generation,
                 profileAPI: payload => {
                     if (!payload) return load();
                     posts.push(payload);
                     return save(payload);
                 },
-                async deleteAccountAPI(password) { deletions.push(password); },
+                async deleteAccountAPI(password) { deletions.push(password); await remove(); },
                 async changePasswordAPI(payload) { passwords.push(payload); }
             },
             '../ts/global_config.ts': {
@@ -60,7 +62,10 @@ function profileHarness(t, {
         if (previousWindow === undefined) delete globalThis.window;
         else globalThis.window = previousWindow;
     });
-    return {...view, alerts, posts, profiles, passwords, deletions, events};
+    return {...view, alerts, posts, profiles, passwords, deletions, events, signOut() {
+        generation++;
+        view.session.reset();
+    }};
 }
 
 test('loading profile shares the saved data and allows selecting the default avatar', async t => {
@@ -96,7 +101,23 @@ test('account deletion requires confirmation and is unavailable to the built-in 
     confirmation = 'current-test-password';
     await app.act('profile-delete-account');
     assert.deepEqual(app.deletions, [confirmation]);
-    assert.deepEqual(app.events, ['account-deleted']);
+    assert.deepEqual(app.events, ['credential-change-start', 'account-deleted', 'credential-change-end']);
+});
+
+test('successful account deletion reports the session change even after the profile is reset', async t => {
+    let finish;
+    const app = profileHarness(t, {
+        confirm: async () => 'current-test-password',
+        remove: () => new Promise(resolve => { finish = resolve; })
+    });
+    await app.session.open();
+    const deletion = app.act('profile-delete-account');
+    await nextTick();
+    assert.deepEqual(app.events, ['credential-change-start']);
+    app.signOut();
+    finish();
+    await deletion;
+    assert.deepEqual(app.events, ['credential-change-start', 'account-deleted', 'credential-change-end']);
 });
 
 test('a failed profile read cannot save an uninitialized draft', async t => {
@@ -107,6 +128,25 @@ test('a failed profile read cannot save an uninitialized draft', async t => {
     app.input('profile-nickname', 'New nickname');
     await app.act('profile-form', 'submit');
     assert.deepEqual(app.posts, []);
+});
+
+test('signout between applying and rendering a profile keeps the form cleared', async t => {
+    const app = profileHarness(t);
+    app.update({onProfileChange: () => queueMicrotask(() => app.signOut())});
+    await app.session.open();
+    assert.equal(app.element('profile-nickname').value, '');
+    assert.equal(app.element('profile-save').props.disabled, true);
+});
+
+test('profile save uses a nickname filled directly into the input', async t => {
+    const app = profileHarness(t);
+    await app.session.open();
+    app.element('profile-nickname').value = ' Autofilled nickname ';
+    app.act('profile-default-avatar');
+    await nextTick();
+    assert.equal(app.element('profile-nickname').value, ' Autofilled nickname ');
+    await app.act('profile-form', 'submit');
+    assert.equal(app.posts[0].nickname, 'Autofilled nickname');
 });
 
 test('a configured nickname limit counts Unicode characters', async t => {
@@ -163,5 +203,5 @@ test('changing a password enforces character limits and signals the auth flow', 
     assert.equal(app.passwords[0].new_password, valid);
     assert.equal(app.passwords[0].current_password, 'Old!12');
     assert.equal(app.element('profile-current-password').value, '');
-    assert.deepEqual(app.events, ['password-change-start', 'password-changed', 'password-change-end']);
+    assert.deepEqual(app.events, ['credential-change-start', 'password-changed', 'credential-change-end']);
 });

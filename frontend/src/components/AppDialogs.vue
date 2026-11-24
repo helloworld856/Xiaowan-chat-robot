@@ -12,12 +12,16 @@ const message = ref('');
 let pending: {dialog: HTMLDialogElement; resolve: (value: string | null) => void} | null = null;
 let alertRevision = 0;
 
+function clearPassword() {
+    if (password.value) password.value.value = '';
+}
+
 function finishConfirmation(result: string | null) {
     if (!pending) return;
     const {dialog, resolve} = pending;
     pending = null;
     if (dialog.open) dialog.close();
-    if (password.value) password.value.value = '';
+    clearPassword();
     options.value = null;
     resolve(result);
 }
@@ -29,6 +33,7 @@ function submitConfirmation() {
 function confirmAction(next: ConfirmOptions) {
     const dialog = next.variant === 'logout' ? logout.value : confirmation.value;
     if (pending || !dialog) return Promise.resolve(null);
+    clearPassword();
     options.value = next;
     return new Promise<string | null>(resolve => {
         const request = {dialog, resolve};

@@ -73,6 +73,41 @@ test('responses arriving after logout cannot be used by the previous authenticat
     await assert.rejects(pending, error => error instanceof api.CancelledRequestError);
 });
 
+test('credential requests keep their original account and complete after the current view is reset', async t => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => calls.push({url, options, resolve})));
+    const account = {id: 7, username: 'member', role: 'user'};
+    api.invalidateRequests(account);
+    const pendingChange = api.changePasswordAPI({current_password: 'old', new_password: 'new', confirm_password: 'new'});
+    const pendingDeletion = api.deleteAccountAPI('old');
+    api.invalidateRequests();
+    const requestState = calls.map(({options}) => [options.headers['X-Xiaowan-User'], options.signal?.aborted ?? false]);
+    for (const call of calls) call.resolve(new Response(JSON.stringify({ok: true})));
+    const result = await Promise.allSettled([pendingChange, pendingDeletion]);
+    assert.deepEqual(requestState, [['7', false], ['7', false]]);
+    assert.deepEqual(result, [
+        {status: 'fulfilled', value: {ok: true}},
+        {status: 'fulfilled', value: {ok: true}}
+    ]);
+});
+
+test('a stale credential 401 does not expire a new login', async t => {
+    const events = [];
+    let resolve;
+    t.mock.method(window, 'dispatchEvent', event => { events.push(event.type); return true; });
+    t.mock.method(globalThis, 'fetch', () => new Promise(done => { resolve = done; }));
+    api.invalidateRequests({id: 7, username: 'member', role: 'user'});
+    try {
+        const deletion = api.deleteAccountAPI('old');
+        api.invalidateRequests({id: 8, username: 'another_user', role: 'user'});
+        resolve(new Response(JSON.stringify({detail: '请先登录'}), {status: 401}));
+        await assert.rejects(deletion, error => error instanceof api.AuthRequiredError);
+        assert.deepEqual(events, []);
+    } finally {
+        api.invalidateRequests();
+    }
+});
+
 test('login/session/logout use same-origin cookies and send credentials only to login', async t => {
     assert.equal(typeof api.loginAPI, 'function', 'login API is missing');
     const calls = [];

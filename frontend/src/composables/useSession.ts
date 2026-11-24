@@ -38,8 +38,8 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
     const loginTone = ref<'error' | 'success'>('error');
     const registrationMessage = ref('');
     const pending = ref<'login' | 'register' | 'logout' | null>(null);
-    const changingPassword = ref(false);
-    const busy = computed(() => pending.value !== null || changingPassword.value);
+    const changingCredentials = ref(false);
+    const busy = computed(() => pending.value !== null || changingCredentials.value);
     const loggingIn = computed(() => pending.value === 'login');
     const registering = computed(() => pending.value === 'register');
     const loggingOut = computed(() => pending.value === 'logout');
@@ -209,12 +209,12 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
         if (user.value) signedOut(expiredMessage);
     }
 
-    function onPasswordChangeStart() {
-        changingPassword.value = true;
+    function onCredentialChangeStart() {
+        changingCredentials.value = true;
     }
 
-    function onPasswordChangeEnd() {
-        changingPassword.value = false;
+    function onCredentialChangeEnd() {
+        changingCredentials.value = false;
     }
 
     function onPasswordChanged() {
@@ -254,8 +254,8 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
         window.addEventListener('pagehide', hideCachedSession);
         window.addEventListener('pageshow', restoreCachedSession);
         window.addEventListener('auth-required', onAuthRequired);
-        window.addEventListener('password-change-start', onPasswordChangeStart);
-        window.addEventListener('password-change-end', onPasswordChangeEnd);
+        window.addEventListener('credential-change-start', onCredentialChangeStart);
+        window.addEventListener('credential-change-end', onCredentialChangeEnd);
         window.addEventListener('password-changed', onPasswordChanged);
         window.addEventListener('account-deleted', onAccountDeleted);
         return initializeSession();
@@ -267,8 +267,8 @@ export function useSession({onAuthenticated, onSignedOut, showAlert, confirmActi
         window.removeEventListener('pagehide', hideCachedSession);
         window.removeEventListener('pageshow', restoreCachedSession);
         window.removeEventListener('auth-required', onAuthRequired);
-        window.removeEventListener('password-change-start', onPasswordChangeStart);
-        window.removeEventListener('password-change-end', onPasswordChangeEnd);
+        window.removeEventListener('credential-change-start', onCredentialChangeStart);
+        window.removeEventListener('credential-change-end', onCredentialChangeEnd);
         window.removeEventListener('password-changed', onPasswordChanged);
         window.removeEventListener('account-deleted', onAccountDeleted);
         if (user.value) invalidateRequests();

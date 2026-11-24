@@ -114,12 +114,25 @@ export function useChat(options: ChatOptions) {
 
     function confirmRound(turn: ChatTurn, round: number) {
         turn.round = round;
-        // 历史请求可能先看到这个已保存的轮次，合并时保留正在显示的气泡。
-        const duplicate = entries.value.find(entry => entry !== turn && entry.kind === 'turn' && entry.round === round);
-        if (duplicate) {
-            entries.value = entries.value.filter(entry => entry !== turn)
-                .map(entry => entry === duplicate ? turn : entry);
+        const optimisticIndex = entries.value.indexOf(turn);
+        let position = optimisticIndex;
+        // 历史可能先于发送结果返回，确认后按轮次排列并保留本地气泡的键。
+        for (const [index, entry] of entries.value.entries()) {
+            if (entry === turn || entry.kind !== 'turn' || entry.round === null) continue;
+            if (entry.round === round) {
+                entries.value[index] = turn;
+                entries.value.splice(optimisticIndex, 1);
+                return;
+            }
+            if (entry.round > round) {
+                position = Math.min(position, index);
+                break;
+            }
+            position = Math.max(position, index);
         }
+        if (position === optimisticIndex) return;
+        entries.value.splice(optimisticIndex, 1);
+        entries.value.splice(position, 0, turn);
     }
 
     async function submitMessage(turn: ChatTurn) {

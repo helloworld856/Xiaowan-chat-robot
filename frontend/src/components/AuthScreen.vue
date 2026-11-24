@@ -26,6 +26,12 @@ watch([user, starting], focusLogin, {flush: 'post'});
 watch([user, starting, registrationOpen], ([account, pending, showRegistration]) => {
     if (!account && !pending) document.title = showRegistration ? '注册 · 小晚' : '登录 · 小晚';
 }, {immediate: true});
+watch(registrationOpen, () => {
+    // 密码管理器可能只改了 DOM，切换表单时也要清空这些值。
+    for (const input of [loginPasswordInput, registerPasswordInput, registerConfirmationInput]) {
+        if (input.value) input.value.value = '';
+    }
+});
 
 async function changeForm(showRegistration: boolean) {
     if (!switchForm(showRegistration)) return;
@@ -62,6 +68,7 @@ async function submitRegistration(event: SubmitEvent) {
 
 <template>
     <section id="login-screen" :aria-labelledby="registrationOpen ? 'register-title' : 'login-title'">
+        <!-- 输入框只随自身绑定值更新，避免其他状态的重新渲染清除自动填充。 -->
         <form id="login-form" class="login-card" method="post" :hidden="registrationOpen" @submit.prevent="submitLogin">
             <header class="login-heading">
                 <h1 id="login-title">登录小晚</h1>
@@ -69,12 +76,12 @@ async function submitRegistration(event: SubmitEvent) {
             <div class="login-fields">
                 <div class="login-field">
                     <label for="login-username">用户名</label>
-                    <input id="login-username" ref="loginUsernameInput" v-model="username" name="username" type="text"
+                    <input id="login-username" ref="loginUsernameInput" v-model="username" v-memo="[username]" name="username" type="text"
                            autocomplete="username" maxlength="64" required>
                 </div>
                 <div class="login-field">
                     <label for="login-password">密码</label>
-                    <input id="login-password" ref="loginPasswordInput" v-model="password" name="password" type="password"
+                    <input id="login-password" ref="loginPasswordInput" v-model="password" v-memo="[password]" name="password" type="password"
                            autocomplete="current-password" maxlength="512" aria-describedby="login-error" required>
                 </div>
             </div>
@@ -91,18 +98,18 @@ async function submitRegistration(event: SubmitEvent) {
             <div class="login-fields">
                 <div class="login-field">
                     <label for="register-username">用户名</label>
-                    <input id="register-username" ref="registerUsernameInput" v-model="registerUsername" name="username"
+                    <input id="register-username" ref="registerUsernameInput" v-model="registerUsername" v-memo="[registerUsername]" name="username"
                            type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}"
                            title="用户名须为 3–32 位英文字母、数字或下划线" required>
                 </div>
                 <div class="login-field">
                     <label for="register-password">密码</label>
-                    <input id="register-password" ref="registerPasswordInput" v-model="registerPassword" name="password"
+                    <input id="register-password" ref="registerPasswordInput" v-model="registerPassword" v-memo="[registerPassword]" name="password"
                            type="password" autocomplete="new-password" aria-describedby="register-error" required>
                 </div>
                 <div class="login-field">
                     <label for="register-confirm-password">确认密码</label>
-                    <input id="register-confirm-password" ref="registerConfirmationInput" v-model="registerConfirmation"
+                    <input id="register-confirm-password" ref="registerConfirmationInput" v-model="registerConfirmation" v-memo="[registerConfirmation]"
                            name="confirm_password" type="password" autocomplete="new-password" aria-describedby="register-error" required>
                 </div>
             </div>

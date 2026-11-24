@@ -13,6 +13,7 @@ const props = defineProps<{
 const emit = defineEmits<{'profile-change': [profile: ProfileInfo]; close: []}>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
+const nicknameInput = ref<HTMLInputElement | null>(null);
 const currentPasswordInput = ref<HTMLInputElement | null>(null);
 const newPasswordInput = ref<HTMLInputElement | null>(null);
 const confirmPasswordInput = ref<HTMLInputElement | null>(null);
@@ -80,6 +81,7 @@ async function open() {
         if (!dialog.value || !requestIsCurrent(generation)) return;
         dialog.value.showModal();
         const saved = await load();
+        if (!requestIsCurrent(generation)) return;
         nickname.value = saved.nickname;
         avatarId.value = saved.avatar_id;
         ready.value = true;
@@ -115,6 +117,7 @@ function reset() {
 
 async function save() {
     if (busy.value || !ready.value || !profile.value) return;
+    nickname.value = nicknameInput.value?.value ?? nickname.value;
     const name = nickname.value.trim();
     if (!name) {
         props.showAlert('请输入昵称');
@@ -152,16 +155,18 @@ async function deleteAccount() {
     });
     if (password === null || !requestIsCurrent(generation)) return;
     busy.value = true;
+    window.dispatchEvent(new Event('credential-change-start'));
     setStatus('正在注销…');
     try {
         await deleteAccountAPI(password);
-        if (requestIsCurrent(generation)) window.dispatchEvent(new Event('account-deleted'));
+        window.dispatchEvent(new Event('account-deleted'));
     } catch (error) {
         if (requestIsCurrent(generation, error)) {
             setStatus(error instanceof Error ? error.message : '注销账户失败，请稍后重试', true);
         }
     } finally {
         if (requestIsCurrent(generation)) busy.value = false;
+        window.dispatchEvent(new Event('credential-change-end'));
     }
 }
 
@@ -184,12 +189,11 @@ async function savePassword() {
     }
     const generation = getRequestGeneration();
     busy.value = true;
-    window.dispatchEvent(new Event('password-change-start'));
+    window.dispatchEvent(new Event('credential-change-start'));
     setPasswordStatus('正在修改…');
     try {
         await changePasswordAPI(passwords);
-        if (!requestIsCurrent(generation)) return;
-        dialog.value?.close();
+        if (requestIsCurrent(generation)) dialog.value?.close();
         window.dispatchEvent(new Event('password-changed'));
     } catch (error) {
         if (requestIsCurrent(generation, error)) {
@@ -200,7 +204,7 @@ async function savePassword() {
             clearPasswords();
             busy.value = false;
         }
-        window.dispatchEvent(new Event('password-change-end'));
+        window.dispatchEvent(new Event('credential-change-end'));
     }
 }
 
@@ -223,7 +227,8 @@ defineExpose({open, load, reset});
                     </div>
                 </div>
                 <label class="profile-label" for="profile-nickname">昵称</label>
-                <input id="profile-nickname" v-model="nickname" class="profile-input" required autocomplete="nickname">
+                <input id="profile-nickname" ref="nicknameInput" v-model="nickname" v-memo="[nickname]"
+                    class="profile-input" required autocomplete="nickname">
                 <div class="profile-avatar-heading">
                     <span class="profile-label">系统头像</span>
                     <button id="profile-default-avatar" class="profile-text-button" type="button" @click="avatarId = profile?.default_avatar_id ?? 'cat'">恢复默认</button>

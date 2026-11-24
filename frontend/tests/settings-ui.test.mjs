@@ -194,6 +194,17 @@ test('the model editor masks API keys, clears autofill, and preserves provider a
     await act('toggle-model-key');
     assert.equal(key.props.type, 'text');
     assert.equal(key.value, 'typed-api-key');
+
+    key.autofilled = true;
+    key.value = 'browser-login-password';
+    await act('model-api-key', 'input', {isTrusted: true, inputType: 'insertText'});
+    assert.equal(key.props.type, 'password');
+    assert.equal(key.value, '');
+    key.autofilled = false;
+
+    key.value = 'typed-api-key';
+    act('model-api-key', 'input', {isTrusted: true, inputType: 'insertText'});
+    await act('toggle-model-key');
     address.value = 'https://custom.example/v1';
     change();
     await act('test-model-btn');

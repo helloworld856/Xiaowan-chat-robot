@@ -112,7 +112,7 @@ test('credential events retain the mutation lock until completion and clear dele
     });
     await settle();
     session.username.value = 'alice';
-    emit('password-change-start');
+    emit('credential-change-start');
     emit('auth-required');
     await session.login();
     assert.equal(logins, 0);
@@ -122,16 +122,24 @@ test('credential events retain the mutation lock until completion and clear dele
     assert.match(session.loginMessage.value, /密码已修改/);
     assert.equal(session.loginTone.value, 'success');
     assert.equal(session.busy.value, true);
-    emit('password-change-end');
+    emit('credential-change-end');
     assert.equal(session.busy.value, false);
     assert.equal(session.username.value, 'alice');
 
     await session.login();
+    emit('credential-change-start');
+    emit('auth-required');
+    await session.login();
+    assert.equal(logins, 1);
+    assert.equal(session.busy.value, true);
     emit('account-deleted');
     assert.equal(session.user.value, null);
     assert.equal(session.username.value, '');
     assert.match(session.loginMessage.value, /账户已注销/);
     assert.equal(session.loginTone.value, 'success');
+    assert.equal(session.busy.value, true);
+    emit('credential-change-end');
+    assert.equal(session.busy.value, false);
 });
 
 test('signed-out startup is silent and startup network failure remains visible', async () => {
@@ -263,7 +271,7 @@ test('a logout confirmation for an expired account cannot log out a newer sessio
     assert.equal(state.signedOut, 1);
 });
 
-test('the auth screen moves focus between forms and submits passwords filled directly into the DOM', async t => {
+test('the auth screen preserves autofill during editing and clears passwords when switching forms', async t => {
     const doc = {title: ''};
     globalThis.document = doc;
     t.after(() => { delete globalThis.document; });
@@ -280,23 +288,36 @@ test('the auth screen moves focus between forms and submits passwords filled dir
     assert.equal(screen.element('login-username').focused, true);
     assert.equal(doc.title, '登录 · 小晚');
 
+    screen.element('login-password').value = 'discard this password';
     await screen.act('open-register');
     assert.equal(screen.element('login-form').props.hidden, true);
     assert.equal(screen.element('register-form').props.hidden, false);
     assert.equal(screen.element('register-username').focused, true);
     assert.equal(doc.title, '注册 · 小晚');
-    screen.input('register-username', newUser.username);
+    assert.equal(screen.element('login-password').value, '');
+    screen.element('register-password').value = 'discard this password too';
+    screen.element('register-confirm-password').value = 'discard this password too';
+    await screen.act('open-login');
+    assert.equal(screen.element('register-password').value, '');
+    assert.equal(screen.element('register-confirm-password').value, '');
+    await screen.act('open-register');
     screen.element('register-password').value = 'new password';
     screen.element('register-confirm-password').value = 'new password';
+    screen.input('register-username', newUser.username);
+    await nextTick();
+    assert.equal(screen.element('register-password').value, 'new password');
+    assert.equal(screen.element('register-confirm-password').value, 'new password');
     await screen.act('register-form', 'submit');
     assert.equal(screen.element('register-form').props.hidden, true);
     assert.equal(screen.element('login-username').value, newUser.username);
     assert.equal(screen.element('login-password').focused, true);
     assert.equal(screen.element('login-error').props['data-tone'], 'success');
 
-    screen.element('login-password').value = 'new password';
+    screen.element('login-username').value = 'saved_account';
+    screen.input('login-password', 'saved password');
+    await nextTick();
     await screen.act('login-form', 'submit');
     await nextTick();
-    assert.deepEqual(logins, [[newUser.username, 'new password']]);
+    assert.deepEqual(logins, [['saved_account', 'saved password']]);
     assert.equal(screen.element('login-password').value, '');
 });
