@@ -1,7 +1,9 @@
 // Vite 构建和开发代理配置
 import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
+    plugins: [vue()],
     base: '/',           // 根据后端挂载路径调整
     build: {
         outDir: 'dist',    // 输出目录，需与后端托管目录对应

@@ -1,6 +1,6 @@
 # 小晚AI角色对话软件
 
-版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
+版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 Vue 3、TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
 
 ## 主要功能
 
@@ -33,7 +33,10 @@
 │   └── system_config.example.json  # 全局配置模板
 ├── frontend/
 │   ├── index.html                  # 前端页面入口
-│   ├── src/ts/                     # TypeScript 逻辑，入口为 main.ts
+│   ├── src/main.ts                 # Vue 应用入口
+│   ├── src/components/             # 聊天、登录、设置和个人资料组件
+│   ├── src/composables/            # 会话和聊天状态
+│   ├── src/ts/                     # API 客户端、类型和共享工具
 │   ├── src/styles/                 # 页面样式和主题
 │   ├── public/                     # 头像、网站图标等静态资源
 │   ├── tests/                      # 前端测试

@@ -1,229 +1,302 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import ts from 'typescript';
+import {createRequire} from 'node:module';
 import {runInNewContext} from 'node:vm';
+import ts from 'typescript';
+import {mountComponent, nextTick} from './vue-harness.mjs';
 
-test('logout requires confirmation and prevents relogin until its response completes', async () => {
-    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    const elements = new Map(), events = new Map();
-    function element(id) {
-        if (!elements.has(id)) elements.set(id, {
-            hidden: true, inert: true, disabled: false, open: false, value: id === 'login-username' ? 'admin' : '', textContent: '',
-            listeners: new Map(), classList: {add() {}, remove() {}}, focus() {}, setAttribute() {}, reportValidity: () => true,
-            showModal() { this.open = true; }, close() { this.open = false; },
-            addEventListener(name, handler) { this.listeners.set(name, handler); }
-        });
-        return elements.get(id);
-    }
-    let resolveLogout, logins = 0, logouts = 0;
-    const pending = new Promise(resolve => { resolveLogout = resolve; });
-    const api = {
-        AuthRequiredError: class extends Error {}, invalidateRequests() {},
-        sessionAPI: async () => ({user: {username: 'admin'}}),
-        loginAPI: async () => { logins++; return {user: {username: 'admin'}}; }, logoutAPI: () => { logouts++; return pending; }
+const require = createRequire(import.meta.url);
+const alice = {id: 8, username: 'alice', role: 'user'};
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+function tab({api = {}, tabs = [], confirmAction = async () => ''} = {}) {
+    const source = fs.readFileSync(new URL('../src/composables/useSession.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, {
+        compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}
+    }).outputText;
+    const vue = require('vue');
+    const renderer = vue.createRenderer({createComment: () => ({}), insert() {}, remove() {}});
+    const events = new EventTarget();
+    const emit = (type, data = {}) => events.dispatchEvent(Object.assign(new Event(type), data));
+    const localStorage = {
+        setItem(key, newValue) {
+            for (const other of tabs) {
+                if (other !== emit) other('storage', {key, newValue});
+            }
+        }
     };
+    tabs.push(emit);
+    const state = {authenticated: [], signedOut: 0, invalidated: [], alerts: []};
     const exports = {};
     runInNewContext(compiled, {
-        exports, require: name => name === './api.ts' ? api : {lockSendBtn() {}, showAlert() {}},
-        document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar-button'), title: ''},
-        window: {addEventListener: (name, handler) => events.set(name, handler)}
+        exports, window: events, localStorage,
+        require: name => ({
+            vue,
+            '../ts/api.ts': {
+                AuthRequiredError: class extends Error {},
+                invalidateRequests: user => state.invalidated.push(user),
+                sessionAPI: async () => ({user: null}),
+                ...api
+            },
+            '../ts/global_config.ts': {inputLimits: {password_min_length: 6, password_max_length: 15}}
+        })[name]
     });
-    await exports.initializeAuth(async () => {}, () => {});
-    assert.equal(element('app-shell').hidden, false);
-    element('logout-btn').listeners.get('click')();
-    assert.equal(logouts, 0, 'opening the confirmation must preserve the session');
-    assert.equal(element('logout-dialog').open, true);
-    await element('logout-cancel').listeners.get('click')();
-    assert.equal(element('logout-dialog').open, false);
-    assert.equal(element('app-shell').hidden, false);
-    assert.equal(logouts, 0, 'cancelling must not request logout');
-    await element('logout-confirm').listeners.get('click')();
-    assert.equal(logouts, 0, 'a closed confirmation cannot request logout');
-    await element('logout-btn').listeners.get('click')();
-    const logout = element('logout-confirm').listeners.get('click')();
+    let session;
+    const app = renderer.createApp({
+        setup() {
+            session = exports.useSession({
+                onAuthenticated: async user => { state.authenticated.push(user); },
+                onSignedOut: () => { state.signedOut++; },
+                showAlert: message => { state.alerts.push(message); },
+                confirmAction
+            });
+            return () => null;
+        }
+    });
+    app.mount({});
+    return {session, state, emit, unmount: () => app.unmount()};
+}
+
+test('logout requires confirmation and blocks login until its cookie mutation settles', async () => {
+    let confirmation, resolveLogout, logins = 0, logouts = 0;
+    const pending = new Promise(resolve => { resolveLogout = resolve; });
+    const {session, emit} = tab({
+        api: {
+            sessionAPI: async () => ({user: alice}),
+            loginAPI: async () => { logins++; return {user: alice}; },
+            logoutAPI: () => { logouts++; return pending; }
+        },
+        confirmAction: async options => {
+            assert.equal(options.variant, 'logout');
+            return new Promise(resolve => { confirmation = resolve; });
+        }
+    });
+    await settle();
+    assert.equal(session.user.value, alice);
+    const cancelled = session.logout();
+    assert.equal(logouts, 0);
+    confirmation(null);
+    await cancelled;
+    assert.equal(logouts, 0);
+    assert.equal(session.user.value, alice);
+
+    const logout = session.logout();
+    confirmation('');
+    await settle();
     assert.equal(logouts, 1);
-    assert.equal(element('logout-dialog').open, false);
-    events.get('auth-required')();
-    assert.equal(element('login-screen').hidden, false);
-    await element('login-form').listeners.get('submit')({preventDefault() {}});
+    assert.equal(session.loggingOut.value, true);
+    emit('auth-required');
+    assert.equal(session.user.value, null);
+    await session.login();
     assert.equal(logins, 0, 'new login must wait for the old logout response');
-    assert.equal(element('login-submit').disabled, true);
+    assert.equal(session.busy.value, true);
     resolveLogout({ok: true});
     await logout;
-    assert.equal(element('login-submit').disabled, false);
-    await element('login-form').listeners.get('submit')({preventDefault() {}});
+    assert.equal(session.busy.value, false);
+    session.username.value = 'alice';
+    session.password.value = 'example password';
+    await session.login();
     assert.equal(logins, 1);
-    assert.equal(element('app-shell').hidden, false);
-
-    events.get('password-change-start')();
-    events.get('auth-required')();
-    await element('login-form').listeners.get('submit')({preventDefault() {}});
-    assert.equal(logins, 1, 'password-changing response must finish before relogin');
-    assert.equal(element('login-submit').disabled, true);
-    events.get('password-changed')();
-    assert.equal(element('app-shell').hidden, true);
-    assert.match(element('login-error').textContent, /密码已修改/);
-    events.get('password-change-end')();
-    assert.equal(element('login-submit').disabled, false);
+    assert.equal(session.user.value, alice);
+    assert.equal(session.password.value, '');
 });
 
-test('signed-out startup shows the login form silently while network failure remains visible', async () => {
-    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    for (const offline of [false, true]) {
-        const nodes = new Map();
-        function element(id) {
-            if (!nodes.has(id)) nodes.set(id, {
-                hidden: true, inert: true, value: '', textContent: '',
-                classList: {add() {}, remove() {}}, focus() {}, setAttribute() {}, addEventListener() {}
-            });
-            return nodes.get(id);
+test('credential events retain the mutation lock until completion and clear deleted login names', async () => {
+    let logins = 0;
+    const {session, emit} = tab({
+        api: {
+            sessionAPI: async () => ({user: alice}),
+            loginAPI: async () => { logins++; return {user: alice}; }
         }
-        let initialized = 0;
-        const exports = {};
-        runInNewContext(compiled, {
-            exports, require: name => name === './api.ts' ? {
-                AuthRequiredError: class extends Error {}, invalidateRequests() {},
-                sessionAPI: async () => { if (offline) throw new Error('offline'); return {user: null}; }
-            } : {lockSendBtn() {}, showAlert() {}},
-            document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
-            window: {addEventListener() {}}
-        });
-        await exports.initializeAuth(async () => { initialized++; }, () => {});
-        assert.equal(initialized, 0);
-        assert.equal(element('login-screen').hidden, false);
-        assert.equal(element('app-shell').hidden, true);
-        if (offline) assert.match(element('login-error').textContent, /无法检查登录状态/);
-        else assert.equal(element('login-error').textContent, '', 'being signed out is not a connection error');
+    });
+    await settle();
+    session.username.value = 'alice';
+    emit('password-change-start');
+    emit('auth-required');
+    await session.login();
+    assert.equal(logins, 0);
+    assert.equal(session.busy.value, true);
+    emit('password-changed');
+    assert.equal(session.user.value, null);
+    assert.match(session.loginMessage.value, /密码已修改/);
+    assert.equal(session.loginTone.value, 'success');
+    assert.equal(session.busy.value, true);
+    emit('password-change-end');
+    assert.equal(session.busy.value, false);
+    assert.equal(session.username.value, 'alice');
+
+    await session.login();
+    emit('account-deleted');
+    assert.equal(session.user.value, null);
+    assert.equal(session.username.value, '');
+    assert.match(session.loginMessage.value, /账户已注销/);
+    assert.equal(session.loginTone.value, 'success');
+});
+
+test('signed-out startup is silent and startup network failure remains visible', async () => {
+    for (const offline of [false, true]) {
+        const {session, state} = tab({api: {
+            sessionAPI: async () => {
+                if (offline) throw new Error('offline');
+                return {user: null};
+            }
+        }});
+        assert.equal(session.starting.value, true);
+        await settle();
+        assert.equal(session.starting.value, false);
+        assert.equal(session.user.value, null);
+        assert.deepEqual(state.authenticated, []);
+        if (offline) assert.match(session.loginMessage.value, /无法检查登录状态/);
+        else assert.equal(session.loginMessage.value, '');
     }
 });
 
 test('registration enforces the session password range and returns to login', async () => {
-    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    const nodes = new Map();
     const attempts = [];
-    const user = {id: 8, username: 'new_account', role: 'user'};
-    function element(id) {
-        if (!nodes.has(id)) nodes.set(id, {
-            hidden: true, inert: true, value: '', textContent: '', listeners: new Map(),
-            focus() {}, setAttribute() {}, classList: {add() {}}, reportValidity: () => true,
-            addEventListener(name, handler) { this.listeners.set(name, handler); }
-        });
-        return nodes.get(id);
-    }
-    const exports = {};
+    const newUser = {id: 9, username: 'new_account', role: 'user'};
     const limits = {password_min_length: 8, password_max_length: 20, max_nickname_chars: 40, max_message_chars: 9000};
-    runInNewContext(compiled, {
-        exports, require: name => ({
-            './api.ts': {
-                invalidateRequests() {}, sessionAPI: async () => ({user: null, limits}),
-                registerAPI: async (...args) => { attempts.push(args); return {user}; }
-            },
-            './global_config.ts': {inputLimits: {password_min_length: 6, password_max_length: 15}},
-            './ui.ts': {lockSendBtn() {}, showAlert() {}}
-        })[name],
-        document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
-        window: {addEventListener() {}}
-    });
-    await exports.initializeAuth(async () => assert.fail('registration must not sign in'), () => {});
-    element('open-register').listeners.get('click')();
-    assert.equal(element('register-form').hidden, false);
-    element('register-username').value = user.username;
-    const submit = () => element('register-form').listeners.get('submit')({preventDefault() {}});
-    element('register-password').value = 'Reg!12';
-    element('register-confirm-password').value = 'Reg!12';
-    await submit();
-    assert.equal(attempts.length, 0);
-    assert.match(element('register-error').textContent, /8–20/);
+    const {session, state} = tab({api: {
+        sessionAPI: async () => ({user: null, limits}),
+        registerAPI: async (...args) => { attempts.push(args); return {user: newUser}; }
+    }});
+    await settle();
+    assert.equal(session.switchForm(true), true);
+    session.registerUsername.value = 'Admin';
+    assert.equal(await session.register(), 'username');
+    assert.match(session.registrationMessage.value, /保留用户名/);
+
+    session.registerUsername.value = ' new_account ';
+    session.registerPassword.value = 'Reg!12';
+    session.registerConfirmation.value = 'Reg!12';
+    assert.equal(await session.register(), 'password');
+    assert.match(session.registrationMessage.value, /8–20/);
     const valid = '🙂'.repeat(20);
-    element('register-password').value = valid;
-    element('register-confirm-password').value = 'Wrong!12';
-    await submit();
-    assert.equal(attempts.length, 0);
-    assert.match(element('register-error').textContent, /密码不一致/);
-    element('register-confirm-password').value = valid;
-    await submit();
-    assert.deepEqual(attempts, [[user.username, valid, valid]]);
-    assert.equal(element('app-shell').hidden, true);
-    assert.equal(element('register-form').hidden, true);
-    assert.equal(element('login-username').value, user.username);
-    assert.equal(element('register-password').value, '');
+    session.registerPassword.value = valid;
+    session.registerConfirmation.value = 'Wrong!12';
+    assert.equal(await session.register(), 'confirmation');
+    assert.match(session.registrationMessage.value, /密码不一致/);
+    assert.deepEqual(attempts, []);
+
+    session.registerConfirmation.value = valid;
+    assert.equal(await session.register(), 'registered');
+    assert.deepEqual(attempts, [[newUser.username, valid, valid]]);
+    assert.deepEqual(state.authenticated, []);
+    assert.equal(session.user.value, null);
+    assert.equal(session.registrationOpen.value, false);
+    assert.equal(session.username.value, newUser.username);
+    assert.equal(session.registerPassword.value, '');
+    assert.equal(session.registerConfirmation.value, '');
+    assert.equal(session.loginTone.value, 'success');
 });
 
-// 用两个标签页模拟会话变化与页面启动响应的先后顺序。
-test('an auth change in another tab clears private state and rejects a stale startup response', async () => {
-    const source = fs.readFileSync(new URL('../src/ts/auth.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    const alice = {id: 8, username: 'alice', role: 'user'};
+test('another tab clears private state without reopening stale startup results', async () => {
     const tabs = [];
+    const active = tab({tabs, api: {sessionAPI: async () => ({user: alice})}});
+    await settle();
+    let resolveSession;
+    const earlier = tab({tabs, api: {sessionAPI: () => new Promise(resolve => { resolveSession = resolve; })}});
+    const trigger = tab({tabs, api: {
+        sessionAPI: async () => ({user: alice}),
+        logoutAPI: async () => ({ok: true})
+    }});
+    const signedOut = tab({tabs});
+    await settle();
+    signedOut.session.switchForm(true);
+    signedOut.session.registerUsername.value = 'unfinished';
+    assert.equal(active.session.user.value, alice);
+    await trigger.session.logout();
+    assert.equal(active.session.user.value, null);
+    assert.equal(active.state.signedOut, 1);
+    assert.deepEqual(active.state.invalidated, [alice, undefined]);
+    assert.equal(signedOut.session.registrationOpen.value, true);
+    assert.equal(signedOut.session.registerUsername.value, 'unfinished');
+    assert.equal(earlier.session.starting.value, true);
+    resolveSession({user: alice});
+    await settle();
+    assert.deepEqual(earlier.state.authenticated, []);
+    assert.equal(earlier.session.user.value, null);
+    assert.equal(earlier.session.starting.value, false);
+    assert.match(earlier.session.loginMessage.value, /登录状态已更改/);
+});
 
-    function tab(sessionAPI) {
-        const nodes = new Map(), listeners = new Map();
-        const state = {sitsIn: 0, resets: 0, discarded: 0};
-        function element(id) {
-            if (!nodes.has(id)) nodes.set(id, {
-                hidden: true, inert: true, value: '', textContent: '', listeners: new Map(),
-                focus() {}, setAttribute() {}, classList: {add() {}}, reportValidity: () => true,
-                showModal() { this.open = true; }, close() { this.open = false; },
-                addEventListener(name, handler) { this.listeners.set(name, handler); }
-            });
-            return nodes.get(id);
-        }
-        const exports = {};
-        const localStorage = {
-            setItem(key, newValue) {
-                for (const other of tabs) {
-                    if (other.storage !== this) other.listeners.get('storage')?.({key, newValue, storageArea: other.storage});
-                }
-            }
-        };
-        runInNewContext(compiled, {
-            exports, localStorage, require: name => name === './api.ts' ? {
-                invalidateRequests(user) { if (!user) state.discarded++; }, sessionAPI,
-                loginAPI: async () => ({user: alice}), logoutAPI: async () => ({ok: true})
-            } : {lockSendBtn() {}, showAlert() {}},
-            document: {getElementById: element, querySelectorAll: () => [], querySelector: () => element('sidebar'), title: ''},
-            window: {addEventListener: (name, handler) => listeners.set(name, handler)}
-        });
-        const ctx = {element, listeners, state, storage: localStorage};
-        tabs.push(ctx);
-        return {...ctx, initialized: exports.initializeAuth(async () => { state.sitsIn++; }, () => { state.resets++; })};
-    }
-
-    const active = tab(async () => ({user: alice}));
-    await active.initialized;
-    let finishSession;
-    const startedEarlier = tab(() => new Promise(resolve => { finishSession = resolve; }));
-    const trigger = tab(async () => ({user: alice}));
-    await trigger.initialized;
-    assert.equal(active.element('app-shell').hidden, false);
-    active.element('login-screen').hidden = true;
-    trigger.element('logout-btn').listeners.get('click')();
-    await trigger.element('logout-confirm').listeners.get('click')();
-    assert.equal(active.element('app-shell').hidden, true);
-    assert.equal(active.state.resets, 1);
-    assert.equal(active.state.discarded, 1);
-    assert.equal(startedEarlier.element('login-screen').hidden, true);
-    finishSession({user: alice});
-    await startedEarlier.initialized;
-    assert.equal(startedEarlier.state.sitsIn, 0);
-    assert.equal(startedEarlier.element('app-shell').hidden, true);
-    assert.equal(startedEarlier.element('login-screen').hidden, false);
-
+test('back-forward cache keeps the account hidden until the cookie is revalidated', async () => {
     let restoredUser = alice;
-    const cached = tab(async () => ({user: restoredUser}));
-    await cached.initialized;
-    cached.listeners.get('pagehide')?.({persisted: true});
-    assert.equal(cached.element('app-shell').hidden, true, 'cached page must hide private content before navigation');
-    await cached.listeners.get('pageshow')({persisted: true});
-    assert.equal(cached.element('app-shell').hidden, false);
-    cached.listeners.get('pagehide')({persisted: true});
-    restoredUser = {id: 9, username: 'bob', role: 'user'};
-    await cached.listeners.get('pageshow')({persisted: true});
-    assert.equal(cached.element('app-shell').hidden, true);
-    assert.equal(cached.element('login-screen').hidden, false);
-    assert.equal(cached.state.resets, 1);
+    const cached = tab({api: {sessionAPI: async () => ({user: restoredUser})}});
+    await settle();
+    cached.emit('pagehide', {persisted: true});
+    assert.equal(cached.session.sessionHidden.value, true);
+    assert.equal(cached.session.user.value, alice);
+    cached.emit('pageshow', {persisted: true});
+    assert.equal(cached.session.sessionHidden.value, true);
+    await settle();
+    assert.equal(cached.session.sessionHidden.value, false);
+    cached.emit('pagehide', {persisted: true});
+    restoredUser = {...alice, role: 'admin'};
+    cached.emit('pageshow', {persisted: true});
+    await settle();
+    assert.equal(cached.session.user.value, null);
+    assert.equal(cached.state.signedOut, 1);
+});
+
+test('a logout confirmation for an expired account cannot log out a newer session', async () => {
+    let confirmation, logouts = 0;
+    const aliceAgain = {...alice};
+    const {session, state, emit, unmount} = tab({
+        api: {
+            sessionAPI: async () => ({user: alice}),
+            loginAPI: async () => ({user: aliceAgain}),
+            logoutAPI: async () => { logouts++; return {ok: true}; }
+        },
+        confirmAction: () => new Promise(resolve => { confirmation = resolve; })
+    });
+    await settle();
+    const stale = session.logout();
+    emit('auth-required');
+    await session.login();
+    confirmation('');
+    await stale;
+    assert.equal(logouts, 0);
+    assert.equal(session.user.value, aliceAgain);
+    unmount();
+    emit('auth-required');
+    assert.equal(state.signedOut, 1);
+});
+
+test('the auth screen moves focus between forms and submits passwords filled directly into the DOM', async t => {
+    const doc = {title: ''};
+    globalThis.document = doc;
+    t.after(() => { delete globalThis.document; });
+    const newUser = {id: 9, username: 'new_account', role: 'user'};
+    const logins = [];
+    const {session, unmount} = tab({api: {
+        registerAPI: async () => ({user: newUser}),
+        loginAPI: async (...args) => { logins.push(args); return {user: newUser}; }
+    }});
+    t.after(unmount);
+    await settle();
+    const screen = mountComponent(new URL('../src/components/AuthScreen.vue', import.meta.url), {props: {session}});
+    t.after(screen.unmount);
+    assert.equal(screen.element('login-username').focused, true);
+    assert.equal(doc.title, '登录 · 小晚');
+
+    await screen.act('open-register');
+    assert.equal(screen.element('login-form').props.hidden, true);
+    assert.equal(screen.element('register-form').props.hidden, false);
+    assert.equal(screen.element('register-username').focused, true);
+    assert.equal(doc.title, '注册 · 小晚');
+    screen.input('register-username', newUser.username);
+    screen.element('register-password').value = 'new password';
+    screen.element('register-confirm-password').value = 'new password';
+    await screen.act('register-form', 'submit');
+    assert.equal(screen.element('register-form').props.hidden, true);
+    assert.equal(screen.element('login-username').value, newUser.username);
+    assert.equal(screen.element('login-password').focused, true);
+    assert.equal(screen.element('login-error').props['data-tone'], 'success');
+
+    screen.element('login-password').value = 'new password';
+    await screen.act('login-form', 'submit');
+    await nextTick();
+    assert.deepEqual(logins, [[newUser.username, 'new password']]);
+    assert.equal(screen.element('login-password').value, '');
 });

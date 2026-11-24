@@ -12,7 +12,6 @@ export class ChatNotStartedError extends Error {
     constructor(message: string, readonly retryable = true) { super(message); }
 }
 export function getRequestGeneration() { return requestGeneration; }
-export function canManageModel() { return currentUser?.role === 'admin'; }
 // 账号切换时取消旧请求，并用请求代数拦住迟到的响应。
 export function invalidateRequests(user?: AuthUser) {
     requestGeneration++;

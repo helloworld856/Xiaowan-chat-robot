@@ -209,6 +209,11 @@ body {
     line-height: 1.6;
 }
 
+#app {
+    width: 100%;
+    height: 100%;
+}
+
 /* --- 主聊天布局 --- */
 .chat-layout {
     display: flex;
