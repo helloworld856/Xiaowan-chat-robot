@@ -305,16 +305,16 @@ body {
 /* --- 输入区域 --- */
 #inputArea {
     display: flex;
+    align-items: flex-end;
     flex-shrink: 0;
     gap: 1rem;
 }
 
-#userInput {
+#chat-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2.75rem;
     flex: 1;
-    border: none;
-    outline: none;
-    padding: 0.9rem 1.3rem;
-    font-size: 0.95rem;
+    min-width: 0;
     background: var(--chat-bg);
     border-radius: 20px;
     box-shadow: var(--chat-shadow);
@@ -322,34 +322,79 @@ body {
     -webkit-backdrop-filter: blur(10px);
 }
 
+#userInput {
+    width: 100%;
+    height: 2.75rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem;
+    border: none;
+    border-radius: inherit;
+    outline: none;
+    background: transparent;
+    color: var(--bot-text);
+    font: inherit;
+    line-height: 1.5;
+    resize: none;
+}
+
+#chat-composer:not(.is-expanded) #userInput { scrollbar-width: none; }
+#chat-composer:not(.is-expanded) #userInput::-webkit-scrollbar { display: none; }
+
+#chat-composer.is-expanded #userInput {
+    height: clamp(2.75rem, 42dvh, 18rem);
+}
+
 #userInput::placeholder {
     color: #878787;
 }
 
-:is(#userInput, #review-search):focus {
+#chat-composer:has(#userInput:focus), #review-search:focus {
     outline: 2px solid var(--select-accent);
     outline-offset: 2px;
 }
 
-html.theme0 #userInput {
+html.theme0 #chat-composer {
     background: var(--input-bg);
     border: 1px solid var(--input-border);
-    color: var(--bot-text);
     box-shadow: none;
 }
 
 html.theme0 #userInput::placeholder { color: #5d6b7c; }
-html.theme0 :is(#userInput, #review-search):focus {
+html.theme0 :is(#chat-composer:has(#userInput:focus), #review-search:focus) {
     outline-color: #737373;
 }
 
-textarea#userInput {
-    min-width: 0;
-    min-height: 3.5rem;
-    max-height: 9rem;
-    resize: vertical;
-    font-family: inherit;
-    line-height: 1.5;
+#chat-input-toggle:not([hidden]) {
+    display: grid;
+    place-items: center;
+    place-self: start center;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-top: 0.125rem;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    color: var(--menu-text);
+    cursor: pointer;
+}
+
+#chat-input-toggle::before {
+    content: '';
+    width: 0.5rem;
+    height: 0.5rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translateY(2px) rotate(225deg);
+}
+
+#chat-input-toggle[aria-expanded='true']::before {
+    transform: translateY(-2px) rotate(45deg);
+}
+
+#chat-input-toggle:hover { background: var(--menu-hover); }
+#chat-input-toggle:focus-visible {
+    outline: 2px solid var(--select-accent);
+    outline-offset: -2px;
 }
 
 /* 发送按钮 */

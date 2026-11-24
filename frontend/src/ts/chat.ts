@@ -4,6 +4,7 @@ import {
 } from './ui.ts';
 import {addAssistantMessage, addUserMessage, showChatHistory} from './utils.ts';
 import {inputLimits} from './global_config.ts';
+import {clearChatInput} from './composer.ts';
 
 function showDeliveryFailure(row: HTMLDivElement, text: string, error: ChatNotStartedError) {
     const marker = document.createElement('button');
@@ -102,6 +103,6 @@ export async function sendMessage() {
     }
 
     // 等待期间可以继续输入下一条消息。重试会从气泡读取原文，不改变输入框。
-    inputBox.value = '';
+    clearChatInput();
     await submitMessage(text, addUserMessage(text));
 }

@@ -180,7 +180,7 @@ export function initProfile() {
         }
         const generation = getRequestGeneration();
         setBusy(true);
-        message('profile-status', '正在保存…');
+        message('profile-status');
         let feedback = '个人资料已保存。';
         try {
             const profile = await profileAPI({nickname: value, avatar_id: selected});
@@ -191,10 +191,7 @@ export function initProfile() {
             if (generation !== getRequestGeneration() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
             feedback = error instanceof Error ? error.message : '保存失败，请重试';
         } finally {
-            if (generation === getRequestGeneration()) {
-                message('profile-status');
-                setBusy(false);
-            }
+            if (generation === getRequestGeneration()) setBusy(false);
         }
         showAlert(feedback);
     });

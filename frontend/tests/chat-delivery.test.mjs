@@ -56,6 +56,7 @@ function harness(chatAPI, historyAPI, maxMessageChars = 8000) {
                 showTypingIndicator() {}, hideTypingIndicator() {}, scrollToBottom() {}, showAlert(message) { alerts.push(message); }
             };
             if (name === './global_config.ts') return {inputLimits: {max_message_chars: maxMessageChars}};
+            if (name === './composer.ts') return {clearChatInput() { inputBox.value = ''; }};
             return {
                 addUserMessage(text) { const row = element('user'); row.textContent = text; rows.push(row); return row; },
                 async addAssistantMessage(messages, _isCurrent, firstReply) { confirmed.push(...messages); firstReply?.(); },

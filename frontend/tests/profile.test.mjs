@@ -138,10 +138,11 @@ test('a configured nickname limit counts Unicode characters', async () => {
 
 test('profile save shows its result and keeps edits available after a failed request', async () => {
     let fail = true;
+    let rejectSave;
     const {exports, getElement, menu, alerts} = profileHarness({
         profileAPI: async payload => {
             if (!payload) return savedProfile;
-            if (fail) throw new Error('保存个人资料失败');
+            if (fail) return new Promise((_, reject) => { rejectSave = reject; });
             return {...savedProfile, ...payload};
         }
     }, {max_nickname_chars: 32});
@@ -150,7 +151,13 @@ test('profile save shows its result and keeps edits available after a failed req
     const nickname = getElement('profile-nickname');
     const submit = () => getElement('profile-form').listeners.get('submit')({preventDefault() {}});
     nickname.value = 'New name';
-    await submit();
+    const pending = submit();
+    const statusWhileSaving = getElement('profile-status').textContent;
+    const disabledWhileSaving = getElement('profile-save').disabled;
+    rejectSave(new Error('保存个人资料失败'));
+    await pending;
+    assert.equal(statusWhileSaving, '');
+    assert.equal(disabledWhileSaving, true);
     assert.deepEqual(alerts, ['保存个人资料失败']);
     assert.equal(nickname.value, 'New name');
     assert.equal(getElement('profile-dialog').open, true);

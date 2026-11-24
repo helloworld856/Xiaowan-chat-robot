@@ -17,6 +17,7 @@ import {loadSettings, resetSettings, updateSettingsPermissions} from './settings
 import {initializeAuth} from './auth.ts';
 import {loadProfile, resetProfile} from './profile.ts';
 import {closeConfirmation} from './confirm.ts';
+import {clearChatInput} from './composer.ts';
 
 const loading = document.getElementById('loading') as HTMLDivElement;
 const app = document.getElementById('app-shell')!;
@@ -91,7 +92,7 @@ function clearChat() {
     resetProfile();
     resetSettings();
     document.getElementById('chatBox')!.replaceChildren();
-    (document.getElementById('userInput') as HTMLTextAreaElement).value = '';
+    clearChatInput();
     (document.getElementById('review-search') as HTMLInputElement).value = '';
     document.getElementById('review-list')!.replaceChildren();
     document.getElementById('current-username')!.textContent = '';

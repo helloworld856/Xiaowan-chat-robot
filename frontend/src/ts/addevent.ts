@@ -13,12 +13,14 @@ import {
     closePopup
 } from './ui.ts';
 import {sendMessage} from './chat.ts';
+import {initChatComposer} from './composer.ts';
 import {initChatReview} from './review.ts';
 import {preferences, shouldSendMessage} from './preferences.ts';
 import {initSettings} from './settings.ts';
 import {initProfile} from './profile.ts';
 
 function bindChatEvents() {
+    initChatComposer();
     sendBtn.onclick = () => sendMessage();
 
     inputBox.addEventListener('keydown', event => {

@@ -99,7 +99,10 @@
 
         <!-- 输入区 -->
         <div id="inputArea">
-            <textarea autocomplete="off" id="userInput" rows="1" aria-label="聊天消息" placeholder="说点什么吧~"></textarea>
+            <div id="chat-composer">
+                <textarea autocomplete="off" id="userInput" rows="1" aria-label="聊天消息" placeholder="说点什么吧~"></textarea>
+                <button id="chat-input-toggle" type="button" aria-label="展开输入框" aria-controls="userInput" aria-expanded="false" title="展开输入框" hidden></button>
+            </div>
             <button class="sendbtn" type="button">发送</button>
         </div>
     </main>
