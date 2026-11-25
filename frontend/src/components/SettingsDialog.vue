@@ -23,6 +23,7 @@ const emit = defineEmits<{
 const settingsDialog = ref<HTMLDialogElement | null>(null);
 const modelDialog = ref<HTMLDialogElement | null>(null);
 const modelForm = ref<HTMLFormElement | null>(null);
+const addressInput = ref<HTMLInputElement | null>(null);
 const keyInput = ref<HTMLInputElement | null>(null);
 const autofillSelector = ':is(:autofill, :-webkit-autofill)';
 
@@ -35,14 +36,13 @@ const merchant = ref('deepseek');
 const modelName = ref('');
 const address = ref('');
 const keyVisible = ref(false);
-const modelBusy = ref(false);
-const modelStatus = ref('');
-const historyStatus = ref('');
-const historyError = ref(false);
+const modelOperation = ref<'test' | 'save' | null>(null);
+const modelBusy = computed(() => modelOperation.value !== null);
 const historyOperation = ref<'idle' | 'confirming' | 'clearing'>('idle');
 
 let resetRevision = 0;
 let modelRevision = 0;
+let settingsLoadFailed = false;
 let loadedAddress = '';
 let typedApiKey = '';
 
@@ -93,8 +93,14 @@ function setProvider(preferredModel = '') {
     modelName.value = preferred && selected?.names.includes(preferred) ? preferred : selected?.default_model || '';
     loadedAddress = selected?.saved_address || selected?.default_address || '';
     address.value = loadedAddress;
-    modelStatus.value = '';
     resetApiKey();
+}
+
+function showAddressHelp() {
+    const rule = props.isAdmin
+        ? '自定义地址须经服务器批准，并兼容 OpenAI 接口。'
+        : '自定义地址须使用公网 HTTPS，并兼容 OpenAI 接口。';
+    props.showAlert(`${rule}\n清空接口地址可恢复厂商默认地址。更换或恢复地址时，请重新填写 API Key。`);
 }
 
 function applySettings(saved: SavedSettings, requestedModelRevision: number) {
@@ -108,9 +114,16 @@ function applySettings(saved: SavedSettings, requestedModelRevision: number) {
     }
 }
 
-function open() {
+async function open() {
     preferenceDraft.value = {...props.preferences};
     if (settingsDialog.value) openDialog(settingsDialog.value);
+    if (!settingsLoadFailed) return;
+    const isCurrent = captureSession();
+    try {
+        await load();
+    } catch (error) {
+        if (isCurrent()) props.showAlert(error instanceof Error ? error.message : '读取设置失败，请关闭后重试。');
+    }
 }
 
 function closeSettings() {
@@ -118,11 +131,13 @@ function closeSettings() {
 }
 
 async function openModel() {
+    const catalog = modelOptions.value;
+    if (!catalog || modelBusy.value) return;
     const isCurrent = captureSession();
-    if (!modelBusy.value) {
-        merchant.value = activeModel.value?.model_merchant || modelOptions.value?.default_provider || 'deepseek';
-        setProvider(activeModel.value?.model_name);
-    }
+    const model = activeModel.value;
+    const activeProvider = model && catalog.providers[model.model_merchant];
+    merchant.value = activeProvider ? model.model_merchant : catalog.default_provider;
+    setProvider(activeProvider ? model.model_name : undefined);
     await nextTick();
     if (isCurrent() && modelDialog.value) openDialog(modelDialog.value);
 }
@@ -137,10 +152,16 @@ async function load() {
     const isCurrent = captureSession();
     const requestedModelRevision = modelRevision;
     preferencesDisabled.value = true;
-    const saved = await settingsAPI();
-    if (!isCurrent()) return;
-    applySettings(saved, requestedModelRevision);
-    preferencesDisabled.value = false;
+    settingsLoadFailed = false;
+    try {
+        const saved = await settingsAPI();
+        if (!isCurrent()) return;
+        applySettings(saved, requestedModelRevision);
+        preferencesDisabled.value = false;
+    } catch (error) {
+        if (isCurrent()) settingsLoadFailed = true;
+        throw error;
+    }
 }
 
 async function savePreferences() {
@@ -168,12 +189,16 @@ async function configureModel(testOnly: boolean) {
     keyVisible.value = false;
     if (!key && !hasSavedKey.value) {
         keyInput.value?.focus();
-        modelStatus.value = '请填写此厂商的 API Key';
+        props.showAlert('请填写此厂商的 API Key');
         return;
     }
-    if (!modelForm.value.reportValidity()) return;
     if (!modelName.value.trim()) {
-        modelStatus.value = '请选择模型';
+        props.showAlert('请选择模型');
+        return;
+    }
+    if (addressInput.value?.validity?.typeMismatch) {
+        addressInput.value.focus();
+        props.showAlert('请输入有效的接口地址。');
         return;
     }
     const isCurrent = captureSession();
@@ -183,12 +208,12 @@ async function configureModel(testOnly: boolean) {
     const base_url = enteredAddress === loadedAddress ? undefined
         : enteredAddress === selected?.default_address ? '' : enteredAddress;
     const model = {model_merchant: merchant.value, model_name: modelName.value.trim(), base_url};
-    modelBusy.value = true;
-    modelStatus.value = testOnly ? '正在测试连接…' : '正在验证并保存模型配置…';
+    modelOperation.value = testOnly ? 'test' : 'save';
+    let feedback: string;
     try {
         const result = await modelAPI(model, testOnly, key, !props.isAdmin);
         if (!isCurrent()) return;
-        modelStatus.value = result.info || (result.status ? '操作成功' : '连接失败');
+        feedback = result.info || (result.status ? '操作成功' : '连接失败');
         if (result.status && !testOnly) {
             modelRevision++;
             const savedProvider = modelOptions.value?.providers[model.model_merchant];
@@ -204,22 +229,18 @@ async function configureModel(testOnly: boolean) {
             if (modelDialog.value) await closeDialog(modelDialog.value);
         }
     } catch {
-        if (isCurrent()) modelStatus.value = '请求失败或超时，请检查后端、接口地址和模型配置。';
+        feedback = '请求失败或超时，请检查后端、接口地址和模型配置。';
     } finally {
-        if (isCurrent()) modelBusy.value = false;
+        if (isCurrent()) modelOperation.value = null;
     }
-}
-
-function setHistoryStatus(message: string, error = false) {
-    historyStatus.value = message;
-    historyError.value = error;
+    if (isCurrent()) props.showAlert(feedback);
 }
 
 async function clearHistory() {
     if (historyOperation.value !== 'idle') return;
-    setHistoryStatus('');
+    const busyMessage = '请等当前回复完成后再清空聊天记录。';
     if (props.chatBusy) {
-        setHistoryStatus('请等当前回复完成后再清空聊天记录。', true);
+        props.showAlert(busyMessage);
         return;
     }
     const isCurrent = captureSession();
@@ -231,20 +252,22 @@ async function clearHistory() {
             action: '清空聊天记录',
             destructive: true
         });
-        if (confirmed === null || !isCurrent() || props.chatBusy) return;
+        if (confirmed === null || !isCurrent()) return;
+        if (props.chatBusy) {
+            props.showAlert(busyMessage);
+            return;
+        }
 
         historyOperation.value = 'clearing';
         emit('clearing-history', true);
-        setHistoryStatus('正在清空…');
         const result = await clearHistoryAPI();
         if (!isCurrent()) return;
         if (!result.ok) throw new Error('清空聊天记录失败，请稍后重试');
         emit('history-cleared');
-        setHistoryStatus('');
         props.showAlert('聊天记录已清空。');
     } catch (error) {
         if (isCurrent()) {
-            setHistoryStatus(error instanceof Error ? error.message : '清空聊天记录失败，请稍后重试', true);
+            props.showAlert(error instanceof Error ? error.message : '清空聊天记录失败，请稍后重试');
         }
     } finally {
         if (isCurrent()) {
@@ -256,17 +279,17 @@ async function clearHistory() {
 
 function reset() {
     resetRevision++;
+    settingsLoadFailed = false;
     if (modelDialog.value) resetDialog(modelDialog.value);
     if (settingsDialog.value) resetDialog(settingsDialog.value);
     activeModel.value = null;
     modelOptions.value = undefined;
     modelReady.value = false;
-    modelBusy.value = false;
+    modelOperation.value = null;
     merchant.value = 'deepseek';
     setProvider();
     preferenceDraft.value = {send_shortcut: 'enter', theme: 'theme0'};
     preferencesDisabled.value = true;
-    setHistoryStatus('');
     if (historyOperation.value === 'clearing') emit('clearing-history', false);
     historyOperation.value = 'idle';
 }
@@ -307,7 +330,8 @@ defineExpose({open, load, reset});
                         <label>模型状态：</label>
                         <span id="display-model-status">{{ modelReady ? '可用' : '未就绪' }}</span>
                     </div>
-                    <button type="button" id="open-modify-btn" class="settings-button settings-section-action" @click="openModel">
+                    <button type="button" id="open-modify-btn" class="settings-button settings-section-action"
+                        :disabled="!modelOptions" @click="openModel">
                         {{ modelAction }}
                     </button>
                 </div>
@@ -341,21 +365,20 @@ defineExpose({open, load, reset});
                     <h2 id="chat-settings-title">聊天设置</h2>
                     <button id="clear-chat-history" class="settings-button settings-button-danger settings-section-action"
                         type="button" :disabled="historyOperation === 'clearing'" @click="clearHistory">
-                        清空聊天记录
+                        {{ historyOperation === 'clearing' ? '正在清空…' : '清空聊天记录' }}
                     </button>
-                    <p id="chat-settings-status" role="status" :class="{'is-error': historyError}">{{ historyStatus }}</p>
                 </section>
 
                 <dialog id="model-edit-modal" ref="modelDialog" class="modal" aria-labelledby="open-modify-btn" @cancel.prevent="closeModel">
                     <div class="modal-content">
                         <form id="model-config-form" ref="modelForm" autocomplete="off" novalidate
-                            @input="modelStatus = ''" @submit.prevent="configureModel(false)">
+                            :aria-busy="modelBusy" @submit.prevent="configureModel(false)">
                             <div class="form-group">
                                 <label for="modelSelect">选择模型厂商:</label>
                                 <select id="modelSelect" v-model="merchant" class="settings-select" autofocus
                                     :disabled="modelBusy" @change="setProvider()">
-                                    <option value="deepseek">deepseek</option>
-                                    <option value="tongyi">通义千问</option>
+                                    <option v-if="modelOptions?.providers.deepseek" value="deepseek">deepseek</option>
+                                    <option v-if="modelOptions?.providers.tongyi" value="tongyi">通义千问</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -365,9 +388,13 @@ defineExpose({open, load, reset});
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="model-base-url">接口地址:</label>
-                                <input id="model-base-url" v-model="address" type="url" autocomplete="off" spellcheck="false"
-                                    placeholder="清空可恢复默认地址" :disabled="modelBusy">
+                                <div class="model-address-heading">
+                                    <label for="model-base-url">接口地址:</label>
+                                    <button id="model-address-help" type="button" class="settings-button"
+                                        :disabled="modelBusy" @click="showAddressHelp">地址说明</button>
+                                </div>
+                                <input id="model-base-url" ref="addressInput" v-model="address" type="url" autocomplete="off"
+                                    spellcheck="false" :disabled="modelBusy">
                             </div>
                             <div class="form-group">
                                 <label for="model-api-key">API Key</label>
@@ -383,16 +410,13 @@ defineExpose({open, load, reset});
                                     </button>
                                 </div>
                             </div>
-                            <p class="settings-help" id="model-address-help">
-                                {{ isAdmin ? '自定义地址须经服务器批准，并兼容 OpenAI 接口。更换地址时请重新填写 API Key。'
-                                    : '自定义地址须使用公网 HTTPS，并兼容 OpenAI 接口。' }}
-                            </p>
-                            <p id="model-test-status" role="status">{{ modelStatus }}</p>
                             <div class="modal-btns">
                                 <button type="button" id="cancel-modify-btn" class="settings-button" :disabled="modelBusy" @click="closeModel">取消</button>
-                                <button type="button" id="test-model-btn" class="settings-button" :disabled="modelBusy" @click="configureModel(true)">测试连接</button>
+                                <button type="button" id="test-model-btn" class="settings-button" :disabled="modelBusy" @click="configureModel(true)">
+                                    {{ modelOperation === 'test' ? '正在测试…' : '测试连接' }}
+                                </button>
                                 <button type="submit" id="submit-model-btn" class="settings-button settings-button-primary" :disabled="modelBusy">
-                                    {{ isAdmin ? '保存并切换' : '保存模型' }}
+                                    {{ modelOperation === 'save' ? '正在验证并保存…' : isAdmin ? '保存并切换' : '保存模型' }}
                                 </button>
                             </div>
                         </form>

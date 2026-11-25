@@ -73,6 +73,16 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(result['ai_response'], ['这次可以继续聊。'])
         agent.invoke.assert_called_once()
 
+    def test_reply_generation_repairs_incomplete_unicode_without_losing_visible_text(self):
+        for content in ('{"reply":["hello\\ud800 world","\\ud83d\\ude42"]}', 'hello\ud800 world'):
+            with self.subTest(content=repr(content)):
+                result, _ = self.generate(content)
+                replies = result['ai_response']
+                self.assertEqual(replies[0], 'hello\ufffd world')
+                self.assertEqual(json.loads(json.dumps(replies, ensure_ascii=False).encode('utf-8')), replies)
+                if len(replies) > 1:
+                    self.assertEqual(replies[1], '\U0001f642')
+
     def test_reply_generation_logs_stage_when_json_is_incomplete(self):
         with self.assertLogs(parser.logger, level='WARNING') as logs:
             result, agent = self.generate('结果：{"reply":["私密回复"', finish_reason='length')

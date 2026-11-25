@@ -57,7 +57,7 @@ html.theme1 {
     
     /* 消息气泡 */
     --user-bubble: skyblue;
-    --user-text: #fff;
+    --user-text: #12374b;
     --bot-bubble: rgba(255, 255, 255, 0.95);
     --bot-text: #333;
     
@@ -99,7 +99,7 @@ html.theme2 {
     --chat-shadow: 0 8px 32px rgba(241, 39, 17, 0.15);
     
     --user-bubble: #f5af19;
-    --user-text: #fff;
+    --user-text: #402509;
     --bot-bubble: rgba(255, 250, 240, 0.95);
     --bot-text: #5a4a3a;
     

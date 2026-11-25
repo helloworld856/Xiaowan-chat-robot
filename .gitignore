@@ -30,6 +30,8 @@ env/
 # 前端依赖与构建缓存
 node_modules/
 dist/
+/frontend/.xiaowan-update.*/
+/frontend/.xiaowan-previous-dist/
 .vite/
 .vite-temp/
 *.tsbuildinfo

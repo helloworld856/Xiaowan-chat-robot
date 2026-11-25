@@ -243,7 +243,7 @@ async def delete_account(credentials: CurrentPasswordRequest, request: Request):
         _auth_event(request, 'auth_account_delete', user=user, reason='chat_busy')
         return JSONResponse({'detail': str(error)}, status_code=error.status_code)
     except AccountDeleteUnknown:
-        _auth_event(request, 'auth_account_delete', user=user, reason='commit_unknown')
+        _auth_event(request, 'auth_account_delete', user=user, reason='outcome_unknown')
         response = JSONResponse({'detail': '无法确认注销结果，请重新登录确认'}, status_code=401)
         return _clear_session_cookie(response, request)
     except AccountStorageError:

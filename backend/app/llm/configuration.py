@@ -15,7 +15,7 @@ from app.llm import factory
 from app.llm.admin_models import AdminModelFile, AdminModelStore
 from app.llm.admin_settings import ModelSettings
 from app.llm.model_catalog import ModelEndpoint
-from app.llm.personal_models import PersonalModel, PersonalModelStore
+from app.llm.personal_models import PersonalModel, PersonalModelAddressChange, PersonalModelStore
 from app.llm.public_endpoint import PublicEndpointError
 from app.system_config import ModelRuntimeConfig
 
@@ -227,11 +227,16 @@ class ModelConfigurationService:
             if agents is None:
                 return ModelConfigResponse(status=True, info='连接测试通过')
             try:
-                if not self.personal_models.update(user_id, model, agents, checked=selected):
-                    return _configuration_failure('configuration_changed', '此模型的配置已更新，请重新测试或保存')
+                saved = self.personal_models.update(user_id, model, agents, checked=selected)
+            except PersonalModelAddressChange:
+                saved = False
             except (OSError, ValueError) as error:
                 return _configuration_failure('personal_save_failed', '个人模型保存失败，请稍后重试', error)
+            if not saved:
+                return _configuration_failure('configuration_changed', '此模型的配置已更新，请重新测试或保存')
             return ModelConfigResponse(status=True, info='个人模型已保存')
+        except PersonalModelAddressChange as error:
+            return _configuration_failure('key_required_for_new_address', str(error), error)
         except Exception as error:
             return _connection_failure(error)
 

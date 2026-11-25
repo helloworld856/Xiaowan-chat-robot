@@ -201,14 +201,13 @@ defineExpose({loadHistory, clearHistory, reset});
                 </div>
                 <input :key="viewRevision" id="review-search" ref="reviewSearch" v-model="search" type="search" aria-label="搜索聊天内容"
                     placeholder="输入关键词" autocomplete="off">
-                <p id="review-count" role="status">{{ query ? `找到 ${matches.length} 条匹配记录` : '' }}</p>
+                <p id="review-count" role="status">{{ query ? `${matches.length} 条匹配记录` : `${matches.length} 条聊天记录` }}</p>
                 <div id="review-list" ref="reviewList">
                     <button v-for="match in matches" :key="match.id" type="button" class="review-item"
                         @click="jumpToBubble(match.target)">
                         <span class="review-item-user">{{ match.user }}</span>
                         <span v-if="match.reply !== undefined" class="review-item-reply">{{ match.reply }}</span>
                     </button>
-                    <p v-if="!matches.length" class="review-empty">{{ query ? '没有找到匹配的聊天记录。' : '暂无聊天记录。' }}</p>
                 </div>
             </div>
         </aside>
@@ -221,7 +220,7 @@ defineExpose({loadHistory, clearHistory, reset});
                 <template v-for="entry in entries" :key="entry.id">
                     <template v-if="entry.kind === 'turn'">
                         <div class="user_message" :data-conversation-round="entry.round">
-                            <button v-if="entry.failure" class="chat-send-failed" type="button" title="发送失败"
+                            <button v-if="entry.failure" class="chat-send-failed" type="button"
                                 :aria-label="entry.failure.retryable ? '发送失败，重试发送' : '发送失败，查看原因'"
                                 @click="activateFailure(entry)">!</button>
                             <div :id="userBubbleId(entry.id)" class="user_bubble"
@@ -238,10 +237,10 @@ defineExpose({loadHistory, clearHistory, reset});
                             </div>
                         </div>
                     </template>
-                    <details v-else class="chat-delivery chat-delivery-uncertain">
-                        <summary><span role="status">{{ entry.message }}</span></summary>
-                        <p>{{ entry.user }}</p>
-                    </details>
+                    <div v-else class="user_message">
+                        <button type="button" class="chat-delivery-action"
+                            @click="showAlert(`${entry.message}\n\n原消息：\n${entry.user}`)">查看发送结果</button>
+                    </div>
                 </template>
                 <div v-if="isTyping" id="chat-typing" class="assistant_message" role="status" aria-label="对方正在输入">
                     <div class="assistant_bag">

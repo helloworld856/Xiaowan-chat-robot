@@ -87,9 +87,9 @@ npm --prefix frontend run build
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。每条消息最多 8000 个字符。
 
-管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。后端使用对应账号的厂商配置，同厂商切换模型会共用地址和密钥，密钥留空时沿用已保存的值。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
+管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。同厂商在同一地址切换模型时，可以沿用已保存的密钥。更换接口地址时需重新填写该地址的 API Key。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
 
-在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
+在“设置 → 偏好”中修改主题或发送快捷键后，点击“保存偏好”使修改生效。两项设置保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`，刷新、换浏览器和重启后都能恢复。旧偏好文件缺少主题字段时使用默认白。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 

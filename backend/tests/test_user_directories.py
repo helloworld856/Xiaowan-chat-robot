@@ -91,6 +91,21 @@ class UserDirectoryTests(unittest.TestCase):
         self.store.recover_deletions(accounts)
         self.assertEqual(list(self.store.paths.root.iterdir()), [])
 
+    def test_deletion_with_failed_directory_restore_requires_relogin(self):
+        user = User(2, 'Member', 'user', uses_username_directory=True)
+        self.store.prepare_new(user)
+        original = self.store.paths.directory(user.id)
+        accounts = Mock()
+        accounts.delete.side_effect = AccountStorageError()
+
+        with patch.object(self.store, 'restore_user', side_effect=[None, OSError('rename failed')]):
+            with self.assertRaises(AccountDeleteUnknown):
+                self.store.delete_account(accounts, Account(user, 'test hash'))
+
+        self.assertFalse(original.exists())
+        self.store.restore_user(user)
+        self.assertTrue(self.store.profiles.path_for(user.id).is_file())
+
     def test_configured_defaults_apply_to_new_accounts_and_preserve_existing_files(self):
         self.store.prepare_new(self.member)
         defaults = DefaultsConfig(theme='theme3', send_shortcut='ctrl_enter', avatar_id='frog')

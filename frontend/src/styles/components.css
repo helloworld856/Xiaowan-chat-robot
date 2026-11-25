@@ -100,12 +100,9 @@
 .review-header h2 { font-size: 1.1rem; font-weight: 600; }
 
 #review-count {
-    font-size: 0.75rem;
-    opacity: 0.7;
+    font-size: 0.875rem;
     margin: 0.5rem 0 0.75rem;
 }
-
-#review-count:empty { margin: 0; }
 
 #review-search {
     width: 100%;
@@ -155,7 +152,6 @@ html.theme1 .review-item { border-color: var(--input-border); }
 }
 .review-item-user { font-weight: 600; }
 .review-item-reply { font-size: 0.75rem; opacity: 0.7; }
-.review-empty { padding: 1rem 0; font-size: 0.85rem; opacity: 0.7; }
 .review-selected { outline: 2px solid var(--menu-text); outline-offset: 4px; }
 .review-item:focus-visible {
     outline: 2px solid var(--menu-text);
@@ -703,13 +699,8 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
         color: var(--select-accent);
     }
 }
-.settings-help, #model-test-status, #chat-settings-status { font-size: 0.78rem; line-height: 1.6; margin: 0.5rem 0; overflow-wrap: anywhere; }
 #chat-settings-panel { margin-top: 1.5rem; border-top: 1px solid var(--chat-border); }
-#chat-settings-status { text-align: center; }
-#chat-settings-status:empty { display: none; }
-#chat-settings-status.is-error { color: #a61b1b; }
 #model-edit-modal .form-group input:focus-visible { outline: 2px solid var(--select-accent); outline-offset: 2px; }
-.settings-help { opacity: 0.7; }
 
 .settings-button {
     display: inline-flex;
@@ -742,6 +733,7 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 #model-edit-modal .form-group { flex-direction: column; align-items: stretch; gap: 0.4rem; margin-bottom: 0.8rem; }
 #model-edit-modal .form-group label { width: auto; }
 #model-edit-modal .form-group input { min-width: 0; width: 100%; background: var(--input-bg); color: var(--menu-text); }
+.model-address-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .model-key-field {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

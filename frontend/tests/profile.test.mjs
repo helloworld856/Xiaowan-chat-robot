@@ -92,8 +92,8 @@ test('account deletion requires confirmation and is unavailable to the built-in 
         }
     });
     await app.session.open();
-    assert.equal(app.element('profile-delete-account').props.disabled, true);
     await app.act('profile-delete-account');
+    assert.equal(app.alerts.at(-1), '内置管理员账号不能注销。');
     assert.deepEqual(app.deletions, []);
     app.update({isAdmin: false});
     await app.act('profile-delete-account');
@@ -123,6 +123,7 @@ test('successful account deletion reports the session change even after the prof
 test('a failed profile read cannot save an uninitialized draft', async t => {
     const app = profileHarness(t, {load: async () => { throw new Error('GET failed'); }});
     await app.session.open();
+    assert.deepEqual(app.alerts, ['GET failed']);
     assert.equal(app.element('profile-fields').props.disabled, true);
     assert.equal(app.element('profile-save').props.disabled, true);
     app.input('profile-nickname', 'New nickname');
@@ -171,7 +172,7 @@ test('profile save uses alerts, has no progress text and keeps the draft after f
     app.input('profile-nickname', 'New name');
     const pending = app.act('profile-form', 'submit');
     await nextTick();
-    assert.equal(app.element('profile-status').text, '');
+    assert.throws(() => app.element('profile-status'), /missing element/);
     assert.equal(app.element('profile-save').props.disabled, true);
     rejectSave(new Error('保存个人资料失败'));
     await pending;
@@ -197,7 +198,7 @@ test('changing a password enforces character limits and signals the auth flow', 
     await submit('Short!1');
     await submit('🙂'.repeat(21));
     assert.equal(app.passwords.length, 0);
-    assert.match(app.element('profile-password-status').text, /8–20/);
+    assert.match(app.alerts.at(-1), /8–20/);
     const valid = '🙂'.repeat(20);
     await submit(valid);
     assert.equal(app.passwords[0].new_password, valid);

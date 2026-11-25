@@ -5,7 +5,7 @@ from app.account_logging import logger
 from app.chat.memory import MemoryManager
 from app.chat.state import AIChatState
 from app.llm.token_counter import count_tokens
-from app.llm.output_parser import model_text, parse_model_json, safe_parse_json
+from app.llm.output_parser import model_text, parse_model_json, replace_invalid_unicode, safe_parse_json
 from app.system_config import ChatConfig
 from app.prompt_loader import load_prompt
 
@@ -117,7 +117,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         state['analysis_result'] = {}
         for field, default in defaults.items():
             value = ai_response.get(field)
-            state['analysis_result'][field] = value if isinstance(value, str) else default
+            state['analysis_result'][field] = replace_invalid_unicode(value) if isinstance(value, str) else default
         state['total_tokens'] += get_total_tokens(last_message)
 
         logger.info('结点"analysis"执行完成！')
@@ -170,7 +170,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
             reply = [reply]
         elif not isinstance(reply, list):
             reply = []
-        messages = [part for part in reply if isinstance(part, str) and part.strip()]
+        messages = [replace_invalid_unicode(part) for part in reply if isinstance(part, str) and part.strip()]
         if not messages:
             logger.warning('回复生成：模型输出缺少有效回复，使用默认回复')
         state['ai_response'] = messages or [DEFAULT_REPLY]

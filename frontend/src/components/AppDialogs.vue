@@ -10,6 +10,7 @@ const alert = ref<HTMLDialogElement | null>(null);
 const password = ref<HTMLInputElement | null>(null);
 const options = ref<ConfirmOptions | null>(null);
 const message = ref('');
+const alertQueue: string[] = [];
 let pending: {dialog: HTMLDialogElement; resolve: (value: string | null) => void} | null = null;
 let alertRevision = 0;
 
@@ -28,7 +29,14 @@ function finishConfirmation(result: string | null) {
 }
 
 function submitConfirmation() {
-    finishConfirmation(options.value?.password ? password.value?.value ?? '' : '');
+    const requiresPassword = options.value?.password;
+    const currentPassword = requiresPassword ? password.value?.value ?? '' : '';
+    if (requiresPassword && !currentPassword) {
+        password.value?.focus();
+        showAlert('请输入当前密码');
+        return;
+    }
+    finishConfirmation(currentPassword);
 }
 
 function confirmAction(next: ConfirmOptions) {
@@ -45,12 +53,17 @@ function confirmAction(next: ConfirmOptions) {
     });
 }
 
-function showAlert(text: string) {
-    message.value = text;
+function presentAlert() {
+    message.value = alertQueue[0];
     const revision = ++alertRevision;
     void nextTick(() => {
         if (alert.value && revision === alertRevision) openDialog(alert.value);
     });
+}
+
+function showAlert(text: string) {
+    alertQueue.push(text);
+    if (alertQueue.length === 1) presentAlert();
 }
 
 async function dismissAlert() {
@@ -58,12 +71,19 @@ async function dismissAlert() {
     if (!dialog?.open || dialog.classList.contains('closing')) return;
     const revision = alertRevision;
     await closeDialog(dialog);
-    if (revision === alertRevision && !dialog.open) emit('alert-closed');
+    if (revision !== alertRevision || dialog.open) return;
+    alertQueue.shift();
+    if (alertQueue.length) presentAlert();
+    else {
+        message.value = '';
+        emit('alert-closed');
+    }
 }
 
 function reset() {
     finishConfirmation(null);
     alertRevision++;
+    alertQueue.length = 0;
     message.value = '';
     if (alert.value) resetDialog(alert.value);
 }
@@ -86,7 +106,7 @@ defineExpose({confirmAction, showAlert, reset});
         aria-labelledby="data-confirm-title" aria-describedby="data-confirm-description" @cancel.prevent="finishConfirmation(null)">
         <h2 id="data-confirm-title">{{ options?.title }}</h2>
         <p id="data-confirm-description">{{ options?.description }}</p>
-        <form id="data-confirm-form" method="dialog" @submit.prevent="submitConfirmation">
+        <form id="data-confirm-form" method="dialog" novalidate @submit.prevent="submitConfirmation">
             <label id="data-confirm-password-field" :hidden="!options?.password">
                 <span>当前密码</span>
                 <input id="data-confirm-password" ref="password" class="profile-input" name="current_password" type="password"

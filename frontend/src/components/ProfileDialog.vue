@@ -23,21 +23,7 @@ const ready = ref(false);
 const editingPassword = ref(false);
 const nickname = ref('');
 const avatarId = ref<AvatarId>('cat');
-const status = ref('');
-const statusError = ref(false);
-const passwordStatus = ref('');
-const passwordError = ref(false);
 const preview = computed(() => profile.value?.avatars.find(avatar => avatar.id === avatarId.value)?.url ?? profile.value?.avatar_url);
-
-function setStatus(text = '', error = false) {
-    status.value = text;
-    statusError.value = error;
-}
-
-function setPasswordStatus(text = '', error = false) {
-    passwordStatus.value = text;
-    passwordError.value = error;
-}
 
 function clearPasswords() {
     for (const field of [currentPasswordInput.value, newPasswordInput.value, confirmPasswordInput.value]) {
@@ -48,7 +34,6 @@ function clearPasswords() {
 function showPassword(show: boolean) {
     editingPassword.value = show;
     clearPasswords();
-    setPasswordStatus();
     if (show) void nextTick(() => currentPasswordInput.value?.focus());
 }
 
@@ -75,7 +60,6 @@ async function open() {
     showPassword(false);
     ready.value = false;
     busy.value = true;
-    setStatus('正在读取资料…');
     try {
         await nextTick();
         if (!dialog.value || !requestIsCurrent(generation)) return;
@@ -85,10 +69,9 @@ async function open() {
         nickname.value = saved.nickname;
         avatarId.value = saved.avatar_id;
         ready.value = true;
-        setStatus();
     } catch (error) {
         if (requestIsCurrent(generation, error)) {
-            setStatus(error instanceof Error ? error.message : '读取失败，请关闭后重试', true);
+            props.showAlert(error instanceof Error ? error.message : '读取失败，请关闭后重试');
         }
     } finally {
         if (requestIsCurrent(generation)) busy.value = false;
@@ -111,7 +94,6 @@ function reset() {
     busy.value = false;
     nickname.value = '';
     avatarId.value = 'cat';
-    setStatus();
     showPassword(false);
 }
 
@@ -120,16 +102,17 @@ async function save() {
     nickname.value = nicknameInput.value?.value ?? nickname.value;
     const name = nickname.value.trim();
     if (!name) {
+        nicknameInput.value?.focus();
         props.showAlert('请输入昵称');
         return;
     }
     if ([...name].length > inputLimits.max_nickname_chars) {
+        nicknameInput.value?.focus();
         props.showAlert(`昵称最多为 ${inputLimits.max_nickname_chars} 个字符`);
         return;
     }
     const generation = getRequestGeneration();
     busy.value = true;
-    setStatus();
     let feedback = '个人资料已保存。';
     try {
         const saved = await profileAPI({nickname: name, avatar_id: avatarId.value});
@@ -146,7 +129,11 @@ async function save() {
 }
 
 async function deleteAccount() {
-    if (busy.value || !ready.value || props.isAdmin) return;
+    if (busy.value || !ready.value) return;
+    if (props.isAdmin) {
+        props.showAlert('内置管理员账号不能注销。');
+        return;
+    }
     const generation = getRequestGeneration();
     const password = await props.confirmAction({
         title: '确认注销账户？',
@@ -156,13 +143,12 @@ async function deleteAccount() {
     if (password === null || !requestIsCurrent(generation)) return;
     busy.value = true;
     window.dispatchEvent(new Event('credential-change-start'));
-    setStatus('正在注销…');
     try {
         await deleteAccountAPI(password);
         window.dispatchEvent(new Event('account-deleted'));
     } catch (error) {
         if (requestIsCurrent(generation, error)) {
-            setStatus(error instanceof Error ? error.message : '注销账户失败，请稍后重试', true);
+            props.showAlert(error instanceof Error ? error.message : '注销账户失败，请稍后重试');
         }
     } finally {
         if (requestIsCurrent(generation)) busy.value = false;
@@ -177,27 +163,43 @@ async function savePassword() {
         new_password: newPasswordInput.value?.value ?? '',
         confirm_password: confirmPasswordInput.value?.value ?? '',
     };
+    if (!passwords.current_password) {
+        currentPasswordInput.value?.focus();
+        props.showAlert('请输入当前密码');
+        return;
+    }
+    if (!passwords.new_password) {
+        newPasswordInput.value?.focus();
+        props.showAlert('请输入新密码');
+        return;
+    }
     const length = [...passwords.new_password].length;
     const {password_min_length: min, password_max_length: max} = inputLimits;
     if (length < min || length > max) {
-        setPasswordStatus(`新密码须为 ${min}–${max} 个字符`, true);
+        newPasswordInput.value?.focus();
+        props.showAlert(`新密码须为 ${min}–${max} 个字符`);
+        return;
+    }
+    if (!passwords.confirm_password) {
+        confirmPasswordInput.value?.focus();
+        props.showAlert('请确认新密码');
         return;
     }
     if (passwords.new_password !== passwords.confirm_password) {
-        setPasswordStatus('两次新密码不一致', true);
+        confirmPasswordInput.value?.focus();
+        props.showAlert('两次新密码不一致');
         return;
     }
     const generation = getRequestGeneration();
     busy.value = true;
     window.dispatchEvent(new Event('credential-change-start'));
-    setPasswordStatus('正在修改…');
     try {
         await changePasswordAPI(passwords);
         if (requestIsCurrent(generation)) dialog.value?.close();
         window.dispatchEvent(new Event('password-changed'));
     } catch (error) {
         if (requestIsCurrent(generation, error)) {
-            setPasswordStatus(error instanceof Error ? error.message : '修改失败，请重试', true);
+            props.showAlert(error instanceof Error ? error.message : '修改失败，请重试');
         }
     } finally {
         if (requestIsCurrent(generation)) {
@@ -212,12 +214,12 @@ defineExpose({open, load, reset});
 </script>
 
 <template>
-    <dialog id="profile-dialog" ref="dialog" aria-labelledby="profile-title" @cancel.prevent="close" @close="onClose">
+    <dialog id="profile-dialog" ref="dialog" aria-labelledby="profile-title" :aria-busy="busy" @cancel.prevent="close" @close="onClose">
         <div class="profile-heading">
             <h2 id="profile-title">{{ editingPassword ? '修改密码' : '个人资料' }}</h2>
             <button id="profile-close" class="profile-text-button" type="button" :disabled="busy" @click="close">关闭</button>
         </div>
-        <form id="profile-form" :hidden="editingPassword" @submit.prevent="save">
+        <form id="profile-form" novalidate :hidden="editingPassword" @submit.prevent="save">
             <fieldset id="profile-fields" :disabled="busy || !ready">
                 <div class="profile-summary">
                     <img id="profile-preview" :src="preview" alt="当前头像" width="60" height="60">
@@ -243,28 +245,25 @@ defineExpose({open, load, reset});
                 </div>
                 <button id="profile-open-password" class="profile-password-link" type="button" @click="showPassword(true)">修改密码 <span aria-hidden="true">›</span></button>
                 <div class="profile-account-actions">
-                    <button id="profile-delete-account" class="danger-button" type="button" :disabled="isAdmin" @click="deleteAccount">注销账户</button>
-                    <p id="profile-delete-help" class="profile-account" :hidden="!isAdmin">内置管理员账号不能注销。</p>
+                    <button id="profile-delete-account" class="danger-button" type="button" @click="deleteAccount">注销账户</button>
                 </div>
             </fieldset>
-            <p id="profile-status" class="profile-status" :class="{'is-error':statusError}" role="status">{{ status }}</p>
             <div class="profile-actions">
                 <button id="profile-save" class="profile-primary" type="submit" :disabled="busy || !ready">保存</button>
             </div>
         </form>
-        <form id="profile-password-form" method="post" :hidden="!editingPassword" @submit.prevent="savePassword">
+        <form id="profile-password-form" method="post" novalidate :hidden="!editingPassword" @submit.prevent="savePassword">
             <fieldset id="profile-password-fields" :disabled="busy">
                 <label class="profile-label" for="profile-current-password">当前密码</label>
                 <input id="profile-current-password" ref="currentPasswordInput" class="profile-input"
                     name="current_password" type="password" autocomplete="current-password" maxlength="512" required>
                 <label class="profile-label" for="profile-new-password">新密码</label>
                 <input id="profile-new-password" ref="newPasswordInput" class="profile-input" name="new_password" type="password"
-                    autocomplete="new-password" aria-describedby="profile-password-status" required>
+                    autocomplete="new-password" required>
                 <label class="profile-label" for="profile-confirm-password">确认新密码</label>
                 <input id="profile-confirm-password" ref="confirmPasswordInput" class="profile-input" name="confirm_password" type="password"
-                    autocomplete="new-password" aria-describedby="profile-password-status" required>
+                    autocomplete="new-password" required>
             </fieldset>
-            <p id="profile-password-status" class="profile-status" :class="{'is-error':passwordError}" role="status">{{ passwordStatus }}</p>
             <div class="profile-actions">
                 <button id="profile-password-back" class="profile-secondary" type="button" :disabled="busy" @click="showPassword(false)">返回资料</button>
                 <button id="profile-password-save" class="profile-primary" type="submit" :disabled="busy">修改并重新登录</button>

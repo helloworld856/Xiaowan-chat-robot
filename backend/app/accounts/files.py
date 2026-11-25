@@ -4,6 +4,7 @@ import json
 import os
 import re
 import stat
+from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Literal
@@ -162,6 +163,22 @@ class UserDataPaths:
         _private_directory(self.root)
         _private_directory(directory)
         return directory
+
+    def create_account_directory(self, user: User) -> User:
+        with self.lock(user.id):
+            _private_directory(self.root)
+            if user.uses_username_directory:
+                named = self.root / username_directory_name(user.username)
+                try:
+                    named.mkdir(mode=0o700)
+                except FileExistsError:
+                    user = replace(user, uses_username_directory=False)
+                else:
+                    self.bind(user)
+                    return user
+            (self.root / str(user.id)).mkdir(mode=0o700)
+            self.unbind(user.id)
+            return user
 
     def log_directory(self, user_id: int) -> Path:
         return self.directory(user_id) / 'logs'

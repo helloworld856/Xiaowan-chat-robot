@@ -124,9 +124,47 @@ test('a late settings read can apply preferences without undoing a model switch'
     assert.equal(preferences.theme, 'theme1');
 });
 
+test('opening settings retries an initial read failure and restores the saved controls', async () => {
+    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3'};
+    let reads = 0;
+    const {element, act, session, preferences, alerts} = mount({
+        settingsAPI: async () => {
+            if (++reads < 3) throw new Error('读取设置失败，请稍后重试');
+            return saved(loaded);
+        }
+    });
+    await assert.rejects(session.load(), /读取设置失败/);
+    assert.equal(element('preferences-fields').props.disabled, true);
+    assert.equal(element('open-modify-btn').props.disabled, true);
+
+    await session.open();
+    await tick();
+    assert.equal(element('setting-container').open, true);
+    assert.equal(element('preferences-fields').props.disabled, true);
+    assert.match(alerts.at(-1), /读取设置失败/);
+
+    await act('setting-container', 'cancel');
+    await session.open();
+    await tick();
+    assert.equal(reads, 3);
+    assert.equal(element('preferences-fields').props.disabled, false);
+    assert.equal(element('open-modify-btn').props.disabled, false);
+    assert.equal(element('theme-select').value, 'theme3');
+    assert.deepEqual(preferences, loaded);
+});
+
+test('the model editor offers only providers in the configured catalog', async () => {
+    const available = saved();
+    delete available.model_options.providers.deepseek;
+    const {element, act, session} = mount({settingsAPI: async () => available});
+    await session.load();
+    await act('open-modify-btn');
+    assert.deepEqual(element('modelSelect').options.map(option => option.value), ['tongyi']);
+});
+
 test('the model editor masks API keys, clears autofill, and preserves provider address semantics', async () => {
     const calls = [];
-    const {element, act, select, session, update} = mount({
+    const {element, act, select, session, update, alerts} = mount({
         settingsAPI: async () => saved(),
         modelAPI: async (model, testOnly, key, personal) => {
             calls.push({...model, testOnly, key, personal});
@@ -145,7 +183,8 @@ test('the model editor masks API keys, clears autofill, and preserves provider a
     assert.equal(key.props.required, false);
     assert.equal(key.props.placeholder, '********');
     assert.equal(key.value, '');
-    assert.match(element('model-address-help').text, /服务器批准/);
+    await act('model-address-help');
+    assert.match(alerts.at(-1), /服务器批准/);
     assert.equal(address.value, 'https://saved-address.example/v1');
     assert.deepEqual(element('modelName').options.map(option => option.value), catalog.providers.tongyi.names);
 
@@ -160,13 +199,24 @@ test('the model editor masks API keys, clears autofill, and preserves provider a
         base_url: undefined, key: undefined, testOnly: true, personal: false
     });
     assert.equal(element('display-model-status').text, '未就绪');
+    assert.equal(alerts.at(-1), '验证通过');
 
     update({isAdmin: false});
     await act('open-modify-btn');
     assert.equal(element('open-modify-btn').text, '配置个人模型');
     assert.equal(element('submit-model-btn').text, '保存模型');
-    assert.match(element('model-address-help').text, /公网 HTTPS/);
+    await act('model-address-help');
+    assert.match(alerts.at(-1), /公网 HTTPS/);
+    assert.match(alerts.at(-1), /更换或恢复地址时，请重新填写 API Key/);
     const change = () => act('model-base-url', 'input');
+    address.validity = {typeMismatch: true};
+    address.value = 'invalid address';
+    change();
+    await act('test-model-btn');
+    assert.equal(calls.length, 1);
+    assert.equal(address.focused, true);
+    assert.match(alerts.at(-1), /有效的接口地址/);
+    address.validity = {typeMismatch: false};
     address.value = catalog.providers.tongyi.default_address;
     change();
     await act('test-model-btn');
@@ -185,6 +235,7 @@ test('the model editor masks API keys, clears autofill, and preserves provider a
     assert.equal(calls.length, 2);
     assert.equal(key.value, '');
     assert.equal(key.focused, true);
+    assert.match(alerts.at(-1), /请填写此厂商的 API Key/);
 
     key.value = 'browser-login-password';
     act('model-api-key', 'beforeinput', {isTrusted: true, inputType: 'insertText'});
@@ -241,7 +292,7 @@ test('clearing history requires confirmation and emits completion after the serv
     });
 
     await act('clear-chat-history');
-    assert.match(element('chat-settings-status').text, /当前回复完成/);
+    assert.match(alerts.at(-1), /当前回复完成/);
     assert.deepEqual(events, []);
     update({chatBusy: false});
     const operation = act('clear-chat-history');
@@ -249,7 +300,7 @@ test('clearing history requires confirmation and emits completion after the serv
     confirmation.resolve('');
     await tick();
     assert.deepEqual(events, ['confirm', true, 'delete']);
-    assert.equal(alerts.length, 0);
+    assert.equal(alerts.length, 1);
     deletion.resolve({ok: true});
     await operation;
     assert.deepEqual(events, ['confirm', true, 'delete', 'cleared', false]);

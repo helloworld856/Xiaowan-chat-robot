@@ -82,7 +82,7 @@ def _read_admin_credentials(path: Path) -> str:
 
 
 class SQLAccountStore:
-    def __init__(self, pool, *, prepare_user: Callable[[User], None] | None = None):
+    def __init__(self, pool, *, prepare_user: Callable[[User], User | None] | None = None):
         self.pool = pool
         self.prepare_user = prepare_user
 
@@ -111,7 +111,11 @@ class SQLAccountStore:
                 user = User(cursor.lastrowid, username, role, uses_username_directory)
                 # 账号提交前先准备个人目录，初始化失败时数据库连接池会回滚本次插入。
                 if role == 'user' and self.prepare_user is not None:
-                    self.prepare_user(user)
+                    prepared = self.prepare_user(user)
+                    if prepared is not None and prepared.uses_username_directory != user.uses_username_directory:
+                        cursor.execute('UPDATE users SET uses_username_directory = %s WHERE id = %s',
+                                       (prepared.uses_username_directory, user.id))
+                        user = prepared
                 db.commit()
         except pymysql.IntegrityError as error:
             if error.args and error.args[0] == 1062:

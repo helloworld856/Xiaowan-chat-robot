@@ -31,6 +31,7 @@ interface ChatOptions {
 }
 
 const firstReplyMetric = 'xiaowan.chat.first-reply';
+const firstReplyDelayMs = 700;
 
 export function useChat(options: ChatOptions) {
     const draft = ref('');
@@ -98,11 +99,12 @@ export function useChat(options: ChatOptions) {
         if (!isCurrent()) return;
         entries.value.push({kind: 'notice', id: turn.id, user: turn.user, message});
         options.scrollAfterRender(true);
+        options.showAlert(message);
     }
 
-    function waitForNextReply(text: string) {
+    function waitForReplyDelay(milliseconds: number) {
         return new Promise<void>(resolve => {
-            const timer = setTimeout(finish, Math.min(1000 + 100 * text.length, 5000));
+            const timer = setTimeout(finish, milliseconds);
             finishReplyDelay = finish;
             function finish() {
                 clearTimeout(timer);
@@ -139,15 +141,23 @@ export function useChat(options: ChatOptions) {
         const isCurrent = currentOperation();
         const startedAt = performance.now();
         setBusy(true);
-        isTyping.value = true;
         options.scrollAfterRender(true);
+
+        // 请求与显示延时并行。延时结束仍未收到回复时，才显示正在输入。
+        let responsePending = true;
+        const firstReplyDelay = waitForReplyDelay(firstReplyDelayMs).then(() => {
+            if (!responsePending || !isCurrent()) return;
+            isTyping.value = true;
+            options.scrollAfterRender(false);
+        });
 
         try {
             let data;
             try {
-                data = await chatAPI(turn.user);
+                data = await chatAPI(turn.user).finally(() => { responsePending = false; });
             } catch (error) {
                 if (!isCurrent() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
+                finishReplyDelay?.();
                 isTyping.value = false;
                 if (error instanceof ChatNotStartedError) {
                     turn.failure = error;
@@ -159,8 +169,10 @@ export function useChat(options: ChatOptions) {
             }
 
             if (!isCurrent()) return;
-            isTyping.value = false;
             if (data.saved && data.conversation_round !== null) confirmRound(turn, data.conversation_round);
+            if (data.response.length) await firstReplyDelay;
+            if (!isCurrent()) return;
+            isTyping.value = false;
             for (const [index, text] of data.response.entries()) {
                 if (!isCurrent()) return;
                 turn.replies.push(text);
@@ -172,11 +184,12 @@ export function useChat(options: ChatOptions) {
                         performance.measure(firstReplyMetric, {start: startedAt, end: performance.now()});
                     });
                 }
-                if (index < data.response.length - 1) await waitForNextReply(text);
+                if (index < data.response.length - 1) await waitForReplyDelay(Math.min(1000 + 100 * text.length, 5000));
             }
             if (isCurrent() && !data.saved) options.showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
         } finally {
             if (isCurrent()) {
+                finishReplyDelay?.();
                 isTyping.value = false;
                 setBusy(false);
             }

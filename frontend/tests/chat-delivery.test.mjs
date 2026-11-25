@@ -62,6 +62,53 @@ async function harness({chatAPI, historyAPI, maxMessageChars = 8000} = {}) {
 // Copy data out of the VM so strict assertions compare objects from the same realm.
 const snapshot = value => JSON.parse(JSON.stringify(value));
 
+test('a fast first reply waits 700 ms after sending without showing a typing bubble', async () => {
+    const app = await harness({async chatAPI() {
+        return {response: ['回复'], conversation_round: 1, saved: true};
+    }});
+    const sending = app.sendMessage();
+    await flushAsync();
+    const [turn] = app.entries.value;
+    assert.equal(turn.user, '原文');
+    assert.deepEqual(snapshot(turn.replies), []);
+    assert.equal(app.isTyping.value, false);
+    assert.equal(app.busy.value, true);
+    assert.deepEqual(app.delays, [700]);
+    await app.nextReply();
+    await sending;
+    assert.deepEqual(snapshot(turn.replies), ['回复']);
+    assert.equal(app.isTyping.value, false);
+});
+
+test('a slow first reply shows typing after 700 ms and needs no additional delay', async () => {
+    let resolveSend;
+    const app = await harness({chatAPI: () => new Promise(resolve => { resolveSend = resolve; })});
+    const sending = app.sendMessage();
+    assert.equal(app.isTyping.value, false);
+    await app.nextReply();
+    assert.equal(app.isTyping.value, true);
+    resolveSend({response: ['回复'], conversation_round: 1, saved: true});
+    await sending;
+    assert.deepEqual(snapshot(app.entries.value[0].replies), ['回复']);
+    assert.deepEqual(app.delays, [700]);
+    assert.equal(app.isTyping.value, false);
+});
+
+test('changing account cancels the first reply delay before a bubble appears', async () => {
+    const app = await harness({async chatAPI() {
+        return {response: ['旧账号回复'], conversation_round: 1, saved: true};
+    }});
+    const sending = app.sendMessage();
+    await flushAsync();
+    const [turn] = app.entries.value;
+    app.nextAccount();
+    await sending;
+    assert.deepEqual(snapshot(turn.replies), []);
+    assert.equal(app.entries.value.length, 0);
+    assert.equal(app.isTyping.value, false);
+    assert.equal(app.busy.value, false);
+});
+
 test('the chat limit counts Unicode characters and preserves an oversized draft', async () => {
     const sent = [];
     const app = await harness({maxMessageChars: 3, async chatAPI(text) {
@@ -75,7 +122,9 @@ test('the chat limit counts Unicode characters and preserves an oversized draft'
     assert.equal(app.draft.value, valid + '好');
     assert.match(app.alerts[0], /3/);
     app.draft.value = valid;
-    await app.sendMessage();
+    const sending = app.sendMessage();
+    await app.nextReply();
+    await sending;
     assert.deepEqual(sent, [valid]);
 });
 
@@ -91,7 +140,7 @@ test('a retryable rejection resends the original, retains its key, and keeps the
         async historyAPI() { assert.fail('definite rejection does not need history'); }
     });
     const sending = app.sendMessage();
-    assert.equal(app.isTyping.value, true);
+    assert.equal(app.isTyping.value, false);
     app.draft.value = '新草稿';
     await sending;
     const [turn] = app.entries.value;
@@ -99,7 +148,9 @@ test('a retryable rejection resends the original, retains its key, and keeps the
     assert.equal(turn.failure.retryable, true);
     assert.deepEqual(app.alerts, [message]);
     assert.equal(app.isTyping.value, false);
-    await app.activateFailure(turn);
+    const retrying = app.activateFailure(turn);
+    await app.nextReply();
+    await retrying;
     assert.deepEqual(sent, ['原文', '原文']);
     assert.equal(app.entries.value.length, 1);
     assert.equal(app.entries.value[0].id, turn.id);
@@ -138,6 +189,7 @@ test('an uncertain send refreshes history and retains the original only in a not
     assert.equal(notice.kind, 'notice');
     assert.equal(notice.user, '原文');
     assert.match(notice.message, /已刷新聊天记录/);
+    assert.deepEqual(app.alerts, [notice.message]);
     assert.equal(notice.failure, undefined);
 });
 
@@ -147,7 +199,7 @@ test('reply delay is recalculated for each bubble and never waits after the last
         async chatAPI() { return {response: replies, conversation_round: null, saved: false}; }
     });
     const sending = app.sendMessage();
-    await flushAsync();
+    await app.nextReply();
     const [turn] = app.entries.value;
     assert.deepEqual(snapshot(turn.replies), ['hello']);
     assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
@@ -156,7 +208,7 @@ test('reply delay is recalculated for each bubble and never waits after the last
     await app.nextReply();
     await app.nextReply();
     await sending;
-    assert.deepEqual(app.delays, [1500, 3000, 5000]);
+    assert.deepEqual(app.delays, [700, 1500, 3000, 5000]);
     assert.deepEqual(snapshot(turn.replies), replies);
     assert.equal(turn.round, null);
     assert.match(app.alerts[0], /未保存/);
@@ -167,7 +219,7 @@ test('changing account cancels delayed replies, clears the draft, and unlocks th
         async chatAPI() { return {response: ['first', 'second', 'third'], conversation_round: 0, saved: true}; }
     });
     const sending = app.sendMessage();
-    await flushAsync();
+    await app.nextReply();
     const [turn] = app.entries.value;
     assert.deepEqual(snapshot(turn.replies), ['first']);
     app.draft.value = '新草稿';
@@ -209,6 +261,7 @@ test('a history refresh and a successful send with the same round converge on th
     history = [...history, saved(2, '另一个本地消息', ['另外的回复']), saved(3)];
     await app.loadHistory();
     resolveSend({response: ['另外的回复'], conversation_round: 2, saved: true});
+    await app.nextReply();
     await sending;
     const turns = app.entries.value;
     assert.deepEqual([...turns.map(turn => turn.round)], [0, 1, 2, 3]);
@@ -228,6 +281,7 @@ test('a send confirmation stays in round order when older history arrives during
     history = [...history, saved(1), saved(2)];
     await app.loadHistory();
     resolveSend({response: ['最新的回复'], conversation_round: 3, saved: true});
+    await app.nextReply();
     await sending;
     assert.deepEqual(Array.from(app.entries.value, turn => turn.round), [0, 1, 2, 3]);
     assert.equal(app.entries.value.at(-1).id, optimisticKey);

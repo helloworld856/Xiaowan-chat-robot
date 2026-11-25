@@ -128,8 +128,15 @@ class SettingsAPITests(unittest.TestCase):
         other = settings.get_settings(self.request_for(3)).model_options.providers['tongyi']
         self.assertNotEqual(other.saved_address, address)
         self.assertEqual(other.default_address, 'https://dashscope.aliyuncs.com/api/v1')
-        self.assertTrue(model.save_personal_model(PersonalModel(
+        self.model_calls.reset_mock()
+        rejected = model.test_personal_model(PersonalModel(
             model_merchant='tongyi', model_name='qwen3-max', base_url='',
+        ), member)
+        self.assertFalse(rejected.status)
+        self.assertIn('重新填写', rejected.info)
+        self.model_calls.assert_not_called()
+        self.assertTrue(model.save_personal_model(PersonalModel(
+            model_merchant='tongyi', model_name='qwen3-max', base_url='', api_key='new-test-key',
         ), member).status)
         self.assertEqual(self.agent_calls.call_args.kwargs['adapter'], 'dashscope')
         self.assertFalse(self.agent_calls.call_args.kwargs['public_only'])

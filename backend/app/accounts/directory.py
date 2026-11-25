@@ -26,9 +26,16 @@ class UserDirectoryStore:
             self.paths, legacy_preferences, Preferences(send_shortcut=initial.send_shortcut, theme=initial.theme),
         )
 
-    def prepare_new(self, user: User) -> None:
+    def prepare_new(self, user: User) -> User:
         # This runs inside the registration transaction. The new user has no legacy settings.
-        self.ensure(user, self.preferences.defaults)
+        user = self.paths.create_account_directory(user)
+        try:
+            self.ensure(user, self.preferences.defaults)
+        except Exception:
+            self._remove_directory(self.paths.directory(user.id))
+            self.paths.unbind(user.id)
+            raise
+        return user
 
     def _staged_path(self, user_id: int) -> Path:
         return self.paths.root / f'.deleting-{user_id}'
@@ -47,15 +54,15 @@ class UserDirectoryStore:
         staged.rename(original)
         _sync_directory(self.paths.root)
 
-    def _purge_staged(self, staged: Path) -> None:
+    def _remove_directory(self, directory: Path) -> None:
         try:
             require_directory(self.paths.root)
-            require_directory(staged)
-            rmtree(staged)
+            require_directory(directory)
+            rmtree(directory)
         except FileNotFoundError:
             pass
         except OSError:
-            logger.warning('暂时无法移除已注销账号的目录 %s，下次启动时重试', staged.name)
+            logger.warning('暂时无法移除账号目录 %s', directory.name)
 
     def recover_deletions(self, accounts: SQLAccountStore) -> None:
         try:
@@ -66,7 +73,7 @@ class UserDirectoryStore:
             if match := re.fullmatch(r'\.deleting-([1-9][0-9]*)', staged.name):
                 user = accounts.find_user_by_id(int(match.group(1)))
                 if user is None:
-                    self._purge_staged(staged)
+                    self._remove_directory(staged)
                 else:
                     self.restore_user(user)
 
@@ -92,11 +99,15 @@ class UserDirectoryStore:
             # 保留暂存目录。登录或启动时按数据库中是否仍有账号决定恢复或清理。
             raise
         except Exception:
-            self.restore_user(user)
+            try:
+                self.restore_user(user)
+            except OSError:
+                # 旧会话须先失效，避免后续请求在恢复前重建同名目录。
+                raise AccountDeleteUnknown() from None
             raise
         self.models.forget(user.id)
         self.paths.unbind(user.id)
-        self._purge_staged(staged)
+        self._remove_directory(staged)
 
     def migrate_legacy(self, accounts: SQLAccountStore) -> None:
         for user in accounts.users_with_id_directories():

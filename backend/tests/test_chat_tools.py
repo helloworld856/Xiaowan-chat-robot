@@ -138,6 +138,18 @@ class ChatToolTests(unittest.TestCase):
         self.assertIn('event=tool_failure tool=weather stage=geocoding error=HTTPError http_status=403', recorded.output[0])
         self.assertNotIn('private weather exception', recorded.output[0])
 
+    def test_weather_rejects_missing_or_invalid_current_values(self):
+        location = Mock(json=Mock(return_value={'results': [
+            {'name': '杭州', 'latitude': 30.2, 'longitude': 120.1},
+        ]}))
+        current = {'time': '2026-11-20T12:00', 'temperature_2m': 18, 'relative_humidity_2m': 60}
+        for invalid in ({'time': None}, {'temperature_2m': None}, {'relative_humidity_2m': False}):
+            conditions = Mock(json=Mock(return_value={'current': {**current, **invalid}}))
+            with (self.subTest(invalid=invalid),
+                  patch('tools_config.weather_tool.weather.requests.get', side_effect=[location, conditions]),
+                  self.assertLogs('xiaowan', level='WARNING')):
+                self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州'}), '天气服务暂时不可用，请稍后再试。')
+
     def test_weather_omits_empty_country(self):
         location = Mock(json=Mock(return_value={'results': [
             {'name': '杭州', 'country': None, 'latitude': 30.2, 'longitude': 120.1},
