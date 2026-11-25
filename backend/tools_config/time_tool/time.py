@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.account_logging import logger
+from app.account_logging import log_event, logger
 
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 TimeOperation = Literal["now", "add_days", "days_between", "convert_timezone"]
@@ -101,6 +101,8 @@ def get_current_time(
         end = _parse_date(end_date, "end_date")
         return f"{start.isoformat()} 到 {end.isoformat()} 相差 {(end - start).days} 天"
     except ValueError as error:
+        log_event('tool_failure', tool='time', reason='invalid_arguments')
         return str(error)
     except OverflowError:
+        log_event('tool_failure', tool='time', reason='date_overflow')
         return "计算结果超出支持的日期和时间范围（年份 1–9999）。"

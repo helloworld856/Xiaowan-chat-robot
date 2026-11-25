@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+from logging import INFO, WARNING
 
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
@@ -6,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from app.account_logging import log_event
 from app.accounts.auth_service import (
     COOKIE_NAME,
     USERNAME_PATTERN,
@@ -27,6 +29,7 @@ from app.accounts.repository import (
 from app.chat.scheduler import ChatNotStarted
 from app.system_config import MAX_PASSWORD_INPUT_LENGTH, PasswordConfig
 
+from .auth_middleware import request_client_ip
 from .credential_route import CredentialRoute
 
 
@@ -91,6 +94,12 @@ def _clear_session_cookie(response: JSONResponse, request: Request) -> JSONRespo
     return response
 
 
+def _auth_event(request: Request, action: str, *, user: User | None = None, reason: str | None = None) -> None:
+    log_event(action, system=True, level=INFO if reason is None else WARNING,
+              outcome='succeeded' if reason is None else 'failed', reason=reason,
+              user_id=user.id if user is not None else None, client_ip=request_client_ip(request.scope))
+
+
 @router.post('/login')
 def login(credentials: LoginRequest, request: Request):
     service = request.app.state.auth
@@ -99,11 +108,15 @@ def login(credentials: LoginRequest, request: Request):
         token, user = service.login(credentials.username, credentials.password, client,
                                     previous_token=request.cookies.get(COOKIE_NAME))
     except InvalidCredentials:
+        _auth_event(request, 'auth_login', reason='invalid_credentials')
         return JSONResponse({'detail': '用户名或密码错误'}, status_code=401)
     except LoginThrottled as error:
+        _auth_event(request, 'auth_login', reason='rate_limited')
         return _throttled(error)
     except AccountStorageError:
+        _auth_event(request, 'auth_login', reason='storage_error')
         return _unavailable()
+    _auth_event(request, 'auth_login', user=user)
     response = JSONResponse({'user': _public_user(user)})
     response.set_cookie(COOKIE_NAME, token, max_age=service.config.session_ttl_seconds, httponly=True,
                         secure=request.url.scheme == 'https', samesite='strict', path='/')
@@ -133,55 +146,74 @@ def register(credentials: RegistrationRequest, request: Request):
     _validate_password_lengths(service.config.password, password=credentials.password,
                                confirm_password=credentials.confirm_password)
     if credentials.password != credentials.confirm_password:
+        _auth_event(request, 'auth_register', reason='password_mismatch')
         return JSONResponse({'detail': '两次输入的密码不一致'}, status_code=400)
     client = request.client.host if request.client else 'unknown'
     try:
         user = service.register(credentials.username, credentials.password, client)
     except ReservedUsername:
+        _auth_event(request, 'auth_register', reason='reserved_username')
         return JSONResponse({'detail': 'admin 是保留用户名'}, status_code=409)
     except DuplicateUsername:
+        _auth_event(request, 'auth_register', reason='duplicate_username')
         return JSONResponse({'detail': '该用户名已注册'}, status_code=409)
     except (InvalidPassword, ValueError) as error:
+        _auth_event(request, 'auth_register', reason='invalid_registration')
         return JSONResponse({'detail': str(error)}, status_code=400)
     except LoginThrottled as error:
+        _auth_event(request, 'auth_register', reason='rate_limited')
         return _throttled(error)
     except AccountStorageError:
+        _auth_event(request, 'auth_register', reason='storage_error')
         return _unavailable()
+    _auth_event(request, 'auth_register', user=user)
     return {'user': _public_user(user)}
 
 
 @router.post('/logout')
 async def logout(request: Request):
     request.app.state.auth.logout(request.cookies.get(COOKIE_NAME))
+    if request.state.user is not None:
+        _auth_event(request, 'auth_logout', user=request.state.user)
     return _clear_session_cookie(JSONResponse({'ok': True}), request)
 
 
 @router.post('/password')
 def change_password(credentials: PasswordRequest, request: Request):
     service = request.app.state.auth
+    user = request.state.user
     _validate_password_lengths(service.config.password, new_password=credentials.new_password,
                                confirm_password=credentials.confirm_password)
     if credentials.new_password != credentials.confirm_password:
+        _auth_event(request, 'auth_password_change', user=user, reason='password_mismatch')
         return JSONResponse({'detail': '两次输入的新密码不一致'}, status_code=400)
     client = request.client.host if request.client else 'unknown'
     try:
-        service.change_password(request.state.user, request.cookies.get(COOKIE_NAME),
+        service.change_password(user, request.cookies.get(COOKIE_NAME),
                                 credentials.current_password, credentials.new_password, client)
     except InvalidSession:
+        _auth_event(request, 'auth_password_change', user=user, reason='invalid_session')
         return JSONResponse({'detail': '请先登录'}, status_code=401)
     except InvalidCredentials:
+        _auth_event(request, 'auth_password_change', user=user, reason='invalid_credentials')
         return JSONResponse({'detail': '当前密码错误'}, status_code=400)
     except InvalidPassword as error:
+        _auth_event(request, 'auth_password_change', user=user, reason='invalid_password')
         return JSONResponse({'detail': str(error)}, status_code=400)
     except LoginThrottled as error:
+        _auth_event(request, 'auth_password_change', user=user, reason='rate_limited')
         return _throttled(error)
     except PasswordCommitUnknown:
+        _auth_event(request, 'auth_password_change', user=user, reason='commit_unknown')
         # 提交结果未知时清除 Cookie，让用户重新登录确认当前密码。
         return _clear_session_cookie(JSONResponse({'detail': '无法确认密码是否已更改，请重新登录'}, status_code=401), request)
     except PasswordSaveFailed:
+        _auth_event(request, 'auth_password_change', user=user, reason='save_failed')
         return JSONResponse({'detail': '保存密码失败，原有密码仍有效'}, status_code=500)
     except AccountStorageError:
+        _auth_event(request, 'auth_password_change', user=user, reason='storage_error')
         return _unavailable()
+    _auth_event(request, 'auth_password_change', user=user)
     return _clear_session_cookie(JSONResponse({'ok': True}), request)
 
 
@@ -196,18 +228,26 @@ async def delete_account(credentials: CurrentPasswordRequest, request: Request):
             await run_in_threadpool(service.delete_account, user, request.cookies.get(COOKIE_NAME),
                                     credentials.current_password, client)
     except AdminDeletionForbidden:
+        _auth_event(request, 'auth_account_delete', user=user, reason='admin_forbidden')
         return JSONResponse({'detail': '内置管理员账号不能注销'}, status_code=403)
     except InvalidSession:
+        _auth_event(request, 'auth_account_delete', user=user, reason='invalid_session')
         return JSONResponse({'detail': '请先登录'}, status_code=401)
     except InvalidCredentials:
+        _auth_event(request, 'auth_account_delete', user=user, reason='invalid_credentials')
         return JSONResponse({'detail': '当前密码错误'}, status_code=400)
     except LoginThrottled as error:
+        _auth_event(request, 'auth_account_delete', user=user, reason='rate_limited')
         return _throttled(error)
     except ChatNotStarted as error:
+        _auth_event(request, 'auth_account_delete', user=user, reason='chat_busy')
         return JSONResponse({'detail': str(error)}, status_code=error.status_code)
     except AccountDeleteUnknown:
+        _auth_event(request, 'auth_account_delete', user=user, reason='commit_unknown')
         response = JSONResponse({'detail': '无法确认注销结果，请重新登录确认'}, status_code=401)
         return _clear_session_cookie(response, request)
     except AccountStorageError:
+        _auth_event(request, 'auth_account_delete', user=user, reason='storage_error')
         return _unavailable()
+    _auth_event(request, 'auth_account_delete', user=user)
     return _clear_session_cookie(JSONResponse({'ok': True}), request)

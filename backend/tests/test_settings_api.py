@@ -71,7 +71,13 @@ class SettingsAPITests(unittest.TestCase):
 
     def test_unlisted_models_are_rejected_before_network_validation(self):
         selection = model.ModelConfigRequest(model_merchant='deepseek', model_name='Unlisted', api_key='fake-key')
-        self.assertFalse(self.switch(selection).status)
+        with self.assertLogs('xiaowan', level='INFO') as audit:
+            self.assertFalse(self.switch(selection).status)
+        events = '\n'.join(audit.output)
+        self.assertIn('event=model_configuration_failed reason=model_not_allowed', events)
+        self.assertIn('event=global_model_switch user_id=1 outcome=failed', events)
+        self.assertNotIn('fake-key', events)
+        self.assertNotIn('Unlisted', events)
         from app.llm.personal_models import PersonalModel
 
         personal = PersonalModel(model_merchant='deepseek', model_name='Unlisted', api_key='fake-key')

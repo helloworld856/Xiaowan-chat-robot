@@ -5,6 +5,18 @@ from _imports import BACKEND_ROOT as _BACKEND_ROOT
 
 
 class ConnectionPoolTests(unittest.TestCase):
+    def test_checkout_timeout_emits_system_event(self):
+        import pymysql
+        from app.database.pool import ConnectionPool
+
+        pool = ConnectionPool(Mock(return_value=Mock()), max_connections=1, wait_timeout=0)
+        self.addCleanup(pool.close)
+        with pool.connection(), self.assertLogs('xiaowan', level='WARNING') as events:
+            with self.assertRaises(pymysql.OperationalError), pool.connection():
+                self.fail('connection checked out when all slots were occupied')
+        self.assertIn('event=db_checkout_timeout timeout_seconds=0', events.output[0])
+        self.assertTrue(events.records[0].system_event)
+
     def test_checkout_rejects_connection_opened_during_close(self):
         import pymysql
         from app.database.pool import ConnectionPool
@@ -45,9 +57,11 @@ class ConnectionPoolTests(unittest.TestCase):
         broken.rollback.side_effect = OSError('lost connection')
         pool = ConnectionPool(Mock(side_effect=[broken, replacement]), max_connections=1)
         self.addCleanup(pool.close)
-        with self.assertRaisesRegex(ValueError, 'operation failed'):
-            with pool.connection():
-                raise ValueError('operation failed')
+        with self.assertLogs('xiaowan', level='WARNING') as events:
+            with self.assertRaisesRegex(ValueError, 'operation failed'):
+                with pool.connection():
+                    raise ValueError('operation failed')
+        self.assertIn('event=db_rollback_failed error=OSError', events.output[0])
         broken.close.assert_called_once()
         with pool.connection() as connection:
             self.assertIs(connection, replacement)
@@ -61,5 +75,7 @@ class ConnectionPoolTests(unittest.TestCase):
         self.addCleanup(pool.close)
         with pool.connection():
             pass
-        with pool.connection() as connection:
-            self.assertIs(connection, replacement)
+        with self.assertLogs('xiaowan', level='WARNING') as events:
+            with pool.connection() as connection:
+                self.assertIs(connection, replacement)
+        self.assertIn('event=db_connection_discarded error=OSError', events.output[0])

@@ -15,7 +15,7 @@ def auth_module():
 
 
 def request(app, path, method='GET', payload=None, cookie=None, origin=None, scheme='http', expected_user=None,
-            extra_headers=()):
+            extra_headers=(), query=b''):
     """执行真实 ASGI 应用；这些路由没有外部异步 I/O，不需要网络套接字。"""
     headers = [(b'host', b'testserver'), (b'content-type', b'application/json')]
     headers.extend(extra_headers)
@@ -27,7 +27,7 @@ def request(app, path, method='GET', payload=None, cookie=None, origin=None, sch
         headers.append((b'x-xiaowan-user', str(expected_user).encode()))
     scope = {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'},
              'http_version': '1.1', 'method': method, 'scheme': scheme, 'path': path,
-             'raw_path': path.encode(), 'root_path': '', 'query_string': b'',
+             'raw_path': path.encode(), 'root_path': '', 'query_string': query,
              'headers': headers, 'server': ('testserver', 80), 'client': ('127.0.0.1', 12345)}
     sent = []
     async def receive():
@@ -168,6 +168,27 @@ class AuthHTTPTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(json.loads(body), {'user': None, 'limits': self.DEFAULT_LIMITS})
                 self.assertIn('no-store', headers['cache-control'])
+
+    def test_auth_audit_records_verified_account_and_outcome(self):
+        password = 'audit-password'
+        credentials = {'username': 'AuditMember', 'password': password}
+        with self.assertLogs('xiaowan', level='INFO') as audit:
+            self.assertEqual(request(self.app, '/auth/login', 'POST', credentials)[0], 401)
+            status, _, body = request(self.app, '/auth/register', 'POST', {
+                **credentials, 'confirm_password': password,
+            })
+            self.assertEqual(status, 201)
+            user_id = json.loads(body)['user']['id']
+            status, headers, _ = request(self.app, '/auth/login', 'POST', credentials)
+            self.assertEqual(status, 200)
+            cookie = headers['set-cookie'].split(';', 1)[0]
+            self.assertEqual(request(self.app, '/auth/account', 'DELETE', {'current_password': password}, cookie=cookie)[0], 200)
+        events = '\n'.join(audit.output)
+        self.assertIn('event=auth_login outcome=failed reason=invalid_credentials', events)
+        for action in ('auth_register', 'auth_login', 'auth_account_delete'):
+            self.assertIn(f'event={action} outcome=succeeded user_id={user_id}', events)
+        self.assertNotIn(password, events)
+        self.assertNotIn(cookie, events)
 
     def test_login_cookie_refresh_session_logout_and_old_token_rejection(self):
         headers, cookie = self.login()

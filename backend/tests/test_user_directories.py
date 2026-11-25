@@ -4,16 +4,18 @@ import os
 import stat
 import tempfile
 import unittest
+from io import StringIO
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from pathlib import Path
-from unittest.mock import Mock
+from threading import Event
+from unittest.mock import Mock, patch
 
 
 from _imports import BACKEND_ROOT as ROOT
 
 from app.accounts.repository import Account, AccountDeleteUnknown, AccountStorageError, User
-from app.account_logging import account_log_context
+from app.account_logging import account_log_context, discard_logs_after
 from app.account_logging import AccountFileHandler, AccountLabel
 from app.llm.personal_models import PersonalModel
 from app.accounts.profile import Profile, ProfileStore
@@ -149,11 +151,11 @@ class UserDirectoryTests(unittest.TestCase):
             raise RuntimeError('synthetic failure')
 
         with ThreadPoolExecutor(max_workers=1) as worker:
-            with account_log_context(self.store.paths, self.member.id):
+            with account_log_context(self.store.paths, self.member):
                 with self.assertRaises(RuntimeError):
                     worker.submit(copy_context().run, log_failure).result()
             worker.submit(logger.info, 'system-only').result()
-            with account_log_context(self.store.paths, self.admin.id):
+            with account_log_context(self.store.paths, self.admin):
                 for part in range(3):
                     worker.submit(copy_context().run, logger.info, 'admin-only-%d %s', part, 'x' * 80).result()
         handler.close()
@@ -177,9 +179,87 @@ class UserDirectoryTests(unittest.TestCase):
         logger = logging.Logger('review-test', level=logging.INFO)
         logger.addHandler(handler)
         self.addCleanup(handler.close)
-        with account_log_context(self.store.paths, self.member.id):
+        with account_log_context(self.store.paths, self.member):
             logger.info('original account event')
         handler.close()
         contents = system_path.read_text(encoding='utf-8')
         self.assertIn('运行日志写入失败', contents)
         self.assertNotIn('original account event', contents)
+
+    def test_timed_out_worker_cannot_reopen_account_log_after_close(self):
+        handler = AccountFileHandler(self.root / 'system.log')
+        self.addCleanup(handler.close)
+        logger = logging.Logger('review-test', level=logging.INFO)
+        logger.addHandler(handler)
+        cancelled = Event()
+        with account_log_context(self.store.paths, self.member), discard_logs_after(cancelled):
+            logger.info('started before timeout')
+            context = copy_context()
+
+        cancelled.set()
+        handler.close_accounts(self.store.paths, self.member.id)
+        log_path = self.store.paths.log_directory(self.member.id) / 'app.log'
+        log_path.unlink()
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            worker.submit(context.run, logger.info, 'finished after timeout').result()
+        self.assertFalse(log_path.exists())
+        self.assertFalse((self.root / 'system.log').exists())
+
+    def test_request_logs_use_usernames_and_correlate_safe_system_errors(self):
+        from fastapi import FastAPI
+        from app import account_logging
+        from app.api.auth_middleware import AuthenticationMiddleware
+        from test_auth import request
+
+        system_path = self.root / 'system.log'
+        handler = AccountFileHandler(system_path)
+        self.addCleanup(handler.close)
+        console_output = StringIO()
+        handler.console = logging.StreamHandler(console_output)
+        handler.addFilter(AccountLabel())
+        handler.setFormatter(logging.Formatter('%(account_label)s%(request_label)s %(message)s'))
+        service = Mock()
+        service.get_user.side_effect = {'member': self.member, 'admin': self.admin}.get
+        app = FastAPI()
+        app.add_middleware(AuthenticationMiddleware, service=service, user_data_paths=self.store.paths)
+
+        @app.get('/example/{name}')
+        async def endpoint(name: str):
+            if name == 'error':
+                raise RuntimeError('private exception body')
+            logging.getLogger('test.sdk').warning('private SDK diagnostics', extra={'source': 'mock'})
+            return {'ok': True}
+
+        with (patch.object(account_logging.logger, 'handlers', [handler]),
+              patch.object(logging.getLogger(), 'handlers', [handler])):
+            status, headers, _ = request(app, '/example/member-path', cookie='xiaowan_session=member',
+                                         query=b'filter=private-query', extra_headers=((b'x-request-id', b'client-id'),))
+            self.assertEqual(status, 200)
+            self.assertEqual(request(app, '/example/admin-path', cookie='xiaowan_session=admin')[0], 200)
+            self.assertEqual(request(app, '/example/anonymous-path')[0], 401)
+            self.assertEqual(request(app, '/example/cross-origin-path', 'POST', origin='https://elsewhere.example')[0], 403)
+            with self.assertRaises(RuntimeError):
+                request(app, '/example/error', cookie='xiaowan_session=member')
+
+        member = (self.store.paths.log_directory(self.member.id) / 'app.log').read_text(encoding='utf-8')
+        admin = (self.store.paths.log_directory(self.admin.id) / 'app.log').read_text(encoding='utf-8')
+        system = system_path.read_text(encoding='utf-8')
+        self.assertIn(f'[账号 {self.member.username}]', member)
+        self.assertIn('[账号 admin]', admin)
+        self.assertNotEqual(headers['x-request-id'], 'client-id')
+        self.assertIn(headers['x-request-id'], member)
+        self.assertNotIn(headers['x-request-id'], admin)
+        self.assertIn('GET /example/{name} 返回 200', member)
+        self.assertIn('event=dependency_log source=test.sdk', member)
+        self.assertIn('reason=authentication_required', system)
+        self.assertIn('reason=cross_origin', system)
+        self.assertIn('event=request_failed', system)
+        self.assertIn('event=request_failed', console_output.getvalue())
+        self.assertIn('error=RuntimeError', member)
+        error_line = next(line for line in member.splitlines() if 'error=RuntimeError' in line)
+        self.assertIn(error_line.split('request_id=')[1].split(']')[0], system)
+        for sample in ('member-path', 'admin-path', 'anonymous-path', 'cross-origin-path', 'private-query',
+                       'private exception body', 'private SDK diagnostics'):
+            self.assertNotIn(sample, member + admin + system)
+        if os.name == 'posix':
+            self.assertEqual(stat.S_IMODE(system_path.stat().st_mode), 0o600)

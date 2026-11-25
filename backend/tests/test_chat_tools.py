@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import _imports
+import requests
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
@@ -126,6 +127,16 @@ class ChatToolTests(unittest.TestCase):
                 request.return_value.json.return_value = payload
                 self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州'}), expected)
                 request.assert_called_once()
+
+    def test_weather_failure_logs_stage_and_status_without_exception_text(self):
+        response = requests.Response()
+        response.status_code = 403
+        error = requests.HTTPError('private weather exception', response=response)
+        with (patch('tools_config.weather_tool.weather.requests.get', side_effect=error),
+              self.assertLogs('xiaowan', level='WARNING') as recorded):
+            self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州'}), '天气服务暂时不可用，请稍后再试。')
+        self.assertIn('event=tool_failure tool=weather stage=geocoding error=HTTPError http_status=403', recorded.output[0])
+        self.assertNotIn('private weather exception', recorded.output[0])
 
     def test_weather_omits_empty_country(self):
         location = Mock(json=Mock(return_value={'results': [

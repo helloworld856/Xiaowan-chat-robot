@@ -1,6 +1,9 @@
+from logging import WARNING
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
+from app.account_logging import log_event
 from app.accounts.profile import AVATARS, Profile
 from app.system_config import AvatarId
 
@@ -30,7 +33,8 @@ def get_profile(request: Request):
     store = request.app.state.profile
     try:
         return profile_response(user.username, store.get(user.id, user.username), store.default_avatar_id)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        log_event('profile_read_failed', level=WARNING, error=type(error).__name__)
         raise HTTPException(500, '读取个人资料失败，请检查 profile.json') from None
 
 
@@ -43,5 +47,6 @@ def save_profile(profile: ProfileRequest, request: Request):
         raise HTTPException(422, f'昵称最多为 {limit} 个字符')
     try:
         return profile_response(user.username, store.update(user.id, profile), store.default_avatar_id)
-    except OSError:
+    except OSError as error:
+        log_event('profile_save_failed', level=WARNING, error=type(error).__name__)
         raise HTTPException(500, '保存个人资料失败，原有资料仍保留') from None
