@@ -45,7 +45,7 @@ def main():
     logging.captureWarnings(True)
     logging.getLogger('uvicorn').setLevel(logging.INFO)
     console = logging.StreamHandler()
-    console.setFormatter(logging.Formatter('%(levelname)s%(request_label)s: %(message)s'))
+    console.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
     console.addFilter(lambda record: record.levelno >= logging.WARNING or (
         record.name == 'uvicorn.error' and record.getMessage().startswith(SERVER_LIFECYCLE_MESSAGES)))
     configure_system_console(console)

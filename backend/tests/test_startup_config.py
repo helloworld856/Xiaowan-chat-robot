@@ -98,8 +98,7 @@ system_config.BACKEND_ROOT = files.BACKEND_ROOT
 def start_server(app, **options):
     server_config = uvicorn.Config(app, **options)
     assert not server_config.access_log
-    from app.account_logging import logger
-    from app.account_logging import account_log_context
+    from app.account_logging import account_log_context, logger, request_log_context
     from app.accounts.files import UserDataPaths
     from app.accounts.repository import User
 
@@ -109,6 +108,8 @@ def start_server(app, **options):
     server.info('Application startup complete.')
     server.info('Uvicorn running on %s://%s:%d (Press CTRL+C to quit)', 'http', '127.0.0.1', 8000)
     server.error('runtime server error')
+    with request_log_context('internal-request-id'):
+        logger.warning('request warning')
     try:
         raise RuntimeError('private ASGI failure text')
     except RuntimeError:
@@ -152,11 +153,10 @@ launcher['main']()
                         'Application startup complete.', 'Uvicorn running on http://127.0.0.1:8000'):
             self.assertIn(message, result.stderr)
             self.assertIn(message, contents)
-        for message in ('runtime server error', 'event=asgi_failure', 'dependency warning'):
+        for message in ('runtime server error', 'event=asgi_failure', 'dependency warning', 'request warning'):
             self.assertIn(message, contents)
-        for message in ('runtime server error', 'event=asgi_failure', 'dependency warning'):
             self.assertIn(message, result.stderr)
-        for message in ('GET /version HTTP/1.1', 'private ASGI failure text', 'Traceback'):
+        for message in ('GET /version HTTP/1.1', 'private ASGI failure text', 'Traceback', 'internal-request-id'):
             self.assertNotIn(message, contents + result.stderr)
         for user_id, message in ((1, 'first account event'), (2, 'second account event')):
             account_log = (users / str(user_id) / 'logs' / 'app.log').read_text(encoding='utf-8')

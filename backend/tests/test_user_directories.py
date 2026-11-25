@@ -205,7 +205,7 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertFalse(log_path.exists())
         self.assertFalse((self.root / 'system.log').exists())
 
-    def test_request_logs_use_usernames_and_correlate_safe_system_errors(self):
+    def test_request_logs_use_usernames_and_omit_request_ids(self):
         from fastapi import FastAPI
         from app import account_logging
         from app.api.auth_middleware import AuthenticationMiddleware
@@ -217,7 +217,7 @@ class UserDirectoryTests(unittest.TestCase):
         console_output = StringIO()
         handler.console = logging.StreamHandler(console_output)
         handler.addFilter(AccountLabel())
-        handler.setFormatter(logging.Formatter('%(account_label)s%(request_label)s %(message)s'))
+        handler.setFormatter(account_logging.logger.handlers[0].formatter)
         service = Mock()
         service.get_user.side_effect = {'member': self.member, 'admin': self.admin}.get
         app = FastAPI()
@@ -247,8 +247,7 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertIn(f'[账号 {self.member.username}]', member)
         self.assertIn('[账号 admin]', admin)
         self.assertNotEqual(headers['x-request-id'], 'client-id')
-        self.assertIn(headers['x-request-id'], member)
-        self.assertNotIn(headers['x-request-id'], admin)
+        self.assertNotIn(headers['x-request-id'], member + admin + system)
         self.assertIn('GET /example/{name} 返回 200', member)
         self.assertIn('event=dependency_log source=test.sdk', member)
         self.assertIn('reason=authentication_required', system)
@@ -256,8 +255,7 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertIn('event=request_failed', system)
         self.assertIn('event=request_failed', console_output.getvalue())
         self.assertIn('error=RuntimeError', member)
-        error_line = next(line for line in member.splitlines() if 'error=RuntimeError' in line)
-        self.assertIn(error_line.split('request_id=')[1].split(']')[0], system)
+        self.assertNotIn('request_id=', member + admin + system + console_output.getvalue())
         for sample in ('member-path', 'admin-path', 'anonymous-path', 'cross-origin-path', 'private-query',
                        'private exception body', 'private SDK diagnostics'):
             self.assertNotIn(sample, member + admin + system)

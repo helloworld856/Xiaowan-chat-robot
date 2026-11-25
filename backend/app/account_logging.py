@@ -111,10 +111,9 @@ class AccountLabel(logging.Filter):
     def filter(self, record):
         context = None if getattr(record, 'system_event', False) else account_log.get()
         record.account_label = f' [账号 {context[1].username}]' if context is not None else ''
-        request_id = request_log.get()
-        record.request_label = f' [request_id={request_id}]' if request_id is not None else ''
+        in_request = request_log.get() is not None
         # SDK 的告警可能包含请求 URL、上游响应或异常正文。
-        if (record.name != 'xiaowan' and request_id is not None
+        if (record.name != 'xiaowan' and in_request
                 or record.name == 'asyncio' and record.exc_info):
             error = record.exc_info[0] if record.exc_info else None
             record.msg = 'event=dependency_log source=%s%s'
@@ -205,7 +204,6 @@ class AccountFileHandler(logging.Handler):
             fallback = logging.LogRecord(record.name, logging.WARNING, __file__, 0,
                                          '账号 %d 的运行日志写入失败（%s）', (user_id, type(error).__name__), None)
             fallback.account_label = ''
-            fallback.request_label = getattr(record, 'request_label', '')
             self._emit_system(fallback)
 
     def _emit_system(self, record):
@@ -215,7 +213,6 @@ class AccountFileHandler(logging.Handler):
             fallback = logging.LogRecord(record.name, logging.ERROR, __file__, 0,
                                          'event=system_log_write_failed error=%s', (type(error).__name__,), None)
             fallback.account_label = ''
-            fallback.request_label = getattr(record, 'request_label', '')
             (self.console or logging.lastResort).handle(fallback)
         if self.console is not None:
             self.console.handle(record)
@@ -239,7 +236,7 @@ def get_logger():
 
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s%(request_label)s %(message)s',
+    formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s %(message)s',
                                   datefmt='%Y-%m-%dT%H:%M:%SZ')
     formatter.converter = time.gmtime
     log_path = config.SYSTEM_LOG_PATH
