@@ -14,7 +14,7 @@ from app.config import BACKEND_ROOT
 from app.json_files import atomic_write_json
 
 
-FileName = Literal['profile.json', 'model.json', 'preferences.json']
+FileName = Literal['profile.json', 'model.json', 'preferences.json', 'portrait.json']
 WINDOWS_DEVICE_NAME = re.compile(r'CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]', re.IGNORECASE)
 DIRECTORY_MIGRATION_MARKER = '.legacy-account.json'
 

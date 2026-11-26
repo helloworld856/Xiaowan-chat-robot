@@ -1,3 +1,6 @@
+【你对对方的了解】
+${user_portrait}
+
 【较早的对话摘要】
 ${abstract}
 

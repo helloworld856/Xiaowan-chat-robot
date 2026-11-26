@@ -311,3 +311,38 @@ test('clearing history requires confirmation and emits completion after the serv
     assert.deepEqual(events, ['confirm', true, 'delete', 'cleared', false]);
     assert.match(alerts.at(-1), /聊天记录已清空/);
 });
+
+test('user portrait editor loads, edits manual and learned sections, and saves through portraitAPI', async () => {
+    const savedPayloads = [];
+    const loaded = {
+        manual: {call_me: '阿明', city: '杭州', birthday: '05-18', occupation: '学生', chat_preference: '别急着给建议'},
+        learned: ['喜欢喝拿铁'],
+        auto_learn: true,
+    };
+    const app = mount({
+        settingsAPI: async () => saved(),
+        portraitAPI: async payload => {
+            if (!payload) return structuredClone(loaded);
+            savedPayloads.push(structuredClone(payload));
+            return payload;
+        },
+    });
+    await app.session.load();
+    await app.act('open-portrait-btn');
+    await tick();
+    assert.equal(app.element('portrait-call-me').value, '阿明');
+    assert.equal(app.element('portrait-city').value, '杭州');
+    assert.ok(app.element('portrait-learned-list').text.includes('喜欢喝拿铁'));
+
+    app.input('portrait-new-note', '养了只橘猫');
+    app.act('portrait-add-note');
+    await tick();
+    assert.ok(app.element('portrait-learned-list').text.includes('养了只橘猫'));
+
+    await app.act('portrait-form', 'submit');
+    await tick();
+    assert.equal(savedPayloads.length, 1);
+    assert.deepEqual(savedPayloads[0].learned, ['喜欢喝拿铁', '养了只橘猫']);
+    assert.equal(savedPayloads[0].manual.city, '杭州');
+    assert.equal(app.alerts.at(-1), '用户画像已保存。');
+});

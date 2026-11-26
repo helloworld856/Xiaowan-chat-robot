@@ -11,6 +11,7 @@ from app.accounts.repository import Account, AccountDeleteUnknown, SQLAccountSto
 from app.llm.personal_models import PersonalModelStore
 from app.llm.model_catalog import ModelCatalog
 from app.accounts.profile import ProfileStore
+from app.accounts.portrait import UserPortraitStore
 from app.accounts.preferences import FilePreferencesStore, Preferences, UserPreferencesStore
 from app.system_config import DefaultsConfig
 
@@ -21,6 +22,7 @@ class UserDirectoryStore:
         self.profiles = profiles
         self.paths = profiles.paths
         self.models = PersonalModelStore(self.paths, catalog)
+        self.portraits = UserPortraitStore(self.paths)
         initial = defaults or DefaultsConfig()
         self.preferences = FilePreferencesStore(
             self.paths, legacy_preferences,

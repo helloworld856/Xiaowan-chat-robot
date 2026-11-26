@@ -12,7 +12,8 @@ from threading import Event
 from time import perf_counter
 from typing import Any
 
-from app.account_logging import discard_logs_after, logger
+from app.account_logging import discard_logs_after, log_event, logger
+from app.accounts.portrait import UserPortraitStore, format_portrait_for_prompt, learn_portrait_from_turn
 from app.accounts.repository import User
 from app.chat.memory import MemoryManager
 from app.chat.progress import ChatCancelled, chat_cancel_context
@@ -49,6 +50,7 @@ class AccountChat:
     maintenance: bool = False
     runtime: ChatRuntime | None = None
     worker: asyncio.Task | None = None
+    learn_task: asyncio.Task | None = None
     cancelling_worker: bool = False
     turns: dict[str, TurnHandle] = field(default_factory=dict)
     cancelled_turns: deque[str] = field(default_factory=lambda: deque(maxlen=16))
@@ -57,12 +59,14 @@ class AccountChat:
 class ChatSessions:
     def __init__(self, connection, *, personal_models: PersonalModelStore | None = None,
                  admin_model: AdminModelRuntime | None = None,
+                 portraits: UserPortraitStore | None = None,
                  graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
         if max_running < 1 or max_waiting < 0 or not wait_timeout > 0:
             raise ValueError('invalid chat capacity')
         self._connection = connection
         self._personal_models = personal_models
         self._admin_model = admin_model
+        self._portraits = portraits
         self._graph_factory = graph_factory
         self._users: dict[int, AccountChat] = {}
         self._slots = asyncio.BoundedSemaphore(max_running)
@@ -218,13 +222,45 @@ class ChatSessions:
         # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
         result = await asyncio.shield(work)
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
+        if (regenerate_round is None and isinstance(result, dict) and result.get('saved')
+                and self._portraits is not None and not self._closing
+                and len(text.strip()) >= 5 and entry.learn_task is None):
+            self._schedule_portrait_learning(entry, user, text, list(result.get('ai_response') or ()))
         return result
+
+    def _schedule_portrait_learning(self, entry: AccountChat, user: User, text: str, replies: list[str]) -> None:
+        async def run_learn():
+            try:
+                current = self._portraits.get(user.id)
+                if not current.auto_learn:
+                    return
+                agents = self._agents_for(user)
+                _, summary_agent, _ = agents
+                loop = asyncio.get_running_loop()
+                learned = await loop.run_in_executor(
+                    self._executor, copy_context().run,
+                    learn_portrait_from_turn, summary_agent, current, text, replies,
+                )
+                if learned is not None:
+                    self._portraits.update_learned(user.id, learned)
+                    log_event('portrait_learned', items=len(learned))
+            except Exception as error:
+                logger.warning('background portrait learn skipped: %s', type(error).__name__)
+            finally:
+                entry.learn_task = None
+
+        task = asyncio.create_task(run_learn())
+        entry.learn_task = task
+        task.add_done_callback(self._consume_error)
 
     async def drain(self):
         """Finish admitted work before its database connections are closed."""
         self._closing = True
-        workers = [entry.worker for entry in self._users.values() if entry.worker is not None]
-        await asyncio.gather(*(asyncio.shield(worker) for worker in workers), return_exceptions=True)
+        tasks = [
+            task for entry in self._users.values()
+            for task in (entry.worker, entry.learn_task) if task is not None
+        ]
+        await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
         self._executor.shutdown()
 
     @staticmethod
@@ -287,6 +323,11 @@ class ChatSessions:
             raise ChatNotStarted(403, '请先在设置中配置个人模型和 API Key')
         return agents
 
+    def _portrait_context(self, user_id: int) -> str:
+        if self._portraits is None:
+            return '暂无'
+        return format_portrait_for_prompt(self._portraits.get(user_id))
+
     def _run(self, entry: AccountChat, user: User, text: str):
         agents = self._agents_for(user)
         if entry.runtime is None:
@@ -295,6 +336,7 @@ class ChatSessions:
         # 每轮操作自己的状态副本，工作流抛错或取消时保留上一次状态。
         state = deepcopy(runtime.state)
         state['user_input'] = text
+        state['user_portrait'] = self._portrait_context(user.id)
         state['regenerate_round'] = None
         result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})
         runtime.state = result
@@ -307,6 +349,7 @@ class ChatSessions:
         runtime = entry.runtime
         state = deepcopy(runtime.state)
         state['user_input'] = ''
+        state['user_portrait'] = self._portrait_context(user.id)
         state['regenerate_round'] = regenerate_round
         result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})
         runtime.state = result

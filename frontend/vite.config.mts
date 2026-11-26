@@ -12,7 +12,7 @@ export default defineConfig({
     // 浏览器始终请求当前来源，开发时由 Vite 把 API 转发给 FastAPI。
     server: {
         // 显式保留浏览器 Host，使后端同源写请求校验也适用于开发代理。
-        proxy: Object.fromEntries(['/chat', '/model', '/history', '/persona', '/version', '/settings', '/auth', '/profile']
+        proxy: Object.fromEntries(['/chat', '/model', '/history', '/persona', '/portrait', '/version', '/settings', '/auth', '/profile']
             .map(path => [path, {target: 'http://127.0.0.1:8000', changeOrigin: false}]))
     }
 });

@@ -132,6 +132,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         # 构建分析提示
         analysis_prompt = load_prompt(
             "analysis_prompt",
+            user_portrait=state.get('user_portrait') or '暂无',
             history=_context_history(state, memorier),
             abstract=memorier.abstract_cache or '无',
             user_input=user_input
@@ -174,6 +175,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 
         answer_prompt = load_prompt(
             "answer_prompt",
+            user_portrait=state.get('user_portrait') or '暂无',
             history=_context_history(state, memorier),
             abstract=memorier.abstract_cache or '无',
             user_input=user_input,

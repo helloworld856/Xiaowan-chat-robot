@@ -14,7 +14,7 @@ from app.accounts.files import UserDataPaths, protect_file
 from app.accounts.preferences import UserPreferencesStore
 from app.accounts.profile import ProfileStore
 from app.accounts.repository import SQLAccountStore
-from app.api import chat, history, model, persona, settings, system
+from app.api import chat, history, model, persona, portrait, settings, system
 from app.api.auth import router as auth_router
 from app.api.auth_middleware import AuthenticationMiddleware
 from app.api.profile import router as profile_router
@@ -153,17 +153,19 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                              lifespan=lifespan, user_data_paths=directories.paths, system_config=config)
     application.state.db = db
     application.state.preferences = directories.preferences
+    application.state.portraits = directories.portraits
     application.state.personal_models = directories.models
     application.state.model_configuration = model_configuration
     application.state.chat = ChatSessions(
         db.connection,
         personal_models=directories.models,
         admin_model=admin_model,
+        portraits=directories.portraits,
         graph_factory=partial(create_graph, compression_tokens=chat_config.history_compression_tokens),
         max_running=chat_config.concurrency,
         max_waiting=chat_config.queue_size,
         wait_timeout=chat_config.queue_timeout,
     )
-    for module in (persona, system, settings, chat, model, history):
+    for module in (persona, portrait, system, settings, chat, model, history):
         application.include_router(module.router)
     return application

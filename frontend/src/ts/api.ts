@@ -131,6 +131,27 @@ export function personaAPI() {
     }, '角色信息加载失败');
 }
 
+export interface ManualPortrait {
+    call_me: string;
+    city: string;
+    birthday: string;
+    occupation: string;
+    chat_preference: string;
+}
+
+export interface UserPortrait {
+    manual: ManualPortrait;
+    learned: string[];
+    auto_learn: boolean;
+}
+
+export function portraitAPI(portrait?: UserPortrait): Promise<UserPortrait> {
+    return requestJSON<UserPortrait>('/portrait', {
+        method: portrait ? 'POST' : 'GET', signal: AbortSignal.timeout(15000),
+        ...(portrait ? {body: JSON.stringify(portrait)} : {})
+    }, portrait ? '保存用户画像失败，请稍后重试' : '读取用户画像失败，请稍后重试');
+}
+
 export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string, personal = false) {
     const options = {
         model_merchant: model.model_merchant,

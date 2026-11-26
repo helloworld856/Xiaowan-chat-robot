@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, TypedDict, Union
 class AIChatState(TypedDict, total=False):
     # 用户输入
     user_input: Optional[str]
+    # 用户画像摘要（手动资料 + 动态印象）
+    user_portrait: str
     # 重新生成指定轮次（仅最新一轮）
     regenerate_round: Optional[int]
     # 分析结果
@@ -32,6 +34,7 @@ class AIChatState(TypedDict, total=False):
 def create_initial_state(next_round: int = 0) -> AIChatState:
     return {
         'user_input': '',
+        'user_portrait': '暂无',
         'regenerate_round': None,
         'analysis_result': {},
         'ai_response': [],

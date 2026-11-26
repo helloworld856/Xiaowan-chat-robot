@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
-import {clearHistoryAPI, getRequestGeneration, modelAPI, settingsAPI} from '../ts/api.ts';
-import type {ModelOptions, SavedSettings} from '../ts/api.ts';
+import {clearHistoryAPI, getRequestGeneration, modelAPI, portraitAPI, settingsAPI} from '../ts/api.ts';
+import type {ModelOptions, SavedSettings, UserPortrait} from '../ts/api.ts';
 import {closeDialog, openDialog, resetDialog} from '../ts/dialogs.ts';
 import type {ConfirmOptions} from '../ts/dialogs.ts';
 import type {ModelInfo} from '../ts/global_config.ts';
@@ -22,6 +22,7 @@ const emit = defineEmits<{
 
 const settingsDialog = ref<HTMLDialogElement | null>(null);
 const modelDialog = ref<HTMLDialogElement | null>(null);
+const portraitDialog = ref<HTMLDialogElement | null>(null);
 const modelForm = ref<HTMLFormElement | null>(null);
 const addressInput = ref<HTMLInputElement | null>(null);
 const keyInput = ref<HTMLInputElement | null>(null);
@@ -39,6 +40,18 @@ const keyVisible = ref(false);
 const modelOperation = ref<'test' | 'save' | null>(null);
 const modelBusy = computed(() => modelOperation.value !== null);
 const historyOperation = ref<'idle' | 'confirming' | 'clearing'>('idle');
+
+function emptyPortrait(): UserPortrait {
+    return {
+        manual: {call_me: '', city: '', birthday: '', occupation: '', chat_preference: ''},
+        learned: [],
+        auto_learn: true,
+    };
+}
+const portraitDraft = ref<UserPortrait>(emptyPortrait());
+const portraitNewNote = ref('');
+const portraitOperation = ref<'idle' | 'loading' | 'saving'>('idle');
+const portraitBusy = computed(() => portraitOperation.value !== 'idle');
 
 let resetRevision = 0;
 let modelRevision = 0;
@@ -146,6 +159,94 @@ function closeModel() {
     if (modelBusy.value || !modelDialog.value) return;
     resetApiKey();
     return closeDialog(modelDialog.value);
+}
+
+async function openPortrait() {
+    if (portraitBusy.value || !portraitDialog.value) return;
+    const isCurrent = captureSession();
+    portraitNewNote.value = '';
+    portraitOperation.value = 'loading';
+    openDialog(portraitDialog.value);
+    try {
+        const loaded = await portraitAPI();
+        if (!isCurrent()) return;
+        portraitDraft.value = {
+            manual: {...loaded.manual},
+            learned: [...loaded.learned],
+            auto_learn: loaded.auto_learn,
+        };
+    } catch (error) {
+        if (isCurrent()) {
+            props.showAlert(error instanceof Error ? error.message : '读取用户画像失败，请稍后重试');
+            if (portraitDialog.value) void closeDialog(portraitDialog.value);
+        }
+    } finally {
+        if (isCurrent()) portraitOperation.value = 'idle';
+    }
+}
+
+function closePortrait() {
+    if (portraitBusy.value || !portraitDialog.value) return;
+    portraitNewNote.value = '';
+    return closeDialog(portraitDialog.value);
+}
+
+function addPortraitNote() {
+    const text = portraitNewNote.value.replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    if (portraitDraft.value.learned.length >= 30) {
+        props.showAlert('最多保存 30 条印象，请先删掉不需要的条目。');
+        return;
+    }
+    if (!portraitDraft.value.learned.includes(text)) {
+        portraitDraft.value.learned.push(text.slice(0, 120));
+    }
+    portraitNewNote.value = '';
+}
+
+function removePortraitNote(index: number) {
+    portraitDraft.value.learned.splice(index, 1);
+}
+
+function clearPortraitNotes() {
+    portraitDraft.value.learned = [];
+}
+
+async function savePortrait() {
+    if (portraitBusy.value) return;
+    addPortraitNote();
+    const isCurrent = captureSession();
+    portraitOperation.value = 'saving';
+    let message = '用户画像已保存。';
+    let ok = false;
+    try {
+        const payload: UserPortrait = {
+            manual: {
+                call_me: portraitDraft.value.manual.call_me.trim(),
+                city: portraitDraft.value.manual.city.trim(),
+                birthday: portraitDraft.value.manual.birthday.trim(),
+                occupation: portraitDraft.value.manual.occupation.trim(),
+                chat_preference: portraitDraft.value.manual.chat_preference.trim(),
+            },
+            learned: [...portraitDraft.value.learned],
+            auto_learn: portraitDraft.value.auto_learn,
+        };
+        const saved = await portraitAPI(payload);
+        if (!isCurrent()) return;
+        portraitDraft.value = {
+            manual: {...saved.manual},
+            learned: [...saved.learned],
+            auto_learn: saved.auto_learn,
+        };
+        ok = true;
+    } catch (error) {
+        if (!isCurrent()) return;
+        message = error instanceof Error ? error.message : '保存用户画像失败，请稍后重试';
+    } finally {
+        if (isCurrent()) portraitOperation.value = 'idle';
+    }
+    if (ok && portraitDialog.value && isCurrent()) await closeDialog(portraitDialog.value);
+    if (isCurrent()) props.showAlert(message);
 }
 
 async function load() {
@@ -281,7 +382,11 @@ function reset() {
     resetRevision++;
     settingsLoadFailed = false;
     if (modelDialog.value) resetDialog(modelDialog.value);
+    if (portraitDialog.value) resetDialog(portraitDialog.value);
     if (settingsDialog.value) resetDialog(settingsDialog.value);
+    portraitDraft.value = emptyPortrait();
+    portraitNewNote.value = '';
+    portraitOperation.value = 'idle';
     activeModel.value = null;
     modelOptions.value = undefined;
     modelReady.value = false;
@@ -372,11 +477,99 @@ defineExpose({open, load, reset});
 
                 <section id="chat-settings-panel" aria-labelledby="chat-settings-title">
                     <h2 id="chat-settings-title">聊天设置</h2>
-                    <button id="clear-chat-history" class="settings-button settings-button-danger settings-section-action"
-                        type="button" :disabled="historyOperation === 'clearing'" @click="clearHistory">
-                        {{ historyOperation === 'clearing' ? '正在清空…' : '清空聊天记录' }}
-                    </button>
+                    <div class="chat-settings-actions">
+                        <button id="open-portrait-btn" class="settings-button settings-section-action"
+                            type="button" @click="openPortrait">用户画像</button>
+                        <button id="clear-chat-history" class="settings-button settings-button-danger settings-section-action"
+                            type="button" :disabled="historyOperation === 'clearing'" @click="clearHistory">
+                            {{ historyOperation === 'clearing' ? '正在清空…' : '清空聊天记录' }}
+                        </button>
+                    </div>
                 </section>
+
+                <dialog id="portrait-edit-modal" ref="portraitDialog" class="modal" aria-labelledby="portrait-modal-title"
+                    @cancel.prevent="closePortrait">
+                    <div class="modal-content">
+                        <div class="portrait-head">
+                            <h3 id="portrait-modal-title">用户画像</h3>
+                            <button type="button" class="settings-button close-setting" aria-label="关闭用户画像"
+                                :disabled="portraitBusy" @click="closePortrait">
+                                <svg viewBox="0 0 17 17" height="17" width="17" aria-hidden="true">
+                                    <line x1="0" y1="0" x2="17" y2="17" stroke="currentColor" stroke-width="2"/>
+                                    <line x1="17" y1="0" x2="0" y2="17" stroke="currentColor" stroke-width="2"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <form id="portrait-form" novalidate :aria-busy="portraitBusy" @submit.prevent="savePortrait">
+                            <fieldset :disabled="portraitBusy" style="border: 0; min-width: 0;">
+                                <section class="portrait-section">
+                                    <h4>我告诉小晚的</h4>
+                                    <p class="portrait-hint">全部选填，由你手动维护，小晚只会参考、不会自动修改。</p>
+                                    <div class="form-group">
+                                        <label for="portrait-call-me">怎么称呼我</label>
+                                        <input id="portrait-call-me" v-model="portraitDraft.manual.call_me" type="text"
+                                            maxlength="32" placeholder="例如：阿明、老陈">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="portrait-city">常住城市</label>
+                                        <input id="portrait-city" v-model="portraitDraft.manual.city" type="text"
+                                            maxlength="48" placeholder="例如：杭州（问天气时可直接参考）">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="portrait-birthday">生日 / 年龄段</label>
+                                        <input id="portrait-birthday" v-model="portraitDraft.manual.birthday" type="text"
+                                            maxlength="32" placeholder="例如：05-18 或 00后">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="portrait-occupation">职业 / 身份</label>
+                                        <input id="portrait-occupation" v-model="portraitDraft.manual.occupation" type="text"
+                                            maxlength="64" placeholder="例如：大三学生、后端开发">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="portrait-preference">相处偏好 / 忌讳</label>
+                                        <textarea id="portrait-preference" v-model="portraitDraft.manual.chat_preference"
+                                            rows="2" maxlength="200" placeholder="例如：吐槽时先陪我聊，别急着给建议"></textarea>
+                                    </div>
+                                </section>
+
+                                <section class="portrait-section">
+                                    <h4>小晚记住的</h4>
+                                    <p class="portrait-hint">随聊天自动积累的兴趣爱好、习惯和生活细节，可随时删改。</p>
+                                    <div class="portrait-learned-bar">
+                                        <label class="portrait-toggle" for="portrait-auto-learn">
+                                            <input id="portrait-auto-learn" v-model="portraitDraft.auto_learn" type="checkbox">
+                                            <span>聊天时自动记录新印象</span>
+                                        </label>
+                                        <button id="portrait-clear-learned" type="button" class="settings-button"
+                                            :disabled="!portraitDraft.learned.length" @click="clearPortraitNotes">清空印象</button>
+                                    </div>
+                                    <ul v-if="portraitDraft.learned.length" id="portrait-learned-list" class="portrait-learned-list">
+                                        <li v-for="(item, index) in portraitDraft.learned" :key="item" class="portrait-learned-item">
+                                            <span>{{ item }}</span>
+                                            <button type="button" class="portrait-remove-btn" aria-label="删除这条印象"
+                                                title="删除这条印象" @click="removePortraitNote(index)">×</button>
+                                        </li>
+                                    </ul>
+                                    <p v-else class="portrait-hint">小晚还没有记下新印象，多聊几句她会慢慢记住你。</p>
+                                    <div class="portrait-add-row">
+                                        <input id="portrait-new-note" v-model="portraitNewNote" type="text" maxlength="120"
+                                            placeholder="也可以手动补充一条，例如：养了只橘猫" @keydown.enter.prevent="addPortraitNote">
+                                        <button id="portrait-add-note" type="button" class="settings-button"
+                                            @click="addPortraitNote">添加</button>
+                                    </div>
+                                </section>
+                            </fieldset>
+                            <div class="modal-btns">
+                                <button id="cancel-portrait-btn" type="button" class="settings-button"
+                                    :disabled="portraitBusy" @click="closePortrait">取消</button>
+                                <button id="save-portrait-btn" type="submit" class="settings-button settings-button-primary"
+                                    :disabled="portraitBusy">
+                                    {{ portraitOperation === 'saving' ? '正在保存…' : '保存画像' }}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </dialog>
 
                 <dialog id="model-edit-modal" ref="modelDialog" class="modal" aria-labelledby="open-modify-btn" @cancel.prevent="closeModel">
                     <div class="modal-content">
