@@ -56,6 +56,25 @@ class UserPortraitTests(unittest.TestCase):
         self.assertIsNone(self.store.update_learned(1, ['不应写入的印象']))
         self.assertEqual(self.store.get(1).learned, ['喜欢喝拿铁', '周末常打羽毛球'])
 
+    def test_clear_all_learned_resets_only_learned_items_and_keeps_manual_fields(self):
+        self.store.update(1, UserPortrait(
+            manual=ManualPortrait(call_me='阿明', city='杭州'),
+            learned=['爱喝美式', '养猫'],
+            auto_learn=False,
+        ))
+        self.store.update(2, UserPortrait(
+            manual=ManualPortrait(city='上海'),
+            learned=[],
+            auto_learn=True,
+        ))
+        self.assertEqual(self.store.clear_all_learned(), 1)
+        first = self.store.get(1)
+        self.assertEqual(first.manual.call_me, '阿明')
+        self.assertEqual(first.manual.city, '杭州')
+        self.assertEqual(first.auto_learn, False)
+        self.assertEqual(first.learned, [])
+        self.assertEqual(self.store.get(2).manual.city, '上海')
+
     def test_learn_portrait_from_turn_parses_json_and_ignores_unchanged_or_invalid(self):
         current = UserPortrait(manual=ManualPortrait(city='上海'), learned=['喜欢小猫'])
         changed_agent = SimpleNamespace(invoke=lambda _: {

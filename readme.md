@@ -145,7 +145,7 @@ python run_serve.py
 
 然后访问 `http://127.0.0.1:8000`。首次打开后，在页面设置中选择模型。
 
-> 默认启动时清空历史对话、摘要和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup` 和 `logging.clear_on_startup`。
+> 默认启动时清空历史对话、摘要、自动记录的用户印象和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup`、`chat.clear_learned_portrait_on_startup` 和 `logging.clear_on_startup`。
 
 后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`system_config.json` 的 `chat.concurrency`、`chat.queue_size` 和 `chat.queue_timeout` 控制最多同时执行数、等待名额和排队秒数，默认分别为 4、8、2。排队失败时可以从原消息重试。
 

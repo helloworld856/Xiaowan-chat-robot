@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.account_logging import logger
-from app.accounts.files import UserDataPaths, read_text, replace_json
+from app.accounts.files import UserDataPaths, read_text, replace_json, require_directory, require_file
 
 MAX_LEARNED_ITEMS = 30
 MAX_LEARNED_ITEM_CHARS = 120
@@ -117,6 +117,35 @@ class UserPortraitStore:
             self.paths.ensure_directory(user_id)
             replace_json(path, updated.model_dump())
             return updated
+
+    def clear_all_learned(self) -> int:
+        """启动时清空所有账号 portrait.json 中的自动印象，保留手动资料与开关。"""
+        try:
+            require_directory(self.paths.root)
+            entries = list(self.paths.root.iterdir())
+        except FileNotFoundError:
+            return 0
+
+        cleared = 0
+        for entry in entries:
+            if entry.name.startswith('.'):
+                continue
+            path = entry / 'portrait.json'
+            try:
+                require_directory(entry)
+                require_file(path)
+                current = self.read_file(path)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as error:
+                logger.warning('无法读取账号目录 %s 的用户画像（%s）', entry.name, type(error).__name__)
+                continue
+            if not current.learned:
+                continue
+            updated = UserPortrait(manual=current.manual, learned=[], auto_learn=current.auto_learn)
+            replace_json(path, updated.model_dump())
+            cleared += 1
+        return cleared
 
 
 def learn_portrait_from_turn(summary_agent, current: UserPortrait,

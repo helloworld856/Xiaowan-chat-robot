@@ -44,6 +44,10 @@ class ChatConfig(_ConfigSection):
     max_message_chars: int = Field(default=8000, ge=1, description='单条用户消息最多允许的字符数。')
     history_compression_tokens: int = Field(default=100000, ge=1, description='历史对话估算 token 数超过该值时触发摘要压缩。')
     clear_history_on_startup: bool = Field(default=True, description='设为 true 时，后端启动会清空所有账号的聊天历史和摘要。')
+    clear_learned_portrait_on_startup: bool = Field(
+        default=True,
+        description='设为 true 时，后端启动会清空所有账号用户画像中自动记录的印象（保留手动填写的资料）。',
+    )
 
 
 class PasswordConfig(_ConfigSection):

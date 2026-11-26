@@ -124,6 +124,15 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                           error=type(error).__name__)
                 raise
             log_event('startup_history_clear', system=True, outcome='succeeded')
+        if chat_config.clear_learned_portrait_on_startup:
+            try:
+                cleared_portraits = directories.portraits.clear_all_learned()
+            except Exception as error:
+                log_event('startup_portrait_learned_clear', level=ERROR, system=True, outcome='failed',
+                          error=type(error).__name__)
+                raise
+            log_event('startup_portrait_learned_clear', system=True, outcome='succeeded',
+                      accounts=cleared_portraits)
         model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
             legacy_model, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),
