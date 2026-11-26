@@ -80,7 +80,7 @@ npm --prefix frontend run build
 
 `auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度和启动清理，`memory` 管理短期原话窗口、情景事件异步提炼、混合召回权重、本地向量模型参数以及重启清空事件记忆开关。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
 
-如需启用本地中英双语语义向量召回，可在安装 Python 依赖后执行一次 `python backend/scripts/download_embedding_model.py`（国内网络可加 `--endpoint https://hf-mirror.com`），将轻量量化模型 `multilingual-e5-small` 下载到 `backend/models/multilingual-e5-small`。未下载模型文件或关闭 `memory.embedding.enabled` 时，系统会自动降级为中英双语关键词与时间衰减混合召回，不影响正常启动与对话。
+后端启动时会自动检测 `backend/models/multilingual-e5-small` 下是否存在本地多语向量模型，若不存在则在后台自动下载量化版 `multilingual-e5-small`（官方源不可达时自动切换 `https://hf-mirror.com` 镜像源，也可在 `memory.embedding.hf_endpoint` 指定镜像或手动运行 `python backend/scripts/download_embedding_model.py` 预下载）。模型下载完成前或关闭 `memory.embedding.enabled` 时，系统会自动使用中英双语关键词与时间衰减混合召回，不阻塞服务启动与对话。
 
 ## 聊天设置
 

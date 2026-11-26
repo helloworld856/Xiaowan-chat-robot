@@ -21,7 +21,7 @@ from app.api.profile import router as profile_router
 from app.chat.episodes import EpisodeMemoryStore
 from app.chat.scheduler import ChatSessions
 from app.chat.workflow import create_graph
-from app.config import SOFTWARE_NAME, VERSION
+from app.config import BACKEND_ROOT, SOFTWARE_NAME, VERSION
 from app.database.mysql import initialize_schema, reset_chat_history, reset_episode_memories
 from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import ModelSettings, settings_store
@@ -55,7 +55,8 @@ def create_app(version: str, auth_service: AuthService | None = None,
 
 def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig | None = None,
                       model_catalog: ModelCatalog | None = None, config_root: Path | None = None,
-                      system_config: SystemConfig | None = None):
+                      system_config: SystemConfig | None = None,
+                      prepare_embedding: bool | None = None):
     config = system_config or SystemConfig()
     if chat_config is not None:
         config = config.model_copy(update={'chat': chat_config})
@@ -63,6 +64,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
     if profile_store is None:
         profile_store = ProfileStore(config=config.profile, defaults=config.defaults)
     config_root = config_root if config_root is not None else legacy_root.parent
+    should_prepare_embedding = (config_root == BACKEND_ROOT) if prepare_embedding is None else prepare_embedding
     env_path = config_root / '.env'
     legacy_preferences = UserPreferencesStore(db)
     directories = UserDirectoryStore(profile_store, legacy_preferences, model_catalog or config.models,
@@ -149,6 +151,8 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             legacy_model, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),
         ))
+        if should_prepare_embedding:
+            embedding_model.prepare_on_startup()
 
     @asynccontextmanager
     async def lifespan(_):
@@ -156,6 +160,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             await run_in_threadpool(startup)
             yield
         finally:
+            embedding_model.close()
             try:
                 # 先等已接收的聊天落库，再关闭它们依赖的数据库和日志。
                 await application.state.chat.drain()

@@ -55,6 +55,19 @@ class EmbeddingMemoryConfig(_ConfigSection):
         default=True,
         description='设为 true 时启用本地 ONNX 向量语义召回；缺少模型文件时自动降级为关键词检索。',
     )
+    auto_download: bool = Field(
+        default=True,
+        description='设为 true 且 enabled 为 true 时，后端启动若检测到本地模型缺失会在后台自动下载。',
+    )
+    repo_id: str = Field(
+        default='Xenova/multilingual-e5-small',
+        min_length=1,
+        description='自动下载本地 ONNX 向量模型时使用的 HuggingFace 仓库名。',
+    )
+    hf_endpoint: str = Field(
+        default='',
+        description='下载模型时可选的 HuggingFace 镜像地址（如 https://hf-mirror.com）；留空时若官方源不可达会自动回退镜像源。',
+    )
     model_dir: str = Field(
         default='models/multilingual-e5-small',
         min_length=1,

@@ -144,6 +144,80 @@ class EmbeddingEngineTests(unittest.TestCase):
             self.assertEqual(len(p_vecs), 1)
             np.testing.assert_allclose(p_vecs[0], np.array([0.6, 0.8], dtype=np.float32), atol=1e-6)
 
+    def test_download_helper_falls_back_to_mirror_and_startup_auto_downloads_when_missing(self):
+        from app.llm.embeddings import DEFAULT_MIRROR_ENDPOINT, download_embedding_model_files
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            src_dir = root / 'hf_cache'
+            src_dir.mkdir()
+            tok_src = src_dir / 'tok.json'
+            onnx_src = src_dir / 'quant.onnx'
+            tok_src.write_text('{"version":"1.0"}', encoding='utf-8')
+            onnx_src.write_bytes(b'fake-onnx-binary')
+
+            calls: list[tuple[str, str | None]] = []
+
+            def fake_hf_download(*, repo_id, filename, endpoint=None, etag_timeout=8):
+                calls.append((filename, endpoint))
+                if endpoint is None:
+                    raise ConnectionError('official huggingface unreachable')
+                if filename == 'tokenizer.json':
+                    return str(tok_src)
+                if filename == 'onnx/model_quantized.onnx':
+                    return str(onnx_src)
+                raise FileNotFoundError(filename)
+
+            fake_hf = SimpleNamespace(hf_hub_download=fake_hf_download)
+            target_dir = root / 'models' / 'multilingual-e5-small'
+            with (
+                patch.dict('sys.modules', {'huggingface_hub': fake_hf}),
+                patch.dict('os.environ', {}, clear=False),
+            ):
+                os_env_backup = __import__('os').environ.pop('HF_ENDPOINT', None)
+                try:
+                    onnx_dest, tok_dest = download_embedding_model_files('Xenova/multilingual-e5-small', target_dir)
+                finally:
+                    if os_env_backup is not None:
+                        __import__('os').environ['HF_ENDPOINT'] = os_env_backup
+
+            self.assertTrue(onnx_dest.is_file())
+            self.assertTrue(tok_dest.is_file())
+            # 先尝试默认源失败，自动回退到镜像源成功
+            self.assertEqual(calls[0], ('tokenizer.json', None))
+            self.assertIn(('tokenizer.json', DEFAULT_MIRROR_ENDPOINT), calls)
+            self.assertIn(('onnx/model_quantized.onnx', DEFAULT_MIRROR_ENDPOINT), calls)
+
+            # 模型已存在时，prepare_on_startup 不再重复触发下载
+            existing_engine = LocalEmbeddingModel(EmbeddingMemoryConfig(), root=root)
+            with (
+                patch('app.llm.embeddings.download_embedding_model_files') as dl_mock,
+                patch.object(LocalEmbeddingModel, '_ensure_loaded', return_value=True) as load_mock,
+            ):
+                existing_engine.prepare_on_startup(blocking=True)
+                dl_mock.assert_not_called()
+                load_mock.assert_called_once()
+
+            # 模型不存在时，prepare_on_startup 自动下载并在完成后加载模型
+            empty_root = root / 'fresh_env'
+            missing_engine = LocalEmbeddingModel(EmbeddingMemoryConfig(), root=empty_root)
+            self.assertFalse(missing_engine.has_model_files())
+
+            def materialize_files(repo_id, out_dir, **kwargs):
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / 'tokenizer.json').write_text('{}', encoding='utf-8')
+                (out_dir / 'model.onnx').write_bytes(b'onnx')
+                return out_dir / 'model.onnx', out_dir / 'tokenizer.json'
+
+            with (
+                patch('app.llm.embeddings.download_embedding_model_files', side_effect=materialize_files) as dl_mock,
+                patch.object(LocalEmbeddingModel, '_ensure_loaded', return_value=True) as load_mock,
+            ):
+                missing_engine.prepare_on_startup(blocking=True)
+                dl_mock.assert_called_once()
+                load_mock.assert_called_once()
+                self.assertTrue(missing_engine.has_model_files())
+
 
 class EpisodeMemoryStoreTests(unittest.TestCase):
     def setUp(self):
@@ -367,9 +441,11 @@ class EpisodeMemoryStoreTests(unittest.TestCase):
                         memory={'clear_episodes_on_startup': clear_flag},
                     )
                     app = build_application(MagicMock(), ProfileStore(root / f'users_{clear_flag}'),
-                                            legacy, system_config=cfg)
-                    with TestClient(app):
-                        pass
+                                            legacy, system_config=cfg, prepare_embedding=True)
+                    with patch.object(app.state.episodes.embedder, 'prepare_on_startup') as prep_mock:
+                        with TestClient(app):
+                            pass
+                        prep_mock.assert_called_once()
                     if clear_flag:
                         clear_episodes.assert_called_once()
                     else:

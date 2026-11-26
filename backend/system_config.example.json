@@ -59,6 +59,12 @@
     "embedding": {
       // 设为 true 时启用本地 ONNX 向量语义召回；缺少模型文件时自动降级为关键词检索。
       "enabled": true,
+      // 设为 true 且 enabled 为 true 时，后端启动若检测到本地模型缺失会在后台自动下载。
+      "auto_download": true,
+      // 自动下载本地 ONNX 向量模型时使用的 HuggingFace 仓库名。
+      "repo_id": "Xenova/multilingual-e5-small",
+      // 下载模型时可选的 HuggingFace 镜像地址（如 https://hf-mirror.com）；留空时若官方源不可达会自动回退镜像源。
+      "hf_endpoint": "",
       // 本地 ONNX 向量模型目录（相对 backend/ 或绝对路径），需包含 model.onnx 与 tokenizer.json。
       "model_dir": "models/multilingual-e5-small",
       // 查询文本编码前拼接的前缀；E5 系列模型使用 "query: "，不需要前缀的模型填 ""。
