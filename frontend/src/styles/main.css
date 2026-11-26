@@ -328,6 +328,55 @@ body {
     bottom: var(--dock-bottom);
 }
 
+#chat-quote-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--chat-border);
+    border-radius: 0.75rem;
+    background: var(--input-bg);
+    color: var(--menu-text);
+    font-size: 0.8125rem;
+    box-shadow: 0 2px 10px rgb(33 51 75 / 9%);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.chat-quote-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.88;
+}
+
+.chat-quote-text strong {
+    font-weight: 600;
+}
+
+#chat-quote-clear {
+    flex: none;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+#chat-quote-clear:hover {
+    background: var(--menu-hover);
+    opacity: 1;
+}
+
 #inputArea {
     --composer-radius: 1rem;
     display: flex;
@@ -425,6 +474,13 @@ html.theme0 #userInput::placeholder { color: #5d6b7c; }
 html.theme0 .sendbtn {
     --btn-bg: #383838;
     --btn-hover: #484848;
+}
+
+.sendbtn.is-stop,
+html.theme0 .sendbtn.is-stop {
+    --btn-bg: #b93842;
+    --btn-hover: #9f2c35;
+    --btn-text: #fff;
 }
 
 .sendbtn:hover:not(:disabled) {

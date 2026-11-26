@@ -1,0 +1,138 @@
+/* ========== 主题四：晚风夜色（深色） ========== */
+
+/* 变量覆盖聊天区、菜单和侧栏；设置、资料和确认弹窗原本写死浅色，这里单独覆盖。 */
+html.theme4 {
+    color-scheme: dark;
+
+    --bg-gradient: linear-gradient(160deg, #11151d 0%, #181e2a 55%, #202838 100%);
+
+    --chat-bg: rgba(26, 30, 40, 0.92);
+    --chat-border: #2e3545;
+    --chat-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+
+    --user-bubble: #34507d;
+    --user-text: #eef3fc;
+    --bot-bubble: #262c38;
+    --bot-text: #dde3ec;
+
+    --input-bg: rgba(31, 36, 48, 0.96);
+    --input-border: #465064;
+    --input-focus: #7fa6e6;
+
+    --btn-bg: #4a6ca4;
+    --btn-hover: #5a7cb6;
+    --btn-text: #fff;
+
+    --scroll-track: rgba(255, 255, 255, 0.04);
+    --scroll-thumb: #3b4456;
+    --scroll-thumb-hover: #566179;
+
+    --menu-bg: #212733;
+    --menu-hover: #2c3341;
+    --menu-text: #dde3ec;
+
+    --alert-color: #34507d;
+
+    --setting-bg: #1e232d;
+    --select-accent: #93b4ec;
+}
+
+/* --- 文本光标：浅色主题的光标滤镜着深灰色，深色背景下改用原生浅色光标 --- */
+@media (forced-colors: none) {
+    html.theme4 :is(textarea, input:not([type]), input[type="text"], input[type="password"], input[type="search"], input[type="url"]):focus {
+        filter: none;
+        caret-color: #e6ebf3;
+    }
+}
+
+/* --- 页面与聊天区 --- */
+html.theme4 #loading { background-color: rgba(17, 21, 29, 0.6); }
+html.theme4 #loading .typing-circle { background-color: #aab3c2; }
+html.theme4 #loading .typing-shadow { background-color: rgba(0, 0, 0, 0.5); }
+html.theme4 #userInput::placeholder { color: #7f8899; }
+html.theme4 #chat-composer { box-shadow: 0 3px 14px rgb(0 0 0 / 35%); }
+html.theme4 #comeToBottom img { filter: invert(1); }
+html.theme4 :is(.user_avatar, .assistant_avatar) { background: #2a303c; }
+html.theme4 :is(.sidebar-btn, #menuBtn) {
+    background: var(--menu-bg);
+    border: 1px solid var(--chat-border);
+}
+html.theme4 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
+html.theme4 :is(.review-item:focus-visible, .review-selected) { outline-color: var(--input-focus); }
+
+/* --- 提示弹窗 --- */
+html.theme4 #alert-window-container { background-color: rgba(8, 10, 14, 0.6); }
+html.theme4 .alert-window { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+html.theme4 .alert-window .alert-window-header { border-bottom-color: rgba(255, 255, 255, 0.2); }
+html.theme4 .alert-window .alert-window-button button { color: var(--user-text); }
+
+/* --- 设置界面 --- */
+html.theme4 #setting-container {
+    --setting-bg: #1e232d;
+    --menu-text: #e2e7ef;
+    --menu-hover: #2a303c;
+    --chat-border: #343b4a;
+    --input-bg: #171b23;
+    --input-border: #424a5b;
+    --select-accent: #a9c1ee;
+    --btn-bg: #dfe5ee;
+    --btn-text: #14171e;
+    color-scheme: dark;
+    background-color: rgba(8, 10, 14, 0.55);
+}
+html.theme4 #setting-container .setting-head { border-bottom-color: rgba(255, 255, 255, 0.16); }
+html.theme4 :is(#model-info-view .info-item, .preference-row) { border-bottom-color: rgba(255, 255, 255, 0.06); }
+html.theme4 .form-group input { border-color: #3a4252; }
+html.theme4 .settings-select {
+    background: color-mix(in srgb, var(--setting-bg) 90%, var(--select-accent));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+}
+@supports (appearance: base-select) and selector(select::picker(select)) {
+    html.theme4 .settings-select::picker(select) {
+        background: color-mix(in srgb, var(--setting-bg) 94%, var(--select-accent));
+        box-shadow: 0 10px 28px rgb(0 0 0 / 45%), 0 2px 5px rgb(0 0 0 / 25%);
+    }
+    html.theme4 .settings-select option:checked {
+        background: color-mix(in srgb, var(--select-accent) 18%, var(--setting-bg));
+    }
+    html.theme4 .settings-select option:enabled:hover,
+    html.theme4 .settings-select option:focus-visible {
+        background: color-mix(in srgb, var(--select-accent) 12%, var(--setting-bg));
+    }
+}
+html.theme4 .settings-button-primary:enabled:hover { border-color: #c9d1dd; background: #c9d1dd; }
+html.theme4 :is(.settings-button-danger, .danger-button) { border-color: #6d3035; color: #ff9b9b; }
+html.theme4 :is(.settings-button-danger, .danger-button):enabled:hover { background: #3a2023; }
+
+/* --- 个人资料与确认弹窗 --- */
+html.theme4 :is(#profile-dialog, .confirm-dialog) {
+    border-color: #343b4a;
+    background: #1e232d;
+    color: #e2e7ef;
+    color-scheme: dark;
+    box-shadow: 0 12px 40px rgb(0 0 0 / 45%);
+}
+html.theme4 :is(#profile-dialog, .confirm-dialog)::backdrop { background: rgb(0 0 0 / 50%); }
+html.theme4 .confirm-dialog > p { color: #a9b1be; }
+html.theme4 #profile-preview { background: #2a303c; }
+html.theme4 :is(.profile-account, .profile-text-button, .profile-password-link span) { color: #9aa3b2; }
+html.theme4 .profile-text-button:hover { color: #e2e7ef; }
+html.theme4 .profile-input { border-color: #424a5b; background: #171b23; }
+html.theme4 .avatar-choice:has(input:checked) { border-color: #dfe5ee; background: #262c38; }
+html.theme4 :is(.profile-password-link, #profile-dialog .profile-account-actions) { border-top-color: #343b4a; }
+html.theme4 :is(.profile-secondary, .confirm-actions button) { border-color: #424a5b; background: #262c38; color: #dde3ec; }
+html.theme4 :is(.profile-primary, .confirm-actions .confirm-primary) { border-color: #dfe5ee; background: #dfe5ee; color: #14171e; }
+html.theme4 .confirm-actions .confirm-destructive { border-color: #c2414b; background: #c2414b; color: #fff; }
+html.theme4 :is(#profile-dialog button, .avatar-choice, .confirm-actions button, .danger-button):is(:focus-visible, :focus-within) {
+    outline-color: #9aa3b2;
+}
+
+/* --- 引用条、时间分隔与气泡操作栏 --- */
+html.theme4 #chat-quote-bar { box-shadow: 0 2px 10px rgb(0 0 0 / 32%); }
+html.theme4 .bubble-quote { background: rgba(255, 255, 255, 0.1); }
+html.theme4 .bubble-actions { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
+html.theme4 .bubble-action-danger:enabled:hover { color: #ff9b9b; }
+html.theme4 .sendbtn.is-stop {
+    --btn-bg: #c2414b;
+    --btn-hover: #d3505a;
+}

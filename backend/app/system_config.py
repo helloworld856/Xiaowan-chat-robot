@@ -82,8 +82,9 @@ class DefaultsConfig(_ConfigSection):
         default='standard', description='新账号聊天字号。可选 small、standard 或 large。',
     )
     send_shortcut: Literal['enter', 'ctrl_enter'] = Field(default='enter', description='新账号发送快捷键。可选 enter 或 ctrl_enter。')
-    theme: Literal['theme0', 'theme1', 'theme2', 'theme3'] = Field(
-        default='theme0', description='新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵。',
+    theme: Literal['theme0', 'theme1', 'theme2', 'theme3', 'theme4', 'system'] = Field(
+        default='theme0',
+        description='新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵，theme4 晚风夜色，system 跟随系统。',
     )
     avatar_id: AvatarId = Field(default='cat', description='新账号头像。可选 cat、fox、rabbit、bear、penguin、frog。')
 

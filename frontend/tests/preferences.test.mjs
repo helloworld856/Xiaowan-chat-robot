@@ -88,3 +88,10 @@ test('the composer keeps unfinished IME text in the input until it is committed'
         else globalThis.ResizeObserver = originalResizeObserver;
     }
 });
+
+test('the system theme resolves to light or dark and other themes pass through', () => {
+    assert.equal(prefs.resolveTheme('system', true), 'theme4');
+    assert.equal(prefs.resolveTheme('system', false), 'theme0');
+    assert.equal(prefs.resolveTheme('theme2', true), 'theme2');
+    assert.equal(prefs.resolveTheme('theme4', false), 'theme4');
+});

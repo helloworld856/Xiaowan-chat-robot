@@ -160,3 +160,53 @@ class ChatToolTests(unittest.TestCase):
         with patch('tools_config.weather_tool.weather.requests.get', side_effect=[location, conditions]):
             result = self.tools['get_weather'].invoke({'city': '杭州'})
         self.assertTrue(result.startswith('地点：杭州；'))
+
+    def _location(self):
+        return Mock(json=Mock(return_value={'results': [
+            {'name': '杭州', 'country': '中国', 'latitude': 30.2, 'longitude': 120.1},
+        ]}))
+
+    def test_weather_describes_conditions_and_optional_current_values(self):
+        conditions = Mock(json=Mock(return_value={'current': {
+            'time': '2026-11-20T12:00', 'temperature_2m': 18, 'relative_humidity_2m': 60,
+            'apparent_temperature': 16.5, 'weather_code': 61, 'wind_speed_10m': 12.3, 'precipitation': 0.4,
+        }}))
+        with patch('tools_config.weather_tool.weather.requests.get',
+                   side_effect=[self._location(), conditions]) as request:
+            result = self.tools['get_weather'].invoke({'city': '杭州'})
+        for expected in ('天气：小雨', '体感：16.5°C', '风速：12.3 km/h', '当前降水：0.4 mm'):
+            self.assertIn(expected, result)
+        self.assertNotIn('daily', request.call_args_list[1].kwargs['params'])
+        self.assertNotIn('预报', result)
+
+    def test_weather_returns_daily_forecast_when_days_requested(self):
+        conditions = Mock(json=Mock(return_value={
+            'current': {'time': '2026-11-20T12:00', 'temperature_2m': 18, 'relative_humidity_2m': 60},
+            'daily': {
+                'time': ['2026-11-20', '2026-11-21'], 'weather_code': [0, 95],
+                'temperature_2m_max': [20, 17.5], 'temperature_2m_min': [11, 9],
+                'precipitation_probability_max': [5, None],
+            },
+        }))
+        with patch('tools_config.weather_tool.weather.requests.get',
+                   side_effect=[self._location(), conditions]) as request:
+            result = self.tools['get_weather'].invoke({'city': '杭州', 'days': 2})
+        params = request.call_args_list[1].kwargs['params']
+        self.assertEqual(params['forecast_days'], 2)
+        self.assertIn('temperature_2m_max', params['daily'])
+        self.assertIn('未来 2 天预报：2026-11-20 晴，11~20°C，降水概率 5%；2026-11-21 雷阵雨，9~17.5°C', result)
+        self.assertNotIn('None', result)
+
+    def test_weather_rejects_out_of_range_days_and_short_forecasts(self):
+        with patch('tools_config.weather_tool.weather.requests.get') as request:
+            self.assertIn('0 到 7', self.tools['get_weather'].invoke({'city': '杭州', 'days': 8}))
+            request.assert_not_called()
+        short = Mock(json=Mock(return_value={
+            'current': {'time': '2026-11-20T12:00', 'temperature_2m': 18, 'relative_humidity_2m': 60},
+            'daily': {'time': ['2026-11-20'], 'weather_code': [0], 'temperature_2m_max': [20],
+                      'temperature_2m_min': [11]},
+        }))
+        with (patch('tools_config.weather_tool.weather.requests.get', side_effect=[self._location(), short]),
+              self.assertLogs('xiaowan', level='WARNING')):
+            self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州', 'days': 3}),
+                             '天气服务暂时不可用，请稍后再试。')

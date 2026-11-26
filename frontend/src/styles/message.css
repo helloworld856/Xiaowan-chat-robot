@@ -1,11 +1,29 @@
 /* ========== 消息气泡样式 ========== */
 
+/* --- 时间分隔条 --- */
+.chat-time-divider {
+    display: flex;
+    justify-content: center;
+    margin: 0.35rem 0 0.85rem;
+}
+
+.chat-time-divider span {
+    padding: 0.15rem 0.65rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bot-bubble) 78%, transparent);
+    color: var(--bot-text);
+    opacity: 0.68;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    user-select: none;
+}
+
 /* --- 通用消息样式 --- */
 .user_message,
 .assistant_message {
     display: flex;
     align-items: flex-start;
-    margin-bottom: 1.1rem;
+    margin-bottom: 1.35rem;
     animation: messageFromRight 0.22s ease-out;
 }
 
@@ -45,9 +63,15 @@
     object-fit: cover;
 }
 
-/* --- 气泡通用 --- */
+/* --- 气泡通用与外层包裹 --- */
 [data-chat-font-size="small"] { --chat-font-size: 0.875rem; }
 [data-chat-font-size="large"] { --chat-font-size: 1.125rem; }
+
+.bubble-wrap {
+    position: relative;
+    min-width: 0;
+    max-width: min(65%, 34rem);
+}
 
 .user_bubble,
 .assistant_bubble {
@@ -59,6 +83,95 @@
     line-height: 1.65;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+.bubble-wrap > :is(.user_bubble, .assistant_bubble) {
+    max-width: 100%;
+}
+
+/* 引用内容块 */
+.bubble-quote {
+    margin-bottom: 0.35rem;
+    padding: 0.25rem 0.5rem;
+    border-left: 2.5px solid currentColor;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.06);
+    font-size: 0.82em;
+    line-height: 1.45;
+    opacity: 0.86;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+
+.bubble-quote-speaker {
+    font-weight: 600;
+}
+
+/* 气泡快捷操作栏（悬浮不撑高消息流） */
+.bubble-actions {
+    position: absolute;
+    top: calc(100% + 0.18rem);
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.12rem 0.3rem;
+    border: 1px solid var(--chat-border);
+    border-radius: 0.5rem;
+    background: var(--menu-bg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 4;
+    white-space: nowrap;
+}
+
+.user-bubble-actions { right: 0; }
+.assistant-bubble-actions { left: 0; }
+
+.bubble-wrap:focus-within .bubble-actions,
+.bubble-wrap.actions-visible .bubble-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (hover: hover) {
+    .bubble-wrap:hover .bubble-actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+.bubble-action-btn {
+    padding: 0.12rem 0.38rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--menu-text);
+    font: inherit;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.bubble-action-btn:enabled:hover {
+    background: var(--menu-hover);
+}
+
+.bubble-action-btn:focus-visible {
+    outline: 1.5px solid var(--select-accent);
+    outline-offset: 1px;
+}
+
+.bubble-action-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.bubble-action-danger:enabled:hover {
+    color: #b4232c;
 }
 
 /* ============================
@@ -99,7 +212,7 @@ html.theme0 .user_bubble { box-shadow: none; }
     animation-name: messageFromLeft;
 }
 
-.assistant_message:has(+ .assistant_message) { margin-bottom: 0.6rem; }
+.assistant_message:has(+ .assistant_message) { margin-bottom: 0.75rem; }
 
 .assistant_bag {
     display: flex;
@@ -127,7 +240,7 @@ html.theme0 .user_bubble { box-shadow: none; }
     border-radius: 8px 16px 16px 16px;
 }
 
-/* 等待回复时的三个圆点，独立于页面最初的加载动画 */
+/* 等待回复时的圆点与阶段文字，独立于页面最初的加载动画 */
 .chat-typing-dots {
     display: flex;
     align-items: center;
@@ -135,16 +248,25 @@ html.theme0 .user_bubble { box-shadow: none; }
     min-height: 44px;
 }
 
-.chat-typing-dots span {
+.chat-typing-dots .typing-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: currentColor;
     animation: chatTyping 1.2s ease-in-out infinite;
+    flex: none;
 }
 
-.chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
-.chat-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+.chat-typing-dots .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-typing-dots .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+.chat-typing-status {
+    margin-left: 0.25rem;
+    font-style: normal;
+    font-size: 0.85em;
+    opacity: 0.78;
+    white-space: nowrap;
+}
 
 /* 失败标记附在原消息上，方便用户找到可重试的内容。 */
 .chat-send-failed {
@@ -189,31 +311,42 @@ html.theme0 .user_bubble { box-shadow: none; }
 
 /* --- 响应式调整 --- */
 @media (prefers-reduced-motion: reduce) {
-    .chat-typing-dots span {
+    .chat-typing-dots .typing-dot {
         animation: none;
         opacity: 0.6;
     }
 
     .user_message,
-    .assistant_message {
+    .assistant_message,
+    .bubble-actions {
         animation: none;
+        transition: none;
     }
 }
 
 @media (max-width: 600px) {
+    .bubble-wrap,
     .user_bubble,
     .assistant_bubble {
         max-width: 85%;
+    }
+
+    .user_bubble,
+    .assistant_bubble {
         padding-inline: 0.65rem;
         font-size: var(--chat-font-size, 0.9375rem);
     }
-    
+
+    .bubble-wrap > :is(.user_bubble, .assistant_bubble) {
+        max-width: 100%;
+    }
+
     .user_avatar,
     .assistant_avatar {
         width: 1.8rem;
         height: 1.8rem;
     }
-    
+
     .user_triangle,
     .assistant_triangle {
         margin-top: 0.58rem;

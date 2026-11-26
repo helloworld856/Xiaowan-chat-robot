@@ -2,7 +2,8 @@ import re
 from time import time
 
 from app.account_logging import logger
-from app.chat.memory import MemoryManager
+from app.chat.memory import MemoryManager, prompt_history
+from app.chat.progress import ChatCancelled, check_cancelled, report_stage
 from app.chat.state import AIChatState
 from app.llm.token_counter import count_tokens
 from app.llm.output_parser import model_text, parse_model_json, replace_invalid_unicode, safe_parse_json
@@ -34,11 +35,17 @@ def get_total_tokens(message) -> int:
     return 0
 
 
+def _context_history(state: AIChatState, memorier: MemoryManager) -> list[dict]:
+    rows = memorier.history_cache[:-1] if state.get('regenerate_round') is not None else memorier.history_cache
+    return prompt_history(rows)
+
+
 # 基础结点定义
 # 定义开始结点
 def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
                compression_tokens: int = DEFAULT_COMPRESSION_TOKENS) -> AIChatState:
     try:
+        check_cancelled()
         logger.info('执行结点"start_node"...')
         state['start_time'] = time()
 
@@ -47,26 +54,45 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
         state['saved'] = False
         state['total_tokens'] = 0
         memorier.refresh_if_needed()
-        state['message']['conversation_round'] = memorier.next_round
 
-        # 计算历史文本的 Token 用量。
-        res = []
-        o = 0
-        for msg in memorier.history_cache:
-            o += 1
-            res.append(msg['user'])
-            res.extend(msg['assistant'])
-        history_text = memorier.abstract_cache + ','.join(res)
-        t = count_tokens(history_text) if history_text else 0
-        t += 4 * o  # 估算每轮历史记录的字段开销。
+        regenerate_round = state.get('regenerate_round')
+        if regenerate_round is not None:
+            if not memorier.history_cache or memorier.history_cache[-1]['conversation_round'] != regenerate_round:
+                from app.chat.scheduler import ChatNotStarted
+                raise ChatNotStarted(409, '只能重新生成最新一轮对话')
+            state['user_input'] = memorier.history_cache[-1]['user']
+            state['message'] = {
+                'conversation_round': regenerate_round,
+                'user': state['user_input'],
+                'assistant': [],
+            }
+        else:
+            state['message'] = {
+                'conversation_round': memorier.next_round,
+                'user': '',
+                'assistant': [],
+            }
+            # 计算历史文本的 Token 用量。
+            res = []
+            o = 0
+            for msg in memorier.history_cache:
+                o += 1
+                res.append(msg['user'])
+                res.extend(msg['assistant'])
+            history_text = memorier.abstract_cache + ','.join(res)
+            t = count_tokens(history_text) if history_text else 0
+            t += 4 * o  # 估算每轮历史记录的字段开销。
 
-        if memorier.has_older_history or t > compression_tokens:
-            # 生成历史对话摘要
-            _, summary_agent, _ = agents
-            memorier.compress_history(summary_agent)
+            if memorier.has_older_history or t > compression_tokens:
+                # 生成历史对话摘要
+                _, summary_agent, _ = agents
+                memorier.compress_history(summary_agent)
+                check_cancelled()
 
         logger.info('结点"start_node"执行完成！')
         return state
+    except ChatCancelled:
+        raise
     except Exception as error:
         logger.error('start node failed: %s', type(error).__name__)
         raise
@@ -74,10 +100,15 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
 
 # 定义结束结点
 def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatState:
+    check_cancelled()
     logger.info('执行结点"end_node"...')
 
     # 保存失败时仍返回回复，由接口明确告知前端。
-    state['saved'] = memorier.record_message(state['message'])
+    if state.get('regenerate_round') is not None:
+        state['saved'] = memorier.replace_last_message(state['message'])
+        state['regenerate_round'] = None
+    else:
+        state['saved'] = memorier.record_message(state['message'])
 
     logger.info('本轮对话 %d：回复 %d 条，分析与回复 Token %s，耗时 %.2f 秒，保存%s',
                 state['message']['conversation_round'] + 1, len(state['ai_response']),
@@ -91,13 +122,14 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
 # 分析用户输入
 def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
+        report_stage('analyzing')
         logger.info('执行结点"analysis"...')
         user_input = state.get('user_input')
 
         # 构建分析提示
         analysis_prompt = load_prompt(
             "analysis_prompt",
-            history=memorier.history_cache,
+            history=_context_history(state, memorier),
             abstract=memorier.abstract_cache or '无',
             user_input=user_input
         )
@@ -108,6 +140,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
                 "messages": [{"role": "user", "content": analysis_prompt}]
             }
         )
+        check_cancelled()
         last_message = get_last_message(response)
 
         # 提取出回复并转成字典格式（使用容错解析）
@@ -122,6 +155,8 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 
         logger.info('结点"analysis"执行完成！')
         return state
+    except ChatCancelled:
+        raise
     except Exception as error:
         logger.error('analysis node failed: %s', type(error).__name__)
         raise
@@ -130,12 +165,13 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 # 生成回复结点
 def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
+        report_stage('generating')
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
 
         answer_prompt = load_prompt(
             "answer_prompt",
-            history=memorier.history_cache,
+            history=_context_history(state, memorier),
             abstract=memorier.abstract_cache,
             user_input=user_input,
             intent=state['analysis_result'].get('intent', '一般对话'),
@@ -148,6 +184,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
             {"messages": [{"role": "user", "content": answer_prompt}]},
             config={"recursion_limit": 6}
         )
+        check_cancelled()
         last_message = get_last_message(response)
         text = model_text(last_message.content)
         ai_response = parse_model_json(text, ('reply',))
@@ -191,9 +228,12 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         # 记录对话
         state['message']['user'] = user_input
         state['message']['assistant'] = state['ai_response']
+        state['message']['created_at'] = int(time() * 1000)
 
         logger.info('结点"generate"执行完成！')
         return state
+    except ChatCancelled:
+        raise
     except Exception as error:
         logger.error('generate node failed: %s', type(error).__name__)
         raise

@@ -248,3 +248,96 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
             response = await client.post('/chat', json={'user_input': '晚'})
             self.assertEqual(response.json(), {'response': ['回复'], 'conversation_round': None, 'saved': False})
         self.assertEqual(calls, [' 😀晚 ', '晚'])
+
+
+    async def test_stream_reports_stages_and_cancel_discards_turn_without_saving(self):
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+        from app.api.chat import router as chat_router
+        from app.api.history import router as history_router
+        from app.chat.progress import check_cancelled, report_stage
+        from app.chat.scheduler import ChatSessions
+        from app.system_config import SystemConfig
+
+        sessions = ChatSessions(None, max_running=2, max_waiting=2, wait_timeout=1.0)
+        self.addAsyncCleanup(sessions.drain)
+        tool_entered = threading.Event()
+        release_tool = threading.Event()
+        self.addCleanup(release_tool.set)
+        saved_rounds = []
+
+        def run(self_, entry, user, text):
+            report_stage('analyzing')
+            report_stage('tool:get_weather')
+            if text == 'cancel-me':
+                tool_entered.set()
+                release_tool.wait(3)
+            check_cancelled()
+            report_stage('generating')
+            saved_rounds.append(text)
+            return {
+                'ai_response': ['晴天回复'],
+                'message': {'conversation_round': 0, 'user': text, 'assistant': ['晴天回复'], 'created_at': 1764150000500},
+                'saved': True,
+            }
+
+        deleted = []
+
+        def fake_delete(_conn, uid, round_id):
+            deleted.append((uid, round_id))
+            return round_id == 3
+
+        app = FastAPI()
+        app.state.system_config = SystemConfig()
+        app.state.chat = sessions
+        app.state.db = SimpleNamespace(connection=None)
+        app.include_router(chat_router)
+        app.include_router(history_router)
+
+        @app.middleware('http')
+        async def authenticate(request, call_next):
+            request.state.user = FIRST_USER
+            return await call_next(request)
+
+        with (
+            patch.object(ChatSessions, '_run', run),
+            patch('app.api.history.delete_history_round', side_effect=fake_delete),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+                streamed = await client.post('/chat/stream', json={'user_input': '查杭州天气', 'turn_id': 'turn_ok'})
+                self.assertEqual(streamed.status_code, 200)
+                self.assertEqual(streamed.headers.get('x-accel-buffering'), 'no')
+                events = [
+                    __import__('json').loads(line.removeprefix('data: '))
+                    for line in streamed.text.splitlines() if line.startswith('data: ')
+                ]
+                stages = [event['stage'] for event in events if event['type'] == 'status']
+                self.assertEqual(stages, ['analyzing', 'tool:get_weather', 'generating'])
+                self.assertEqual(events[-1], {
+                    'type': 'done',
+                    'response': ['晴天回复'],
+                    'conversation_round': 0,
+                    'saved': True,
+                    'created_at': 1764150000500,
+                })
+
+                # 测试进行中的请求取消后立即返回 cancelled，且不写入记录
+                in_flight = asyncio.create_task(
+                    client.post('/chat/stream', json={'user_input': 'cancel-me', 'turn_id': 'turn_cancel'})
+                )
+                self.assertTrue(await asyncio.to_thread(tool_entered.wait, 3))
+                cancel_res = await client.post('/chat/cancel', json={'turn_id': 'turn_cancel'})
+                self.assertEqual(cancel_res.json(), {'ok': True, 'cancelled': True})
+                release_tool.set()
+                cancelled_stream = await in_flight
+                cancel_events = [
+                    __import__('json').loads(line.removeprefix('data: '))
+                    for line in cancelled_stream.text.splitlines() if line.startswith('data: ')
+                ]
+                self.assertTrue(any(event['type'] == 'cancelled' for event in cancel_events))
+                self.assertEqual(saved_rounds, ['查杭州天气'])
+
+                # 单轮删除路由验证
+                self.assertEqual((await client.delete('/history/3')).status_code, 200)
+                self.assertEqual((await client.delete('/history/99')).status_code, 404)
+                self.assertEqual(deleted, [(FIRST_USER.id, 3), (FIRST_USER.id, 99)])

@@ -17,6 +17,7 @@ export interface ChatResponse {
     response: string[];
     conversation_round: number | null;
     saved: boolean;
+    created_at?: number | null;
 }
 
 export interface InputLimits {
@@ -36,7 +37,8 @@ export const inputLimits: InputLimits = {
 
 //历史对话表中每个元素的接口
 export interface ConversationItem {
-  conversation_round: number;
-  user: string;
-  assistant: string[];  // 多条助手回复
+    conversation_round: number;
+    user: string;
+    assistant: string[];  // 多条助手回复
+    created_at?: number | null;
 }

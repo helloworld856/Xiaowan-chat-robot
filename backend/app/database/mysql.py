@@ -69,6 +69,7 @@ def initialize_schema(pool):
                 conversation_round INT NOT NULL,
                 user MEDIUMTEXT,
                 assistant MEDIUMTEXT,
+                created_at BIGINT NULL,
                 PRIMARY KEY (user_id, conversation_round)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ''')
@@ -82,6 +83,9 @@ def initialize_schema(pool):
                 DROP PRIMARY KEY,
                 ADD PRIMARY KEY (user_id, conversation_round)
             ''')
+        cursor.execute("SHOW COLUMNS FROM history_messages LIKE 'created_at'")
+        if cursor.fetchone() is None:
+            cursor.execute('ALTER TABLE history_messages ADD COLUMN created_at BIGINT NULL')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS abstract_messages (
                 user_id BIGINT UNSIGNED PRIMARY KEY,

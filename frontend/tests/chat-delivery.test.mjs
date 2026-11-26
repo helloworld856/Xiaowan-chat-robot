@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {runInNewContext} from 'node:vm';
-import {mountComponent, nextTick} from './vue-harness.mjs';
+import {compileModule, mountComponent, nextTick} from './vue-harness.mjs';
 
+const chatFormat = compileModule(fs.readFileSync(new URL('../src/ts/chat_format.ts', import.meta.url), 'utf8'));
 const sourcePath = new URL('../src/composables/useChat.ts', import.meta.url);
 const compiled = fs.existsSync(sourcePath) && ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}
@@ -327,7 +328,8 @@ async function workspaceHarness(t, initialEntries = []) {
             './ChatComposer.vue': {__esModule: true, default: {render: () => null}},
             '../composables/useChat.ts': {useChat: () => ({
                 entries, draft: ref(''), busy: ref(false), isTyping: ref(false), reset() {}
-            })}
+            })},
+            '../ts/chat_format.ts': chatFormat,
         },
         props: {ready: true, shortcut: 'enter', profile: null, persona: null, clearingHistory: false, showAlert() {}}
     });

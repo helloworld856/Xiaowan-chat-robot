@@ -2,9 +2,11 @@ from typing import Dict, List, Optional, TypedDict, Union
 
 
 # 定义数据状态
-class AIChatState(TypedDict):
+class AIChatState(TypedDict, total=False):
     # 用户输入
     user_input: Optional[str]
+    # 重新生成指定轮次（仅最新一轮）
+    regenerate_round: Optional[int]
     # 分析结果
     analysis_result: Dict
     # 回复
@@ -30,6 +32,7 @@ class AIChatState(TypedDict):
 def create_initial_state(next_round: int = 0) -> AIChatState:
     return {
         'user_input': '',
+        'regenerate_round': None,
         'analysis_result': {},
         'ai_response': [],
         'saved': False,

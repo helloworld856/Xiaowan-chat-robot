@@ -9,10 +9,13 @@ from app.account_logging import logger
 from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
 
 
+ThemeChoice = Literal['theme0', 'theme1', 'theme2', 'theme3', 'theme4', 'system']
+
+
 class Preferences(BaseModel):
     model_config = ConfigDict(extra='forbid')
     send_shortcut: Literal['enter', 'ctrl_enter'] = 'enter'
-    theme: Literal['theme0', 'theme1', 'theme2', 'theme3'] = 'theme0'
+    theme: ThemeChoice = 'theme0'
     chat_font_size: Literal['small', 'standard', 'large'] = 'standard'
 
 

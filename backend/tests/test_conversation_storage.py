@@ -48,6 +48,7 @@ class SQLitePool:
             db.executescript('''
                 CREATE TABLE history_messages (
                     user_id INTEGER, conversation_round INTEGER, user TEXT, assistant TEXT,
+                    created_at INTEGER,
                     PRIMARY KEY (user_id, conversation_round)
                 );
                 CREATE TABLE abstract_messages (user_id INTEGER PRIMARY KEY, abstract TEXT);
@@ -239,6 +240,29 @@ class MemoryIsolationTests(unittest.TestCase):
         self.assertEqual(restored.abstract_cache, '有效摘要')
         self.assertEqual(restored.history_cache, [message(1, 'previous message')])
 
+    def test_timestamps_and_single_round_deletion_are_scoped_and_strip_prompt_metadata(self):
+        from app.chat.memory import delete_history_round, prompt_history
+
+        account_a = MemoryManager(1, self.pool.connection)
+        account_b = MemoryManager(2, self.pool.connection)
+        stamped = {**message(0, '带时间的消息'), 'created_at': 1764150000123}
+        legacy = message(1, '无时间的旧消息')
+        self.assertTrue(account_a.record_message(stamped))
+        self.assertTrue(account_a.record_message(legacy))
+        self.assertTrue(account_b.record_message({**message(0, 'B的消息'), 'created_at': 1764150000999}))
+
+        rows = load_history(self.pool.connection, 1, 0)
+        self.assertEqual(rows[0]['created_at'], 1764150000123)
+        self.assertNotIn('created_at', rows[1])
+        self.assertEqual(prompt_history(rows), [message(0, '带时间的消息'), legacy])
+
+        # 其他账号不能删除当前账号同轮次记录
+        self.assertFalse(delete_history_round(self.pool.connection, 2, 1))
+        self.assertTrue(delete_history_round(self.pool.connection, 1, 0))
+        self.assertFalse(delete_history_round(self.pool.connection, 1, 0))
+        self.assertEqual(load_history(self.pool.connection, 1, 0), [legacy])
+        self.assertEqual(len(load_history(self.pool.connection, 2, 0)), 1)
+
 
 @unittest.skipUnless(importlib.util.find_spec('langgraph'), 'requires LangGraph')
 class GraphOutputTests(unittest.TestCase):
@@ -423,3 +447,51 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
             a_prompt = next(prompt for prompt in observed if 'private-A-second' in prompt)
             self.assertNotIn('private-A', b_prompt)
             self.assertIn('private-A-first', a_prompt)
+
+
+    async def test_regenerate_replaces_only_latest_round_and_excludes_old_reply_from_prompt(self):
+        from app.accounts.repository import User
+        from app.chat.scheduler import ChatNotStarted, ChatSessions
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pool = SQLitePool(Path(folder.name) / 'regenerate.sqlite')
+        user = User(1, 'First', 'admin')
+        sessions = ChatSessions(pool.connection)
+        self.addAsyncCleanup(sessions.drain)
+        answer_prompts = []
+        replies = iter(['{"reply":["旧回复"]}', '{"reply":["第二轮原回复"]}', '{"reply":["第二轮新回复"]}'])
+
+        def answer(prompt):
+            answer_prompts.append(prompt)
+            return next(replies)
+
+        agents = (
+            FakeAgent(lambda _: '{"intent":"对话"}'),
+            FakeAgent(lambda _: 'summary'),
+            FakeAgent(answer),
+        )
+        with (
+            patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
+            patch('app.chat.nodes.count_tokens', return_value=1),
+        ):
+            first = await sessions.send(user, '第一问')
+            second = await sessions.send(user, '第二问')
+            self.assertEqual(first['message']['conversation_round'], 0)
+            self.assertEqual(second['message']['conversation_round'], 1)
+            with self.assertRaises(ChatNotStarted) as stale_round:
+                await sessions.regenerate(user, 0)
+            self.assertEqual(stale_round.exception.status_code, 409)
+
+            regenerated = await sessions.regenerate(user, 1)
+        self.assertTrue(regenerated['saved'])
+        self.assertEqual(regenerated['message']['conversation_round'], 1)
+        self.assertEqual(regenerated['ai_response'], ['第二轮新回复'])
+        self.assertIn('第一问', answer_prompts[-1])
+        self.assertNotIn('第二轮原回复', answer_prompts[-1])
+        rows = load_history(pool.connection, user.id, 0)
+        self.assertEqual([(row['conversation_round'], row['user'], row['assistant']) for row in rows], [
+            (0, '第一问', ['旧回复']),
+            (1, '第二问', ['第二轮新回复']),
+        ])
+        self.assertIsInstance(rows[1].get('created_at'), int)

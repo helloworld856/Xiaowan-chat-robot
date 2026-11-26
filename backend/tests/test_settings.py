@@ -40,6 +40,8 @@ class SettingsTests(unittest.TestCase):
             Preferences(send_shortcut='unknown')
         with self.assertRaises(ValidationError):
             Preferences(theme='unknown')
+        for theme in ('theme4', 'system'):
+            self.assertEqual(Preferences(theme=theme).theme, theme)
         with self.assertRaises(ValidationError):
             Preferences(chat_font_size='unknown')
 

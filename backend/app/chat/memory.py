@@ -8,17 +8,44 @@ HISTORY_CACHE_LIMIT = 256
 HISTORY_COMPRESSION_BATCH_SIZE = 32
 
 
+def _row_to_item(row) -> dict:
+    item = {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
+    if len(row) > 3 and row[3] is not None:
+        item['created_at'] = int(row[3])
+    return item
+
+
+def prompt_history(rows: list[dict]) -> list[dict]:
+    """Strip UI metadata such as timestamps before interpolating history into prompts."""
+    return [
+        {'conversation_round': row['conversation_round'], 'user': row['user'], 'assistant': row['assistant']}
+        for row in rows
+    ]
+
+
 def load_history(connection, user_id: int, k: int, front: bool = True):
     """Read committed history for one authenticated account."""
     with connection() as db, db.cursor() as cursor:
         return _read_history(cursor, user_id, k, front)
 
 
+def delete_history_round(connection, user_id: int, conversation_round: int) -> bool:
+    """Delete one uncompressed round owned by the authenticated account."""
+    with connection() as db:
+        with db.cursor() as cursor:
+            removed = cursor.execute(
+                'DELETE FROM history_messages WHERE user_id = %s AND conversation_round = %s',
+                (user_id, conversation_round),
+            )
+        db.commit()
+    return bool(removed)
+
+
 def _read_history(cursor, user_id: int, k: int, front: bool = True):
     ascending = front if k >= 0 else not front
     direction = 'ASC' if ascending else 'DESC'
     sql = (
-        'SELECT conversation_round, user, assistant FROM history_messages '
+        'SELECT conversation_round, user, assistant, created_at FROM history_messages '
         f'WHERE user_id = %s ORDER BY conversation_round {direction}'
     )
     params = (user_id,)
@@ -26,10 +53,7 @@ def _read_history(cursor, user_id: int, k: int, front: bool = True):
         sql += ' LIMIT %s'
         params += (abs(k),)
     cursor.execute(sql, params)
-    return [
-        {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
-        for row in cursor.fetchall()
-    ]
+    return [_row_to_item(row) for row in cursor.fetchall()]
 
 
 class MemoryManager:
@@ -70,15 +94,27 @@ class MemoryManager:
     def next_round(self) -> int:
         return self.history_cache[-1]['conversation_round'] + 1 if self.history_cache else 0
 
+    @staticmethod
+    def _cached_item(message) -> dict:
+        item = {
+            'conversation_round': message['conversation_round'],
+            'user': message['user'],
+            'assistant': message['assistant'].copy(),
+        }
+        if message.get('created_at') is not None:
+            item['created_at'] = int(message['created_at'])
+        return item
+
     def record_message(self, message) -> bool:
+        created_at = message.get('created_at')
         try:
             with self._connection() as db:
                 with db.cursor() as cursor:
                     cursor.execute(
-                        'INSERT INTO history_messages (user_id, conversation_round, user, assistant) '
-                        'VALUES (%s, %s, %s, %s)',
+                        'INSERT INTO history_messages (user_id, conversation_round, user, assistant, created_at) '
+                        'VALUES (%s, %s, %s, %s, %s)',
                         (self.user_id, message['conversation_round'], message['user'],
-                         json.dumps(message['assistant'], ensure_ascii=False)),
+                         json.dumps(message['assistant'], ensure_ascii=False), created_at),
                     )
                 self._commit(db)
         except Exception as error:
@@ -86,10 +122,36 @@ class MemoryManager:
             return False
 
         # 只把提交成功的轮次放进记忆，模型不会参考已知保存失败的消息。
-        self.history_cache.append({**message, 'assistant': message['assistant'].copy()})
+        self.history_cache.append(self._cached_item(message))
         if len(self.history_cache) > HISTORY_CACHE_LIMIT:
             del self.history_cache[0]
             self.has_older_history = True
+        return True
+
+    def replace_last_message(self, message) -> bool:
+        created_at = message.get('created_at')
+        round_id = message['conversation_round']
+        try:
+            with self._connection() as db:
+                with db.cursor() as cursor:
+                    updated = cursor.execute(
+                        'UPDATE history_messages SET assistant = %s, created_at = %s '
+                        'WHERE user_id = %s AND conversation_round = %s',
+                        (json.dumps(message['assistant'], ensure_ascii=False), created_at, self.user_id, round_id),
+                    )
+                    if updated != 1:
+                        self._stale = True
+                        return False
+                self._commit(db)
+        except Exception as error:
+            logger.warning('history replace failed: %s', type(error).__name__)
+            return False
+
+        item = self._cached_item(message)
+        if self.history_cache and self.history_cache[-1]['conversation_round'] == round_id:
+            self.history_cache[-1] = item
+        else:
+            self._stale = True
         return True
 
     def compress_history(self, summary_agent):
@@ -114,7 +176,7 @@ class MemoryManager:
 
 【这次归入摘要的对话，按时间顺序】
 user 是用户，assistant 是{persona.BOT_NAME}。
-{older}
+{prompt_history(older)}
 
 请合并已有摘要和这批对话，输出完整的更新摘要。两部分都没有值得保留的信息时，写「暂无需要延续的对话信息。」"""
             result = summary_agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})

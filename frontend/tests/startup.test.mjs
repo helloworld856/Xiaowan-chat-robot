@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {defineComponent, h, ref} from 'vue';
-import {mountComponent, nextTick} from './vue-harness.mjs';
+import {compileModule, mountComponent, nextTick} from './vue-harness.mjs';
 
+const preferencesModule = compileModule(readFileSync(new URL('../src/ts/preferences.ts', import.meta.url), 'utf8'));
 const account = {id: 1, username: 'member', role: 'user'};
 const profile = {nickname: 'Saved nickname', avatar_url: '/avatars/system/fox.png'};
 const persona = {BOT_NAME: '小晚', BOT_AVATAR: '/avatars/xiaowan.png', USER_AVATAR: '/avatars/system/cat.png'};
 const preferences = {theme: 'theme3', send_shortcut: 'ctrl_enter', chat_font_size: 'large'};
 
-function startupHarness(t, loadPersona = async () => persona) {
+function startupHarness(t, loadPersona = async () => persona, savedPreferences = preferences) {
     const document = {documentElement: {className: 'theme0'}, title: ''};
     const originalDocument = globalThis.document;
     const originalStorage = globalThis.localStorage;
@@ -47,13 +49,14 @@ function startupHarness(t, loadPersona = async () => persona) {
                 reset() {}
             }))},
             './components/SettingsDialog.vue': {__esModule: true, default: component('test-settings', emit => ({
-                async load() { calls.push('settings'); emit('preferences-change', preferences); },
+                async load() { calls.push('settings'); emit('preferences-change', savedPreferences); },
                 reset() {}
             }))},
             './composables/useSession.ts': {useSession(options) {
                 handlers = options;
                 return {user, starting, sessionHidden: ref(false), loggingOut: ref(false), busy: ref(false)};
             }},
+            './ts/preferences.ts': preferencesModule,
             './ts/api.ts': {
                 AuthRequiredError: class extends Error {},
                 CancelledRequestError: class extends Error {},
@@ -106,4 +109,33 @@ test('signout clears account data and ignores a late persona response', async t 
     assert.equal(app.element('test-chat').text, 'false|||enter');
     assert.equal(app.document.documentElement.className, 'theme0');
     assert.equal(app.element('app-shell').props['data-chat-font-size'], 'standard');
+});
+
+test('the system theme follows the color scheme and reacts to changes', async t => {
+    const listeners = [];
+    const scheme = {
+        matches: true,
+        addEventListener(type, listener) { listeners.push(listener); },
+        removeEventListener(type, listener) { listeners.splice(listeners.indexOf(listener), 1); }
+    };
+    const originalMatchMedia = globalThis.matchMedia;
+    globalThis.matchMedia = query => {
+        assert.equal(query, '(prefers-color-scheme: dark)');
+        return scheme;
+    };
+    t.after(() => {
+        if (originalMatchMedia === undefined) delete globalThis.matchMedia;
+        else globalThis.matchMedia = originalMatchMedia;
+    });
+    const app = startupHarness(t, async () => persona, {...preferences, theme: 'system'});
+    await app.login();
+    await nextTick();
+    assert.equal(app.document.documentElement.className, 'theme4');
+    scheme.matches = false;
+    listeners.forEach(listener => listener());
+    assert.equal(app.document.documentElement.className, 'theme0');
+    app.logout();
+    scheme.matches = true;
+    listeners.forEach(listener => listener());
+    assert.equal(app.document.documentElement.className, 'theme0', 'signed-out pages keep the default theme');
 });

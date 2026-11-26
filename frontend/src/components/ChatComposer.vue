@@ -3,8 +3,16 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import {shouldSendMessage} from '../ts/preferences.ts';
 import type {Preferences} from '../ts/preferences.ts';
 
-const props = defineProps<{locked: boolean; shortcut: Preferences['send_shortcut']}>();
-const emit = defineEmits<{send: []}>();
+const props = withDefaults(defineProps<{
+    locked: boolean;
+    cancellable?: boolean;
+    quote?: {speaker: string; text: string} | null;
+    shortcut: Preferences['send_shortcut'];
+}>(), {
+    cancellable: false,
+    quote: null,
+});
+const emit = defineEmits<{send: []; cancel: []; 'clear-quote': []}>();
 const draft = defineModel<string>({required: true});
 
 const input = ref<HTMLTextAreaElement | null>(null);
@@ -24,9 +32,13 @@ watch(draft, value => {
     void nextTick(measureOverflow);
 });
 
+function focus() {
+    input.value?.focus({preventScroll: true});
+}
+
 function setExpanded(value: boolean) {
     expanded.value = value;
-    input.value?.focus({preventScroll: true});
+    focus();
     void nextTick(measureOverflow);
 }
 
@@ -36,6 +48,11 @@ function preserveInputFocus(event: PointerEvent) {
 
 function send() {
     if (!composing.value && !props.locked) emit('send');
+}
+
+function onPrimaryAction() {
+    if (props.cancellable) emit('cancel');
+    else send();
 }
 
 function onInputKey(event: KeyboardEvent) {
@@ -49,10 +66,17 @@ function onEscape(event: KeyboardEvent) {
         event.stopPropagation();
         return;
     }
-    if (!expanded.value) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setExpanded(false);
+    if (expanded.value) {
+        event.preventDefault();
+        event.stopPropagation();
+        setExpanded(false);
+        return;
+    }
+    if (props.quote) {
+        event.preventDefault();
+        event.stopPropagation();
+        emit('clear-quote');
+    }
 }
 
 onMounted(() => {
@@ -63,9 +87,17 @@ onMounted(() => {
     measureOverflow();
 });
 onBeforeUnmount(() => observer?.disconnect());
+defineExpose({focus});
 </script>
 
 <template>
+    <div v-if="quote" id="chat-quote-bar" role="region" aria-label="引用消息">
+        <span class="chat-quote-text" :title="`${quote.speaker}：${quote.text}`">
+            <strong>引用 {{ quote.speaker }}：</strong>{{ quote.text }}
+        </span>
+        <button id="chat-quote-clear" type="button" aria-label="取消引用" title="取消引用"
+            @pointerdown="preserveInputFocus" @click="emit('clear-quote')">×</button>
+    </div>
     <div id="inputArea">
         <div id="chat-composer" :class="{'is-expanded': expanded}" @keydown.esc="onEscape">
             <textarea id="userInput" ref="input" v-model="draft" autocomplete="off" rows="1"
@@ -76,6 +108,10 @@ onBeforeUnmount(() => observer?.disconnect());
                 :aria-expanded="expanded" :title="toggleLabel" :hidden="!expanded && !overflow"
                 @pointerdown="preserveInputFocus" @click="setExpanded(!expanded)"></button>
         </div>
-        <button class="sendbtn" type="button" :disabled="locked" @click="send">{{ locked ? '......' : '发送' }}</button>
+        <button id="chat-submit-btn" class="sendbtn" :class="{'is-stop': cancellable}" type="button"
+            :disabled="locked && !cancellable" :aria-label="cancellable ? '停止生成' : undefined"
+            @click="onPrimaryAction">
+            {{ cancellable ? '停止' : locked ? '......' : '发送' }}
+        </button>
     </div>
 </template>
