@@ -36,6 +36,7 @@ def get_total_tokens(message) -> int:
     return 0
 
 
+# 截取送入提示词的短期原话滑动窗口；重新生成最新轮时先剔除待替换的末轮旧回复。
 def _slice_window(state: AIChatState, memorier: MemoryManager, recent_window_rounds: int | None = None) -> list[dict]:
     rows = memorier.history_cache[:-1] if state.get('regenerate_round') is not None else memorier.history_cache
     if recent_window_rounds is not None and recent_window_rounds > 0:
@@ -47,6 +48,7 @@ def _context_history(state: AIChatState, memorier: MemoryManager, recent_window_
     return format_history_dialogue(_slice_window(state, memorier, recent_window_rounds), bot_name=persona.BOT_NAME)
 
 
+# 启用情景记忆库时优先注入按需混合召回的事件卡片，否则回退旧版摘要字段。
 def _memory_context(state: AIChatState, memorier: MemoryManager) -> str:
     recalled = state.get('recalled_episodes')
     if recalled is not None:
@@ -94,8 +96,9 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
             window = _slice_window(state, memorier, recent_window_rounds)
             window_start = window[0]['conversation_round'] if window else None
             query = (state.get('user_input') or '').strip()
+            # 用户只回「那后来呢」「为什么」等短句时，拼上上一轮末尾输入补足检索语境。
             if len(query) < 12 and window:
-                query = f"{window[-1]['user']}\n{query}".strip()
+                query = f"{window[-1]['user'][-200:]}\n{query}".strip()
             state['recalled_episodes'] = episodes.recall(
                 memorier.user_id, query, exclude_from_round=window_start,
             )

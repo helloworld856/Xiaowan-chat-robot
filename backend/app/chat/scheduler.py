@@ -53,6 +53,7 @@ class AccountChat:
     worker: asyncio.Task | None = None
     learn_task: asyncio.Task | None = None
     episode_task: asyncio.Task | None = None
+    bg_cancel: Event = field(default_factory=Event)
     cancelling_worker: bool = False
     turns: dict[str, TurnHandle] = field(default_factory=dict)
     cancelled_turns: deque[str] = field(default_factory=lambda: deque(maxlen=16))
@@ -93,11 +94,18 @@ class ChatSessions:
         if entry.maintenance or entry.waiting or entry.lock.locked():
             raise ChatNotStarted(409, '该账号还有聊天请求正在处理，请稍后重试')
         entry.maintenance = True
+        # 清空历史或注销账号前先终止后台印象学习与事件提炼，防止清理后旧任务把数据写回磁盘或数据库。
+        entry.bg_cancel.set()
+        bg_tasks = [t for t in (entry.learn_task, entry.episode_task) if t is not None and not t.done()]
+        for task in bg_tasks:
+            task.cancel()
+        if bg_tasks:
+            await asyncio.gather(*bg_tasks, return_exceptions=True)
         try:
             yield
         finally:
             # 丢弃缓存的历史和摘要，下一轮从数据库重新读取。
-            del self._users[user_id]
+            self._users.pop(user_id, None)
 
     def cancel(self, user_id: int, turn_id: str | None = None) -> bool:
         if self._closing:
@@ -226,8 +234,9 @@ class ChatSessions:
         # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
         result = await asyncio.shield(work)
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
+        # 回复成功落库后异步触发后台印象学习与情景记忆归档，不阻塞本轮 HTTP 响应返回。
         if (regenerate_round is None and isinstance(result, dict) and result.get('saved')
-                and not self._closing):
+                and not self._closing and not entry.maintenance):
             if self._portraits is not None and len(text.strip()) >= 5 and entry.learn_task is None:
                 self._schedule_portrait_learning(entry, user, text, list(result.get('ai_response') or ()))
             if self._episodes is not None and entry.episode_task is None:
@@ -239,50 +248,70 @@ class ChatSessions:
         return result
 
     def _schedule_episode_extraction(self, entry: AccountChat, user: User, max_eligible_round: int) -> None:
+        cancel_event = entry.bg_cancel
+
         async def run_extract():
             try:
+                if cancel_event.is_set():
+                    return
                 agents = self._agents_for(user)
                 _, summary_agent, _ = agents
                 loop = asyncio.get_running_loop()
-                # 单次后台最多推进两批，逐步消化积压且不长期占用工作线程。
-                for _ in range(2):
-                    if self._closing:
+                # 单次后台最多推进两批；关闭服务 drain 时跑完首批发起了的任务即可。
+                for batch_idx in range(2):
+                    if cancel_event.is_set() or (batch_idx > 0 and self._closing):
                         break
-                    changed = await loop.run_in_executor(
-                        self._executor, copy_context().run,
-                        self._episodes.extract_and_save_batch, user.id, summary_agent, max_eligible_round,
-                    )
-                    if not changed and not self._episodes.unextracted_batch(user.id, max_eligible_round):
+                    with discard_logs_after(cancel_event):
+                        advanced = await loop.run_in_executor(
+                            self._executor, copy_context().run,
+                            partial(self._episodes.extract_and_save_batch, cancel_event=cancel_event),
+                            user.id, summary_agent, max_eligible_round,
+                        )
+                    if not advanced:
                         break
+            except asyncio.CancelledError:
+                return
             except Exception as error:
-                logger.warning('background episode extraction skipped: %s', type(error).__name__)
+                if not cancel_event.is_set():
+                    logger.warning('background episode extraction skipped: %s', type(error).__name__)
             finally:
-                entry.episode_task = None
+                if entry.episode_task is task:
+                    entry.episode_task = None
 
         task = asyncio.create_task(run_extract())
         entry.episode_task = task
         task.add_done_callback(self._consume_error)
 
     def _schedule_portrait_learning(self, entry: AccountChat, user: User, text: str, replies: list[str]) -> None:
+        cancel_event = entry.bg_cancel
+
         async def run_learn():
             try:
+                if cancel_event.is_set():
+                    return
                 current = self._portraits.get(user.id)
                 if not current.auto_learn:
                     return
                 agents = self._agents_for(user)
                 _, summary_agent, _ = agents
                 loop = asyncio.get_running_loop()
-                learned = await loop.run_in_executor(
-                    self._executor, copy_context().run,
-                    learn_portrait_from_turn, summary_agent, current, text, replies,
-                )
-                if learned is not None:
-                    self._portraits.update_learned(user.id, learned)
-                    log_event('portrait_learned', items=len(learned))
+                with discard_logs_after(cancel_event):
+                    learned = await loop.run_in_executor(
+                        self._executor, copy_context().run,
+                        learn_portrait_from_turn, summary_agent, current, text, replies,
+                    )
+                if learned is not None and not cancel_event.is_set():
+                    with discard_logs_after(cancel_event):
+                        self._portraits.update_learned(user.id, learned)
+                        log_event('portrait_learned', items=len(learned))
+            except asyncio.CancelledError:
+                return
             except Exception as error:
-                logger.warning('background portrait learn skipped: %s', type(error).__name__)
+                if not cancel_event.is_set():
+                    logger.warning('background portrait learn skipped: %s', type(error).__name__)
             finally:
-                entry.learn_task = None
+                if entry.learn_task is task:
+                    entry.learn_task = None
 
         task = asyncio.create_task(run_learn())
         entry.learn_task = task

@@ -16,11 +16,13 @@ DEFAULT_EMBEDDING_REPO = 'Xenova/multilingual-e5-small'
 DEFAULT_MIRROR_ENDPOINT = 'https://hf-mirror.com'
 
 
+# 将归一化后的一维向量序列化为小端序 float32 字节流，紧凑存入 MySQL MEDIUMBLOB。
 def pack_vector(vector: np.ndarray) -> tuple[bytes, int]:
     arr = np.asarray(vector, dtype='<f4').reshape(-1)
     return arr.tobytes(), int(arr.shape[0])
 
 
+# 从字节流还原向量，校验维度与数值合法性，损坏数据直接忽略以免污染打分。
 def unpack_vector(blob: bytes | memoryview | None, dim: int | None) -> np.ndarray | None:
     if blob is None or not isinstance(dim, int) or dim <= 0:
         return None
@@ -106,6 +108,7 @@ def download_embedding_model_files(
 
                 if stop_event is not None and stop_event.is_set():
                     raise InterruptedError('embedding download cancelled on shutdown')
+                # 先写 .part 临时文件再原子替换，避免进程中断或断网留下半截损坏模型。
                 os.replace(tok_part, tok_dest)
                 os.replace(onnx_part, onnx_dest)
                 return onnx_dest, tok_dest
@@ -212,6 +215,7 @@ class LocalEmbeddingModel:
             if self._load_failed:
                 return False
             if not self.has_model_files():
+                # 文件尚未下载完成时不置位 _load_failed，待后台下载落盘后下一轮自动加载。
                 if not self._logged_missing:
                     self._logged_missing = True
                     log_event('embedding_model_unavailable', system=True, reason='files_missing')
@@ -225,7 +229,14 @@ class LocalEmbeddingModel:
 
                 tokenizer = Tokenizer.from_file(str(tokenizer_file))
                 tokenizer.enable_truncation(max_length=self.config.max_length)
-                tokenizer.enable_padding(pad_id=0, pad_token='<pad>')
+                # 不同底模的 pad token ID 不同（如 XLM-RoBERTa 的 <pad> 为 1，<s> 为 0），按词表动态解析。
+                for pad_token in ('<pad>', '[PAD]', '<|endoftext|>'):
+                    pad_id = tokenizer.token_to_id(pad_token)
+                    if pad_id is not None:
+                        tokenizer.enable_padding(pad_id=pad_id, pad_token=pad_token)
+                        break
+                else:
+                    tokenizer.enable_padding(pad_id=0, pad_token='<pad>')
 
                 options = ort.SessionOptions()
                 options.intra_op_num_threads = 2
@@ -271,6 +282,7 @@ class LocalEmbeddingModel:
             outputs = self._session.run(None, feeds)
             primary = np.asarray(outputs[0], dtype=np.float32)
             if primary.ndim == 3:
+                # 使用 attention_mask 做掩码均值池化，排除末尾 padding token 对句向量的干扰。
                 mask = attention_mask[:, :, None].astype(np.float32)
                 summed = np.sum(primary * mask, axis=1)
                 counts = np.clip(np.sum(mask, axis=1), 1e-9, None)
@@ -280,6 +292,7 @@ class LocalEmbeddingModel:
             else:
                 return None
 
+            # 预先做 L2 归一化，后续召回时直接用点积即可得到余弦相似度。
             norms = np.linalg.norm(pooled, axis=1, keepdims=True)
             normalized = pooled / np.clip(norms, 1e-12, None)
             return [row.astype('<f4', copy=False) for row in normalized]

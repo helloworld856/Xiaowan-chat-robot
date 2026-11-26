@@ -68,6 +68,7 @@ test('useChat cancels in-flight sends back to draft/quote, regenerates latest ro
             historyAPI: async () => ({history_messages: []}),
         },
         '../ts/global_config.ts': {inputLimits: {max_message_chars: 8000}},
+        '../ts/chat_format.ts': chatFormat,
     });
 
     const alerts = [];

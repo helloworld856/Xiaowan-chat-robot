@@ -41,6 +41,7 @@ async function harness({chatAPI, historyAPI, maxMessageChars = 8000} = {}) {
                 getRequestGeneration: () => generation
             };
             if (name === '../ts/global_config.ts') return {inputLimits: {max_message_chars: maxMessageChars}};
+            if (name === '../ts/chat_format.ts') return chatFormat;
             throw new Error('Unexpected dependency: ' + name);
         },
         performance: {now: () => 1, clearMeasures() {}, measure: name => timings.push(name)},

@@ -5,11 +5,12 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from logging import WARNING
+from threading import Event
 from time import time
 
 import numpy as np
 
-from app.account_logging import log_event, logger
+from app.account_logging import log_event
 from app.chat.memory import format_history_dialogue
 from app.llm.embeddings import LocalEmbeddingModel, cosine_similarity, pack_vector, unpack_vector
 from app.llm.output_parser import model_text, parse_model_json
@@ -19,6 +20,7 @@ from app.system_config import MemoryConfig
 VALID_STATUSES = frozenset(('ongoing', 'resolved', 'fact'))
 _WORD_RE = re.compile(r'[a-z0-9+#._-]{2,}')
 _CJK_RE = re.compile(r'[\u4e00-\u9fff]{2,}')
+_CJK_CHAR_RE = re.compile(r'[\u4e00-\u9fff]')
 
 
 @dataclass
@@ -36,6 +38,7 @@ class EpisodeRecord:
     updated_at: int
 
 
+# 提取英文/数字词元与中文双字切分（bigram），无需额外分词库即可兼顾中英专有名词匹配。
 def _extract_tokens(text: str) -> set[str]:
     lowered = text.lower()
     tokens = set(_WORD_RE.findall(lowered))
@@ -67,10 +70,13 @@ def _keyword_overlap_score(query_text: str, query_tokens: set[str], episode: Epi
     return min(1.0, overlap)
 
 
-def _calibrate_semantic(raw_cosine: float, uses_e5_prefix: bool) -> float:
+def _calibrate_semantic(raw_cosine: float, *, uses_e5_prefix: bool, cross_script: bool) -> float:
     if uses_e5_prefix:
-        # E5 多语向量空间各向异性较强，无关文本余弦约在 0.72~0.76，以 0.75 为基线线性拉伸至 [0, 1]。
-        return max(0.0, min(1.0, (raw_cosine - 0.75) / 0.25))
+        # multilingual-e5-small 同语种无关句余弦约在 0.80~0.85，中英跨语种无关句约在 0.72~0.75；
+        # 按是否跨语种分别扣除各向异性基线后再线性拉伸到 [0, 1]，避免日常闲聊误召回无关卡片。
+        baseline = 0.74 if cross_script else 0.83
+        span = 0.14
+        return max(0.0, min(1.0, (raw_cosine - baseline) / span))
     return max(0.0, min(1.0, raw_cosine))
 
 
@@ -141,6 +147,7 @@ class EpisodeMemoryStore:
             return '无'
 
         if exclude_from_round is not None:
+            # 仍在短期原话窗口内的非 ongoing 记录无需重复塞入长期记忆；ongoing 事件保留以便提示状态。
             episodes = [
                 ep for ep in episodes
                 if ep.source_round_end is None or ep.source_round_end < exclude_from_round or ep.status == 'ongoing'
@@ -169,6 +176,7 @@ class EpisodeMemoryStore:
         if relevant_limit > 0 and remaining and query_text.strip():
             query_vec = self.embedder.encode_query(query_text) if self.config.embedding.enabled else None
             uses_e5 = self._uses_e5_prefix()
+            query_has_cjk = bool(_CJK_CHAR_RE.search(query_text))
             query_tokens = _extract_tokens(query_text)
 
             w_sem = self.config.embedding.semantic_weight
@@ -184,10 +192,16 @@ class EpisodeMemoryStore:
                 rec_score = 0.5 * recency_decay + 0.5 * importance_norm
 
                 if query_vec is not None and ep.embedding is not None and ep.embedding.shape == query_vec.shape:
-                    sem_score = _calibrate_semantic(cosine_similarity(query_vec, ep.embedding), uses_e5)
+                    ep_has_cjk = bool(_CJK_CHAR_RE.search(ep.summary))
+                    sem_score = _calibrate_semantic(
+                        cosine_similarity(query_vec, ep.embedding),
+                        uses_e5_prefix=uses_e5,
+                        cross_script=(query_has_cjk != ep_has_cjk),
+                    )
                     total_w = w_sem + w_kw + w_rec
                     score = (w_sem * sem_score + w_kw * kw_score + w_rec * rec_score) / total_w
-                    if sem_score < 0.25 and kw_score < 0.2:
+                    # 语义和关键词都偏弱时直接过滤，防止仅靠时间新或重要度高混入无关事件。
+                    if sem_score < 0.35 and kw_score < 0.2:
                         continue
                 else:
                     # 降级模式：无可用向量时必须至少命中一定关键词，不能仅凭时间新就混入无关记忆。
@@ -235,11 +249,14 @@ class EpisodeMemoryStore:
             for row in rows
         ]
 
-    def extract_and_save_batch(self, user_id: int, summary_agent, max_eligible_round: int) -> int:
-        """Extract structured episodes from one batch of eligible older turns without deleting history."""
+    def extract_and_save_batch(self, user_id: int, summary_agent, max_eligible_round: int, *,
+                               cancel_event: Event | None = None) -> bool:
+        """提炼一批已滑出短期窗口的对话并推进水位（不删原文）；水位成功推进时返回 True。"""
+        if cancel_event is not None and cancel_event.is_set():
+            return False
         batch = self.unextracted_batch(user_id, max_eligible_round)
         if not batch:
-            return 0
+            return False
 
         round_start = batch[0]['conversation_round']
         round_end = batch[-1]['conversation_round']
@@ -264,7 +281,7 @@ class EpisodeMemoryStore:
 1. 只记录具体发生的事、计划/约定、重要决定、阶段性烦恼或需要后续记挂的进展；纯寒暄、打招呼、表情、日常废话不要记（可返回空列表）。
 2. 已归入「用户画像」的长期静态属性（如固定称呼、常住城市）不必重复记，除非是一次具体事件。
 3. summary 用 1 到 2 句自然中文写清事实，保留原文关键英文词（如 offer、React、IELTS）。
-4. keywords 给 2 到 6 个检索关键词，**同时包含中文关键词与原文出现的英文关键词**，方便中英跨语言检索。
+4. keywords 给 2 到 6 个检索关键词，**同时包含中文核心词与对应的英文检索词**（即使原文全中文，也补 1 到 2 个对应英文词），方便中英跨语言检索。
 5. status 取值："ongoing"（尚未结束、后续值得记挂）、"resolved"（已出结果/已结束）或 "fact"（一般过往事件）。
 6. importance 取 1 到 5 的整数（5 最重要）。
 7. 如果本批对话让上面某条「进行中的旧事件」有了结果或已结束，在 updates 里给出它的 id、更新后的 summary 和 status（通常为 "resolved"），不要重复新建同一件事。
@@ -282,7 +299,10 @@ class EpisodeMemoryStore:
         except Exception as error:
             log_event('episode_extraction', level=WARNING, outcome='failed', error=type(error).__name__,
                       rounds=len(batch))
-            return 0
+            return False
+
+        if cancel_event is not None and cancel_event.is_set():
+            return False
 
         raw_episodes = parsed.get('episodes') if isinstance(parsed.get('episodes'), list) else []
         raw_updates = parsed.get('updates') if isinstance(parsed.get('updates'), list) else []
@@ -336,6 +356,8 @@ class EpisodeMemoryStore:
         update_texts = [upd['summary'] for upd in clean_updates if upd['summary']]
         update_vectors = self.embedder.encode_passages(update_texts) if update_texts else []
 
+        if cancel_event is not None and cancel_event.is_set():
+            return False
         now_ms = int(time() * 1000)
         try:
             with self._connection() as db:
@@ -375,20 +397,23 @@ class EpisodeMemoryStore:
                              ep['status'], ep['importance'], round_start, round_end, blob, dim, now_ms, now_ms),
                         )
 
+                    # 推进归档水位但不删除 history_messages 原文；整批纯寒暄无新卡片时也会推进水位避免重复扫描。
                     cursor.execute(
                         'INSERT INTO memory_watermarks (user_id, last_extracted_round) VALUES (%s, %s) '
                         'ON DUPLICATE KEY UPDATE last_extracted_round = %s',
                         (user_id, round_end, round_end),
                     )
                     self._prune_excess(cursor, user_id)
+                if cancel_event is not None and cancel_event.is_set():
+                    return False
                 db.commit()
         except Exception as error:
             log_event('episode_extraction', level=WARNING, outcome='db_failed', error=type(error).__name__)
-            return 0
+            return False
 
         log_event('episode_extraction', outcome='succeeded', added=len(clean_episodes),
                   updated=len(clean_updates), through_round=round_end)
-        return len(clean_episodes) + len(clean_updates)
+        return True
 
     def _prune_excess(self, cursor, user_id: int) -> None:
         cursor.execute('SELECT COUNT(*) FROM memory_episodes WHERE user_id = %s', (user_id,))

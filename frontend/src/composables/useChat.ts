@@ -4,13 +4,12 @@ import {
     cancelChatAPI, chatAPI, deleteHistoryRoundAPI, getRequestGeneration,
     historyAPI, regenerateChatAPI
 } from '../ts/api.ts';
+import {composeQuotedMessage, parseQuotedMessage} from '../ts/chat_format.ts';
+import type {QuoteTarget as QuoteDraft} from '../ts/chat_format.ts';
 import {inputLimits} from '../ts/global_config.ts';
 import type {ChatResponse, ConversationItem} from '../ts/global_config.ts';
 
-export interface QuoteDraft {
-    speaker: string;
-    text: string;
-}
+export type {QuoteDraft};
 
 export interface ChatTurn {
     kind: 'turn';
@@ -47,24 +46,6 @@ interface ActiveTurnControl {
 
 const firstReplyMetric = 'xiaowan.chat.first-reply';
 const firstReplyDelayMs = 700;
-const maxQuoteSnippetChars = 240;
-const quoteHeaderPattern = /^【引用 ([^：\r\n]{1,40})：([\s\S]+?)】\r?\n([\s\S]+)$/;
-
-function unwrapQuote(raw: string): {quote: QuoteDraft | null; body: string} {
-    const match = quoteHeaderPattern.exec(raw);
-    return match ? {quote: {speaker: match[1], text: match[2]}, body: match[3]} : {quote: null, body: raw};
-}
-
-function buildQuotedInput(body: string, quote: QuoteDraft | null): string {
-    if (!quote) return body;
-    const speaker = quote.speaker.replace(/[【】：\r\n]/g, '').trim() || '消息';
-    const compact = unwrapQuote(quote.text).body.replace(/\r\n/g, '\n').trim().replace(/\s*\n+\s*/g, ' ');
-    const chars = [...compact];
-    const snippet = (chars.length > maxQuoteSnippetChars
-        ? chars.slice(0, maxQuoteSnippetChars).join('') + '…'
-        : compact).replace(/】/g, '﹞');
-    return snippet ? `【引用 ${speaker}：${snippet}】\n${body}` : body;
-}
 
 export function useChat(options: ChatOptions) {
     const draft = ref('');
@@ -99,7 +80,7 @@ export function useChat(options: ChatOptions) {
     }
 
     function setQuote(speaker: string, text: string) {
-        const cleaned = unwrapQuote(text).body.trim();
+        const cleaned = parseQuotedMessage(text).body.trim();
         if (!cleaned) return;
         quote.value = {speaker, text: cleaned};
     }
@@ -230,8 +211,9 @@ export function useChat(options: ChatOptions) {
         if (isCurrent() && !data.saved) options.showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
     }
 
+    // 用户主动停止发送时，拆回原引用条与输入草稿，不保留半截气泡。
     function restoreCancelledDraft(rawUserText: string) {
-        const parsed = unwrapQuote(rawUserText);
+        const parsed = parseQuotedMessage(rawUserText);
         if (parsed.quote && !quote.value) quote.value = parsed.quote;
         if (!draft.value.trim()) draft.value = parsed.body;
         else if (draft.value !== parsed.body) draft.value = `${parsed.body}\n${draft.value}`;
@@ -340,7 +322,7 @@ export function useChat(options: ChatOptions) {
         if (busy.value || !options.canSend()) return;
         const body = draft.value.trim();
         if (!body) return;
-        const composed = buildQuotedInput(body, quote.value);
+        const composed = composeQuotedMessage(body, quote.value);
         const limit = inputLimits.max_message_chars;
         if (composed.length > limit && [...composed].length > limit) {
             options.showAlert(quote.value ? `聊天消息（含引用内容）最多 ${limit} 个字符` : `聊天消息最多 ${limit} 个字符`);

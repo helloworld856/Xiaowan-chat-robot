@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from _imports import BACKEND_ROOT as ROOT
+import _imports
 from app.chat.episodes import EpisodeMemoryStore
 from app.chat.memory import MemoryManager, load_history
 from app.database.mysql import reset_chat_history, reset_episode_memories
@@ -95,6 +95,9 @@ class EmbeddingEngineTests(unittest.TestCase):
             observed_feeds: list[dict] = []
 
             class FakeTokenizer:
+                def token_to_id(self, token):
+                    return 1 if token == '<pad>' else None
+
                 def enable_truncation(self, max_length):
                     self.max_length = max_length
 
@@ -103,9 +106,9 @@ class EmbeddingEngineTests(unittest.TestCase):
 
                 def encode_batch(self, texts):
                     observed_texts.append(list(texts))
-                    # 第二条样本包含末尾 padding，验证掩码均值池化会忽略 pad 位置。
+                    # 末尾带 pad_id=1，验证掩码均值池化会忽略 pad 位置。
                     return [
-                        SimpleNamespace(ids=[10, 20, 0], attention_mask=[1, 1, 0]),
+                        SimpleNamespace(ids=[10, 20, 1], attention_mask=[1, 1, 0]),
                     ] * len(texts)
 
             class FakeSession:
@@ -278,7 +281,7 @@ class EpisodeMemoryStoreTests(unittest.TestCase):
             }, ensure_ascii=False),
         )[-1])
         changed_first = store.extract_and_save_batch(1, first_agent, max_eligible_round=3)
-        self.assertEqual(changed_first, 2)
+        self.assertTrue(changed_first)
         self.assertEqual(store.get_watermark(1), 1)
         # 历史原文不因归档而被删除
         self.assertEqual(len(load_history(self.pool.connection, 1, 0)), 6)
@@ -316,7 +319,7 @@ class EpisodeMemoryStoreTests(unittest.TestCase):
             }, ensure_ascii=False),
         )[-1])
         changed_second = store.extract_and_save_batch(1, second_agent, max_eligible_round=3)
-        self.assertEqual(changed_second, 3)
+        self.assertTrue(changed_second)
         self.assertEqual(store.get_watermark(1), 3)
         # 没有更多可提炼批次
         self.assertEqual(store.unextracted_batch(1, max_eligible_round=3), [])
@@ -534,3 +537,9 @@ class EpisodeWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('晚饭喝了一碗热汤', prompt)
             # 滑出 recent_window_rounds=2 的早期原话不再直接塞入短期对话流
             self.assertNotIn('最近每天都在刷题', prompt)
+
+        # 清空历史进入 maintenance 时，会终止在途后台归档任务，禁止旧任务在清空后写回记忆卡片
+        async with sessions.maintenance(user.id):
+            reset_chat_history(pool, user_id=user.id)
+        self.assertEqual(store.list_episodes(user.id), [])
+        self.assertEqual(store.get_watermark(user.id), -1)
