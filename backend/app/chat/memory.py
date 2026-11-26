@@ -23,6 +23,18 @@ def prompt_history(rows: list[dict]) -> list[dict]:
     ]
 
 
+def format_history_dialogue(rows: list[dict], *, bot_name: str = '小晚') -> str:
+    """Render committed history as natural chat lines instead of Python dict repr."""
+    if not rows:
+        return '无'
+    blocks = []
+    for row in rows:
+        lines = [f"对方：{row['user']}"]
+        lines.extend(f"{bot_name}：{part}" for part in row['assistant'])
+        blocks.append('\n'.join(lines))
+    return '\n\n'.join(blocks)
+
+
 def load_history(connection, user_id: int, k: int, front: bool = True):
     """Read committed history for one authenticated account."""
     with connection() as db, db.cursor() as cursor:
@@ -175,8 +187,7 @@ class MemoryManager:
 {self.abstract_cache or '无'}
 
 【这次归入摘要的对话，按时间顺序】
-user 是用户，assistant 是{persona.BOT_NAME}。
-{prompt_history(older)}
+{format_history_dialogue(older, bot_name=persona.BOT_NAME)}
 
 请合并已有摘要和这批对话，输出完整的更新摘要。两部分都没有值得保留的信息时，写「暂无需要延续的对话信息。」"""
             result = summary_agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})

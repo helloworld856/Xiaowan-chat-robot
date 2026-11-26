@@ -2,9 +2,10 @@ import re
 from time import time
 
 from app.account_logging import logger
-from app.chat.memory import MemoryManager, prompt_history
+from app.chat.memory import MemoryManager, format_history_dialogue
 from app.chat.progress import ChatCancelled, check_cancelled
 from app.chat.state import AIChatState
+from app.llm.persona import persona
 from app.llm.token_counter import count_tokens
 from app.llm.output_parser import model_text, parse_model_json, replace_invalid_unicode, safe_parse_json
 from app.system_config import ChatConfig
@@ -12,7 +13,7 @@ from app.prompt_loader import load_prompt
 
 
 DEFAULT_COMPRESSION_TOKENS = ChatConfig().history_compression_tokens
-DEFAULT_ANALYSIS = {'intent': '一般对话', 'emotion': '无情感波动', 'answer': '日常互动'}
+DEFAULT_ANALYSIS = {'intent': '一般对话', 'emotion': '不确定', 'pace': '简短', 'answer': '日常互动'}
 DEFAULT_REPLY = '嗯...我刚刚有点没组织好语言，你再说一遍嘛'
 
 
@@ -35,9 +36,9 @@ def get_total_tokens(message) -> int:
     return 0
 
 
-def _context_history(state: AIChatState, memorier: MemoryManager) -> list[dict]:
+def _context_history(state: AIChatState, memorier: MemoryManager) -> str:
     rows = memorier.history_cache[:-1] if state.get('regenerate_round') is not None else memorier.history_cache
-    return prompt_history(rows)
+    return format_history_dialogue(rows, bot_name=persona.BOT_NAME)
 
 
 # 基础结点定义
@@ -174,10 +175,11 @@ def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
         answer_prompt = load_prompt(
             "answer_prompt",
             history=_context_history(state, memorier),
-            abstract=memorier.abstract_cache,
+            abstract=memorier.abstract_cache or '无',
             user_input=user_input,
             intent=state['analysis_result'].get('intent', '一般对话'),
-            emotion=state['analysis_result'].get('emotion', '无情绪波动'),
+            emotion=state['analysis_result'].get('emotion', '不确定'),
+            pace=state['analysis_result'].get('pace', '简短'),
             answer=state['analysis_result'].get('answer', '日常互动')
         )
 

@@ -62,7 +62,7 @@ class ModelOutputTests(unittest.TestCase):
         prompt = agent.invoke.call_args.args[0]['messages'][0]['content']
         self.assertRegex(prompt, r'1\s*至\s*5\s*条')
         schema_example = json.loads(prompt.splitlines()[-1])
-        self.assertEqual(set(schema_example), {'reply', 'inner monologue', 'emotion', 'action'})
+        self.assertEqual(set(schema_example), {'reply'})
         self.assertIsInstance(schema_example['reply'], list)
         self.assertTrue(schema_example['reply'])
         self.assertTrue(all(isinstance(part, str) and part.strip() for part in schema_example['reply']))
@@ -98,3 +98,40 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(result['ai_response'], [nodes.DEFAULT_REPLY])
         self.assertIn('empty_visible_text', logs.output[0])
         self.assertNotIn('未结束的推理', logs.output[0])
+
+    def test_history_is_formatted_as_natural_dialogue_and_analysis_carries_pace(self):
+        from app.chat.memory import format_history_dialogue
+        from app.chat.state import create_initial_state
+
+        rendered = format_history_dialogue([
+            {'conversation_round': 0, 'user': '今天下雨了', 'assistant': ['我也喜欢雨天', '出门记得带伞'], 'created_at': 1764150000000},
+        ], bot_name='小晚')
+        self.assertEqual(rendered, '对方：今天下雨了\n小晚：我也喜欢雨天\n小晚：出门记得带伞')
+        self.assertNotIn('conversation_round', rendered)
+        self.assertEqual(format_history_dialogue([]), '无')
+
+        state = create_initial_state()
+        state['user_input'] = '好累啊'
+        memory = SimpleNamespace(
+            history_cache=[{'conversation_round': 0, 'user': '刚下班', 'assistant': ['辛苦啦']}],
+            abstract_cache='',
+            has_older_history=False,
+            next_round=1,
+            refresh_if_needed=lambda: None,
+        )
+        analysis_agent = Mock()
+        analysis_agent.invoke.return_value = {'messages': [SimpleNamespace(
+            content='{"intent":"倾诉疲惫","emotion":"累","pace":"展开","answer":"先接住对方的累"}',
+            usage_metadata={'total_tokens': 5},
+        )]}
+        reply_agent = Mock()
+        reply_agent.invoke.return_value = {'messages': [SimpleNamespace(
+            content='{"reply":["今天忙坏了吧","回去赶紧歇会"]}',
+            usage_metadata={'total_tokens': 6},
+        )]}
+        analyzed = nodes.analysis(nodes.start_node(state, memory, ()), memory, (analysis_agent, None, reply_agent))
+        self.assertEqual(analyzed['analysis_result']['pace'], '展开')
+        nodes.generate(analyzed, memory, (analysis_agent, None, reply_agent))
+        answer_prompt = reply_agent.invoke.call_args.args[0]['messages'][0]['content']
+        self.assertIn('建议篇幅：展开', answer_prompt)
+        self.assertIn('对方：刚下班\n小晚：辛苦啦', answer_prompt)
