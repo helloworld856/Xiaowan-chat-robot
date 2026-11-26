@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, codex/backend-updates, codex/frontend-framework]
+    branches: [main, codex/backend-updates, codex/frontend-framework, feat/chat-experience]
   pull_request:
 
 concurrency:

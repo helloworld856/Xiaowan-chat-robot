@@ -401,8 +401,7 @@ export function useChat(options: ChatOptions) {
 
     async function regenerateTurn(turn: ChatTurn) {
         if (busy.value || !options.canSend()) return;
-        const turns = entries.value.filter((entry): entry is ChatTurn => entry.kind === 'turn');
-        if (turns[turns.length - 1] !== turn) {
+        if (entries.value[entries.value.length - 1] !== turn) {
             options.showAlert('只能重新生成最新一轮对话');
             return;
         }

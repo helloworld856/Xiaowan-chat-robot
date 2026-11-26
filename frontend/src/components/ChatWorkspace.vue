@@ -64,11 +64,8 @@ function userBubbleId(id: string) { return `chat-user-${id}`; }
 function replyBubbleId(id: string, index: number) { return `chat-reply-${id}-${index}`; }
 
 const latestTurnId = computed(() => {
-    for (let index = entries.value.length - 1; index >= 0; index--) {
-        const entry = entries.value[index];
-        if (entry.kind === 'turn') return entry.id;
-    }
-    return '';
+    const last = entries.value[entries.value.length - 1];
+    return last?.kind === 'turn' ? last.id : '';
 });
 
 const timeline = computed(() => {

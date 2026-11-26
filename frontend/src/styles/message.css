@@ -109,7 +109,7 @@
     font-weight: 600;
 }
 
-/* 气泡快捷操作栏（悬浮不撑高消息流） */
+/* 气泡快捷操作栏（悬浮不撑高消息流，::before 桥接气泡与工具栏间隙避免移入时丢悬停） */
 .bubble-actions {
     position: absolute;
     top: calc(100% + 0.18rem);
@@ -126,6 +126,13 @@
     transition: opacity 0.15s ease;
     z-index: 4;
     white-space: nowrap;
+}
+
+.bubble-actions::before {
+    content: '';
+    position: absolute;
+    inset: -0.3rem 0 auto;
+    height: 0.3rem;
 }
 
 .user-bubble-actions { right: 0; }

@@ -94,6 +94,8 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
     except ChatCancelled:
         raise
     except Exception as error:
+        if type(error).__name__ == 'ChatNotStarted':
+            raise
         logger.error('start node failed: %s', type(error).__name__)
         raise
 
