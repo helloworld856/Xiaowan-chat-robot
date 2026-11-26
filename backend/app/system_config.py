@@ -42,11 +42,92 @@ class ChatConfig(_ConfigSection):
     queue_size: int = Field(default=8, ge=1, description='等待处理的聊天请求名额。')
     queue_timeout: int = Field(default=2, ge=1, description='聊天排队最长等待时间，单位为秒。')
     max_message_chars: int = Field(default=8000, ge=1, description='单条用户消息最多允许的字符数。')
-    history_compression_tokens: int = Field(default=100000, ge=1, description='历史对话估算 token 数超过该值时触发摘要压缩。')
+    history_compression_tokens: int = Field(default=100000, ge=1, description='历史兼容保留项；长期记忆现由 memory 配置段控制。')
     clear_history_on_startup: bool = Field(default=True, description='设为 true 时，后端启动会清空所有账号的聊天历史和摘要。')
     clear_learned_portrait_on_startup: bool = Field(
         default=True,
         description='设为 true 时，后端启动会清空所有账号用户画像中自动记录的印象（保留手动填写的资料）。',
+    )
+
+
+class EmbeddingMemoryConfig(_ConfigSection):
+    enabled: bool = Field(
+        default=True,
+        description='设为 true 时启用本地 ONNX 向量语义召回；缺少模型文件时自动降级为关键词检索。',
+    )
+    model_dir: str = Field(
+        default='models/multilingual-e5-small',
+        min_length=1,
+        description='本地 ONNX 向量模型目录（相对 backend/ 或绝对路径），需包含 model.onnx 与 tokenizer.json。',
+    )
+    query_prefix: str = Field(
+        default='query: ',
+        description='查询文本编码前拼接的前缀；E5 系列模型使用 "query: "，不需要前缀的模型填 ""。',
+    )
+    passage_prefix: str = Field(
+        default='passage: ',
+        description='记忆文本入库编码前拼接的前缀；E5 系列模型使用 "passage: "，不需要前缀的模型填 ""。',
+    )
+    max_length: int = Field(
+        default=256, ge=32, le=2048,
+        description='单条文本参与向量编码的最大 token 数。',
+    )
+    semantic_weight: float = Field(
+        default=0.65, ge=0.0, le=1.0,
+        description='混合召回中向量语义相似度的权重。',
+    )
+    keyword_weight: float = Field(
+        default=0.2, ge=0.0, le=1.0,
+        description='混合召回中中英文关键词重合度的权重。',
+    )
+    recency_weight: float = Field(
+        default=0.15, ge=0.0, le=1.0,
+        description='混合召回中时间新鲜度与重要度的权重。',
+    )
+
+    @model_validator(mode='after')
+    def check_weights(self):
+        if self.semantic_weight + self.keyword_weight + self.recency_weight <= 0:
+            raise ValueError('记忆混合召回的三项权重之和须大于 0')
+        return self
+
+
+class MemoryConfig(_ConfigSection):
+    recent_window_rounds: int = Field(
+        default=24, ge=1, le=256,
+        description='每次聊天直接送入模型的最近对话轮数；更早原文保留在数据库不再删除。',
+    )
+    extract_batch_rounds: int = Field(
+        default=8, ge=1, le=64,
+        description='后台每次提炼情景事件记忆的未归档对话轮数。',
+    )
+    max_episodes_per_account: int = Field(
+        default=500, ge=10, le=10000,
+        description='每个账号最多保留的情景事件记忆条数，超出时优先清理最早的已完结低重要度记录。',
+    )
+    ongoing_recall_limit: int = Field(
+        default=3, ge=0, le=20,
+        description='每轮对话固定带入的「近期进行中」事件上限。',
+    )
+    ongoing_window_days: int = Field(
+        default=14, ge=1, le=365,
+        description='「近期进行中」事件默认关注的天数范围。',
+    )
+    relevant_recall_limit: int = Field(
+        default=4, ge=0, le=20,
+        description='每轮按相关性混合召回的历史事件上限。',
+    )
+    min_relevance_score: float = Field(
+        default=0.35, ge=0.0, le=1.0,
+        description='相关性召回的最低综合得分（0 到 1），低于此值的无关记忆不注入提示词。',
+    )
+    clear_episodes_on_startup: bool = Field(
+        default=True,
+        description='设为 true 时，后端启动会清空所有账号的情景事件记忆与归档水位。',
+    )
+    embedding: EmbeddingMemoryConfig = Field(
+        default_factory=EmbeddingMemoryConfig,
+        description='本地轻量多语向量模型与混合召回权重设置。',
     )
 
 
@@ -108,6 +189,7 @@ class SystemConfig(_ConfigSection):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, description='MySQL 连接设置。密码由 .env 的 MYSQL_PASSWORD 提供。')
     server: ServerConfig = Field(default_factory=ServerConfig, description='小晚后端监听设置。')
     chat: ChatConfig = Field(default_factory=ChatConfig, description='聊天队列、输入与历史设置。')
+    memory: MemoryConfig = Field(default_factory=MemoryConfig, description='长期情景事件记忆、召回策略与本地向量模型设置。')
     models: ModelCatalog = Field(default_factory=default_model_catalog, description='厂商默认地址、协议和可选模型。')
     auth: AuthConfig = Field(default_factory=AuthConfig, description='登录会话、密码规则与认证限流。')
     profile: ProfileConfig = Field(default_factory=ProfileConfig, description='个人资料的校验规则。')

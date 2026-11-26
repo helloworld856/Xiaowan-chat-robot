@@ -15,6 +15,7 @@ from typing import Any
 from app.account_logging import discard_logs_after, log_event, logger
 from app.accounts.portrait import UserPortraitStore, format_portrait_for_prompt, learn_portrait_from_turn
 from app.accounts.repository import User
+from app.chat.episodes import EpisodeMemoryStore
 from app.chat.memory import MemoryManager
 from app.chat.progress import ChatCancelled, chat_cancel_context
 from app.chat.state import AIChatState, create_initial_state
@@ -51,6 +52,7 @@ class AccountChat:
     runtime: ChatRuntime | None = None
     worker: asyncio.Task | None = None
     learn_task: asyncio.Task | None = None
+    episode_task: asyncio.Task | None = None
     cancelling_worker: bool = False
     turns: dict[str, TurnHandle] = field(default_factory=dict)
     cancelled_turns: deque[str] = field(default_factory=lambda: deque(maxlen=16))
@@ -60,6 +62,7 @@ class ChatSessions:
     def __init__(self, connection, *, personal_models: PersonalModelStore | None = None,
                  admin_model: AdminModelRuntime | None = None,
                  portraits: UserPortraitStore | None = None,
+                 episodes: EpisodeMemoryStore | None = None,
                  graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
         if max_running < 1 or max_waiting < 0 or not wait_timeout > 0:
             raise ValueError('invalid chat capacity')
@@ -67,6 +70,7 @@ class ChatSessions:
         self._personal_models = personal_models
         self._admin_model = admin_model
         self._portraits = portraits
+        self._episodes = episodes
         self._graph_factory = graph_factory
         self._users: dict[int, AccountChat] = {}
         self._slots = asyncio.BoundedSemaphore(max_running)
@@ -223,10 +227,41 @@ class ChatSessions:
         result = await asyncio.shield(work)
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
         if (regenerate_round is None and isinstance(result, dict) and result.get('saved')
-                and self._portraits is not None and not self._closing
-                and len(text.strip()) >= 5 and entry.learn_task is None):
-            self._schedule_portrait_learning(entry, user, text, list(result.get('ai_response') or ()))
+                and not self._closing):
+            if self._portraits is not None and len(text.strip()) >= 5 and entry.learn_task is None:
+                self._schedule_portrait_learning(entry, user, text, list(result.get('ai_response') or ()))
+            if self._episodes is not None and entry.episode_task is None:
+                saved_round = (result.get('message') or {}).get('conversation_round')
+                if isinstance(saved_round, int):
+                    max_eligible = saved_round - self._episodes.config.recent_window_rounds
+                    if max_eligible >= 0:
+                        self._schedule_episode_extraction(entry, user, max_eligible)
         return result
+
+    def _schedule_episode_extraction(self, entry: AccountChat, user: User, max_eligible_round: int) -> None:
+        async def run_extract():
+            try:
+                agents = self._agents_for(user)
+                _, summary_agent, _ = agents
+                loop = asyncio.get_running_loop()
+                # 单次后台最多推进两批，逐步消化积压且不长期占用工作线程。
+                for _ in range(2):
+                    if self._closing:
+                        break
+                    changed = await loop.run_in_executor(
+                        self._executor, copy_context().run,
+                        self._episodes.extract_and_save_batch, user.id, summary_agent, max_eligible_round,
+                    )
+                    if not changed and not self._episodes.unextracted_batch(user.id, max_eligible_round):
+                        break
+            except Exception as error:
+                logger.warning('background episode extraction skipped: %s', type(error).__name__)
+            finally:
+                entry.episode_task = None
+
+        task = asyncio.create_task(run_extract())
+        entry.episode_task = task
+        task.add_done_callback(self._consume_error)
 
     def _schedule_portrait_learning(self, entry: AccountChat, user: User, text: str, replies: list[str]) -> None:
         async def run_learn():
@@ -258,7 +293,7 @@ class ChatSessions:
         self._closing = True
         tasks = [
             task for entry in self._users.values()
-            for task in (entry.worker, entry.learn_task) if task is not None
+            for task in (entry.worker, entry.learn_task, entry.episode_task) if task is not None
         ]
         await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
         self._executor.shutdown()

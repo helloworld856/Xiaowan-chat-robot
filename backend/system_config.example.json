@@ -30,12 +30,50 @@
     "queue_timeout": 2,
     // 单条用户消息最多允许的字符数。
     "max_message_chars": 8000,
-    // 历史对话估算 token 数超过该值时触发摘要压缩。
+    // 历史兼容保留项；长期记忆现由 memory 配置段控制。
     "history_compression_tokens": 100000,
     // 设为 true 时，后端启动会清空所有账号的聊天历史和摘要。
     "clear_history_on_startup": true,
     // 设为 true 时，后端启动会清空所有账号用户画像中自动记录的印象（保留手动填写的资料）。
     "clear_learned_portrait_on_startup": true
+  },
+  // 长期情景事件记忆、召回策略与本地向量模型设置。
+  "memory": {
+    // 每次聊天直接送入模型的最近对话轮数；更早原文保留在数据库不再删除。
+    "recent_window_rounds": 24,
+    // 后台每次提炼情景事件记忆的未归档对话轮数。
+    "extract_batch_rounds": 8,
+    // 每个账号最多保留的情景事件记忆条数，超出时优先清理最早的已完结低重要度记录。
+    "max_episodes_per_account": 500,
+    // 每轮对话固定带入的「近期进行中」事件上限。
+    "ongoing_recall_limit": 3,
+    // 「近期进行中」事件默认关注的天数范围。
+    "ongoing_window_days": 14,
+    // 每轮按相关性混合召回的历史事件上限。
+    "relevant_recall_limit": 4,
+    // 相关性召回的最低综合得分（0 到 1），低于此值的无关记忆不注入提示词。
+    "min_relevance_score": 0.35,
+    // 设为 true 时，后端启动会清空所有账号的情景事件记忆与归档水位。
+    "clear_episodes_on_startup": true,
+    // 本地轻量多语向量模型与混合召回权重设置。
+    "embedding": {
+      // 设为 true 时启用本地 ONNX 向量语义召回；缺少模型文件时自动降级为关键词检索。
+      "enabled": true,
+      // 本地 ONNX 向量模型目录（相对 backend/ 或绝对路径），需包含 model.onnx 与 tokenizer.json。
+      "model_dir": "models/multilingual-e5-small",
+      // 查询文本编码前拼接的前缀；E5 系列模型使用 "query: "，不需要前缀的模型填 ""。
+      "query_prefix": "query: ",
+      // 记忆文本入库编码前拼接的前缀；E5 系列模型使用 "passage: "，不需要前缀的模型填 ""。
+      "passage_prefix": "passage: ",
+      // 单条文本参与向量编码的最大 token 数。
+      "max_length": 256,
+      // 混合召回中向量语义相似度的权重。
+      "semantic_weight": 0.65,
+      // 混合召回中中英文关键词重合度的权重。
+      "keyword_weight": 0.2,
+      // 混合召回中时间新鲜度与重要度的权重。
+      "recency_weight": 0.15
+    }
   },
   // 厂商默认地址、协议和可选模型。
   "models": {

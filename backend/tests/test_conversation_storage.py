@@ -52,6 +52,25 @@ class SQLitePool:
                     PRIMARY KEY (user_id, conversation_round)
                 );
                 CREATE TABLE abstract_messages (user_id INTEGER PRIMARY KEY, abstract TEXT);
+                CREATE TABLE memory_episodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    happened_at TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    keywords TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'fact',
+                    importance INTEGER NOT NULL DEFAULT 3,
+                    source_round_start INTEGER NULL,
+                    source_round_end INTEGER NULL,
+                    embedding BLOB NULL,
+                    embedding_dim INTEGER NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE memory_watermarks (
+                    user_id INTEGER PRIMARY KEY,
+                    last_extracted_round INTEGER NOT NULL
+                );
             ''')
 
     @contextmanager

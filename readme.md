@@ -1,12 +1,12 @@
 # 小晚AI角色对话软件
 
-版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 Vue 3、TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
+版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 Vue 3、TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有独立对话、两层用户画像与三层长期记忆（近期原话窗口 + 结构化情景事件记忆 + 本地多语向量与中英关键词混合召回）。
 
 ## 主要功能
 
 - 根据用户意图和情绪生成角色化回复
 - 管理员和普通账号可分别配置自己的 DeepSeek 或通义模型
-- 保存对话、加载本次运行的历史并自动生成历史摘要
+- 保存完整对话历史，后台异步提炼情景事件记忆并按语义、中英关键词和时间混合召回
 - 支持默认白、三套彩色主题和晚风夜色深色主题，人设通过 `backend/persona_config/persona.json` 修改
 - 支持消息时间分隔条、单条复制、引用回复、重新生成最新一轮、删除单轮对话，以及发送中途停止并回填草稿
 - 支持账号独立的「用户画像」（手动填写资料 + 随聊天后台自动记录并可随时删改的长期印象），清空聊天记录不丢失
@@ -25,9 +25,10 @@
 │   │   ├── static_assets.py         # 前端静态资源缓存策略
 │   │   ├── api/                    # HTTP 路由与认证中间件
 │   │   ├── accounts/               # 账号、会话、个人资料与偏好
-│   │   ├── chat/                   # 聊天调度、LangGraph 工作流和历史摘要
+│   │   ├── chat/                   # 聊天调度、LangGraph 工作流和情景长期记忆
 │   │   ├── database/               # MySQL 连接池和表结构初始化
-│   │   └── llm/                    # 厂商目录、模型配置、连接验证和模型客户端
+│   │   └── llm/                    # 厂商目录、模型配置、本地 ONNX 向量和模型客户端
+│   ├── scripts/                    # 运维辅助脚本（如拉取本地多语向量模型）
 │   ├── persona_config/             # 小晚的人设配置
 │   ├── utils/deepseek_tokenizer/    # 本地 Token 计数资源
 │   ├── tests/                      # 后端测试
@@ -77,7 +78,9 @@ npm --prefix frontend run build
 
 如果服务器已有自定义的 `backend/settings.json`，更新前请保留一份本地副本供迁移。这个文件由 Git 忽略，启动时仍可读取。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`，新安装从全局配置读取默认模型。
 
-`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度、历史压缩和启动时的历史清理。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
+`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度和启动清理，`memory` 管理短期原话窗口、情景事件异步提炼、混合召回权重、本地向量模型参数以及重启清空事件记忆开关。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
+
+如需启用本地中英双语语义向量召回，可在安装 Python 依赖后执行一次 `python backend/scripts/download_embedding_model.py`（国内网络可加 `--endpoint https://hf-mirror.com`），将轻量量化模型 `multilingual-e5-small` 下载到 `backend/models/multilingual-e5-small`。未下载模型文件或关闭 `memory.embedding.enabled` 时，系统会自动降级为中英双语关键词与时间衰减混合召回，不影响正常启动与对话。
 
 ## 聊天设置
 
@@ -99,7 +102,7 @@ npm --prefix frontend run build
 
 `POST /history` 的 `num` 接受 `-10000` 到 `10000` 的整数或 `null`。`front: true` 的基础顺序是最早到最新，`front: false` 则相反。正数按基础顺序读取，负数反向读取 `abs(num)` 条。例如 `{"num": -3, "front": true}` 从最新一轮开始读取三条。`0` 或 `null` 取最新的至多 10000 条，再按 `front` 指定的顺序返回。响应中的 `num` 原样回显请求参数，实际返回条数以 `history_messages` 数组长度为准。
 
-聊天时模型最多使用每账号最近 256 轮原文和更早的摘要。超过 `chat.history_compression_tokens` 或仍有更早原文时，系统从数据库按轮次读取最早的记录，每次最多压缩 32 轮。摘要与对应原文的删除在同一事务内提交。
+聊天采用三层长期记忆：用户画像保存稳定的个人资料与长期印象；短期对话窗口默认向模型传入最近 `memory.recent_window_rounds`（默认 24）轮原话；滑出短期窗口的对话不会从 `history_messages` 删除，而是在回复返回后由后台按批（默认每 `memory.extract_batch_rounds` = 8 轮）提炼为结构化情景事件卡片（含发生日期、中英双语关键词、状态与重要度），并在后续聊天时按「近期进行中事件 + 本地多语向量/关键词/时间混合相关性」按需召回。
 
 检查命令为 `python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck` 和 `npm --prefix frontend run build`。CI 使用独立的 MySQL 8.4 容器运行数据库集成测试。本地运行数据库用例时，将 `XIAOWAN_TEST_MYSQL_PORT` 和 `XIAOWAN_TEST_MYSQL_PASSWORD` 指向 `127.0.0.1` 上的独立测试实例及其 `root` 密码。未配置端口时本地跳过这组用例。
 
@@ -145,7 +148,7 @@ python run_serve.py
 
 然后访问 `http://127.0.0.1:8000`。首次打开后，在页面设置中选择模型。
 
-> 默认启动时清空历史对话、摘要、自动记录的用户印象和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup`、`chat.clear_learned_portrait_on_startup` 和 `logging.clear_on_startup`。
+> 默认启动时清空历史对话、自动记录的用户印象、情景事件记忆和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup`、`chat.clear_learned_portrait_on_startup`、`memory.clear_episodes_on_startup` 和 `logging.clear_on_startup`。
 
 后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`system_config.json` 的 `chat.concurrency`、`chat.queue_size` 和 `chat.queue_timeout` 控制最多同时执行数、等待名额和排队秒数，默认分别为 4、8、2。排队失败时可以从原消息重试。
 

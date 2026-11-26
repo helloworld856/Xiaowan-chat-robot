@@ -14,5 +14,7 @@ dashscope==1.25.7
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 PyMySQL[rsa]>=1.1.0
+numpy>=1.26.0
+onnxruntime>=1.19.0
 tokenizers>=0.22.0
 tzdata; sys_platform == 'win32'

@@ -1,4 +1,4 @@
-"""创建数据库、迁移表结构，并在应用启动时清理本次运行的聊天数据。"""
+"""创建数据库、迁移表结构，并在应用启动时按配置清理聊天与记忆数据。"""
 import re
 
 import pymysql
@@ -99,14 +99,39 @@ def initialize_schema(pool):
                 ALTER TABLE abstract_messages
                 ADD COLUMN user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY FIRST
             ''')
-        # 单用户版本继承服务器的默认引擎，压缩和清理需要两个表都支持事务。
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS memory_episodes (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT UNSIGNED NOT NULL,
+                happened_at VARCHAR(32) NOT NULL,
+                summary TEXT NOT NULL,
+                keywords TEXT NOT NULL,
+                status VARCHAR(16) NOT NULL DEFAULT 'fact',
+                importance TINYINT NOT NULL DEFAULT 3,
+                source_round_start INT NULL,
+                source_round_end INT NULL,
+                embedding MEDIUMBLOB NULL,
+                embedding_dim SMALLINT NULL,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL,
+                INDEX idx_memory_episodes_user_status (user_id, status, updated_at),
+                INDEX idx_memory_episodes_user_round (user_id, source_round_end)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS memory_watermarks (
+                user_id BIGINT UNSIGNED PRIMARY KEY,
+                last_extracted_round INT NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        # 单用户版本继承服务器的默认引擎，压缩和清理需要所有聊天与记忆表都支持事务。
         cursor.execute('''
             SELECT table_name FROM information_schema.tables
             WHERE table_schema = DATABASE() AND engine <> 'InnoDB'
-              AND table_name IN ('history_messages', 'abstract_messages')
+              AND table_name IN ('history_messages', 'abstract_messages', 'memory_episodes', 'memory_watermarks')
         ''')
         legacy_engines = {table for (table,) in cursor.fetchall()}
-        for table in ('history_messages', 'abstract_messages'):
+        for table in ('history_messages', 'abstract_messages', 'memory_episodes', 'memory_watermarks'):
             if table in legacy_engines:
                 cursor.execute(f'ALTER TABLE {table} ENGINE=InnoDB')
         connection.commit()
@@ -115,14 +140,28 @@ def initialize_schema(pool):
 def delete_user_history(cursor, user_id: int) -> None:
     cursor.execute('DELETE FROM history_messages WHERE user_id = %s', (user_id,))
     cursor.execute('DELETE FROM abstract_messages WHERE user_id = %s', (user_id,))
+    cursor.execute('DELETE FROM memory_episodes WHERE user_id = %s', (user_id,))
+    cursor.execute('DELETE FROM memory_watermarks WHERE user_id = %s', (user_id,))
 
 
 def reset_chat_history(pool, user_id: int | None = None):
-    # 同时清空原文和摘要，启动清理可覆盖全部账号。
+    # 清空聊天原文、旧摘要及归档水位；单账号清空时同步清空该账号事件记忆。
     with pool.connection() as connection, connection.cursor() as cursor:
         if user_id is None:
             cursor.execute('DELETE FROM history_messages')
             cursor.execute('DELETE FROM abstract_messages')
+            cursor.execute('DELETE FROM memory_watermarks')
         else:
             delete_user_history(cursor, user_id)
+        connection.commit()
+
+
+def reset_episode_memories(pool, user_id: int | None = None):
+    with pool.connection() as connection, connection.cursor() as cursor:
+        if user_id is None:
+            cursor.execute('DELETE FROM memory_episodes')
+            cursor.execute('DELETE FROM memory_watermarks')
+        else:
+            cursor.execute('DELETE FROM memory_episodes WHERE user_id = %s', (user_id,))
+            cursor.execute('DELETE FROM memory_watermarks WHERE user_id = %s', (user_id,))
         connection.commit()

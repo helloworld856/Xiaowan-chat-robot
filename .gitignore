@@ -18,6 +18,7 @@ env/
 *.env
 !.env.example
 /backend/user_data/
+/backend/models/
 /backend/system_config.json
 /backend/settings.json
 /backend/auth_config/admin.json

@@ -18,13 +18,15 @@ from app.api import chat, history, model, persona, portrait, settings, system
 from app.api.auth import router as auth_router
 from app.api.auth_middleware import AuthenticationMiddleware
 from app.api.profile import router as profile_router
+from app.chat.episodes import EpisodeMemoryStore
 from app.chat.scheduler import ChatSessions
 from app.chat.workflow import create_graph
 from app.config import SOFTWARE_NAME, VERSION
-from app.database.mysql import initialize_schema, reset_chat_history
+from app.database.mysql import initialize_schema, reset_chat_history, reset_episode_memories
 from app.llm.admin_models import AdminModelStore, import_legacy_admin_model
 from app.llm.admin_settings import ModelSettings, settings_store
 from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
+from app.llm.embeddings import LocalEmbeddingModel
 from app.llm.model_catalog import ModelCatalog
 from app.system_config import ChatConfig, SystemConfig, legacy_environment
 
@@ -71,6 +73,8 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         AdminModelStore(env_path, directories.models.catalog), directories.models,
         admin_model, config=config.model_runtime,
     )
+    embedding_model = LocalEmbeddingModel(config.memory.embedding, root=config_root)
+    episode_store = EpisodeMemoryStore(db.connection, config=config.memory, embedder=embedding_model)
 
     def startup():
         logger.info("version:%s", VERSION)
@@ -133,6 +137,14 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                 raise
             log_event('startup_portrait_learned_clear', system=True, outcome='succeeded',
                       accounts=cleared_portraits)
+        if config.memory.clear_episodes_on_startup:
+            try:
+                reset_episode_memories(db)
+            except Exception as error:
+                log_event('startup_episodes_clear', level=ERROR, system=True, outcome='failed',
+                          error=type(error).__name__)
+                raise
+            log_event('startup_episodes_clear', system=True, outcome='succeeded')
         model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
             legacy_model, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),
@@ -163,6 +175,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
     application.state.db = db
     application.state.preferences = directories.preferences
     application.state.portraits = directories.portraits
+    application.state.episodes = episode_store
     application.state.personal_models = directories.models
     application.state.model_configuration = model_configuration
     application.state.chat = ChatSessions(
@@ -170,7 +183,13 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         personal_models=directories.models,
         admin_model=admin_model,
         portraits=directories.portraits,
-        graph_factory=partial(create_graph, compression_tokens=chat_config.history_compression_tokens),
+        episodes=episode_store,
+        graph_factory=partial(
+            create_graph,
+            compression_tokens=chat_config.history_compression_tokens,
+            episodes=episode_store,
+            recent_window_rounds=config.memory.recent_window_rounds,
+        ),
         max_running=chat_config.concurrency,
         max_waiting=chat_config.queue_size,
         wait_timeout=chat_config.queue_timeout,
