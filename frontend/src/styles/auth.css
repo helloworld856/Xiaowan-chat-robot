@@ -41,10 +41,7 @@
     color: inherit;
     font: inherit;
     font-size: 14px;
-    outline: none;
-    transition: border-color 120ms, box-shadow 120ms;
 }
-.login-card input:focus { border-color: #52525b; box-shadow: 0 0 0 3px rgb(24 24 27 / 6%); }
 .login-primary {
     width: 100%;
     height: 40px;

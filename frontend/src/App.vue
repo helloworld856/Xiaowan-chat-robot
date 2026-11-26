@@ -19,7 +19,7 @@ const authScreen = ref<InstanceType<typeof AuthScreen> | null>(null);
 const chat = ref<InstanceType<typeof ChatWorkspace> | null>(null);
 const settings = ref<InstanceType<typeof SettingsDialog> | null>(null);
 const profileDialog = ref<InstanceType<typeof ProfileDialog> | null>(null);
-const defaultPreferences: Preferences = {send_shortcut: 'enter', theme: 'theme0'};
+const defaultPreferences: Preferences = {send_shortcut: 'enter', theme: 'theme0', chat_font_size: 'standard'};
 const preferences = ref<Preferences>({...defaultPreferences});
 const profile = ref<ProfileInfo | null>(null);
 const persona = ref<PersonaInfo | null>(null);
@@ -104,7 +104,8 @@ function resetAccount() {
         </div>
     </div>
     <AuthScreen v-if="!starting && !user && !sessionHidden" ref="authScreen" :session="session" />
-    <div id="app-shell" :hidden="!user || sessionHidden" :inert="!ready || sessionHidden || !user">
+    <div id="app-shell" :data-chat-font-size="preferences.chat_font_size"
+        :hidden="!user || sessionHidden" :inert="!ready || sessionHidden || !user">
         <ChatWorkspace ref="chat" :ready="ready" :shortcut="preferences.send_shortcut" :profile="profile"
             :persona="persona" :clearing-history="clearingHistory" :show-alert="showAlert" @busy-change="chatBusy = $event" />
         <AccountMenu ref="menu" :display-name="profile?.nickname ?? user?.username ?? ''" :logout-busy="sessionBusy" :logging-out="loggingOut"

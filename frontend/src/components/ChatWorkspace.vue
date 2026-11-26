@@ -17,6 +17,7 @@ const props = defineProps<{
 const emit = defineEmits<{'busy-change': [busy: boolean]}>();
 
 const chatBox = ref<HTMLDivElement | null>(null);
+const composerDock = ref<HTMLDivElement | null>(null);
 const reviewToggle = ref<HTMLButtonElement | null>(null);
 const reviewSearch = ref<HTMLInputElement | null>(null);
 const reviewList = ref<HTMLDivElement | null>(null);
@@ -171,9 +172,21 @@ function reset() {
 
 onMounted(() => {
     window.addEventListener('keydown', onEscape);
-    if (chatBox.value) {
-        observer = new ResizeObserver(updateBottomButton);
-        observer.observe(chatBox.value);
+    const box = chatBox.value;
+    const dock = composerDock.value;
+    if (box && dock) {
+        observer = new ResizeObserver(changes => {
+            const dockSize = changes.find(change => change.target === dock)?.borderBoxSize[0];
+            if (dockSize && dockSize.blockSize > 0) {
+                // 输入栏向上展开时为末条消息留出空间，翻阅历史时保留阅读位置。
+                const follow = isNearBottom(2) || scrollingToBottom;
+                box.style.setProperty('--composer-height', `${dockSize.blockSize}px`);
+                if (follow) box.scrollTo({top: box.scrollHeight, behavior: 'instant'});
+            }
+            updateBottomButton();
+        });
+        observer.observe(box, {box: 'border-box'});
+        observer.observe(dock, {box: 'border-box'});
     }
 });
 onBeforeUnmount(() => {
@@ -250,11 +263,13 @@ defineExpose({loadHistory, clearHistory, reset});
                     </div>
                 </div>
             </div>
-            <button id="comeToBottom" type="button" title="回到底部" aria-label="回到底部"
-                :style="{display: showBottomButton ? 'block' : ''}" @click="scrollToBottom">
-                <img src="/ico/arrow.png" alt="">
-            </button>
+            <div ref="composerDock" class="chat-dock">
+                <button id="comeToBottom" type="button" title="回到底部" aria-label="回到底部"
+                    :style="{display: showBottomButton ? 'block' : ''}" @click="scrollToBottom">
+                    <img src="/ico/arrow.png" alt="">
+                </button>
+                <ChatComposer :key="composerRevision" v-model="draft" :shortcut="shortcut" :locked="locked" @send="sendMessage" />
+            </div>
         </div>
-        <ChatComposer :key="composerRevision" v-model="draft" :shortcut="shortcut" :locked="locked" @send="sendMessage" />
     </main>
 </template>

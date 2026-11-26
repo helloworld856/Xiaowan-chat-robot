@@ -1,4 +1,5 @@
 export interface Preferences {
+    chat_font_size: 'small' | 'standard' | 'large';
     send_shortcut: 'enter' | 'ctrl_enter';
     theme: 'theme0' | 'theme1' | 'theme2' | 'theme3';
 }

@@ -108,7 +108,7 @@
     width: 100%;
     min-width: 0;
     margin: 0.75rem 0;
-    padding: 0.65rem;
+    padding: 0.45rem 0.65rem;
     border: 1px solid var(--input-border);
     border-radius: 9px;
     background: var(--input-bg);
@@ -484,7 +484,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     padding: 0.6rem;
     border: 2px solid #ddd;
     border-radius: 8px;
-    outline: none;
 }
 
 .valid-loader {
@@ -637,7 +636,12 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     outline-offset: 2px;
 }
 .settings-select:disabled { cursor: not-allowed; }
-.preference-row .settings-select { width: 11rem; max-width: 62%; }
+.preference-row .settings-select {
+    width: 9.5rem;
+    max-width: 62%;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.625rem;
+}
 
 /* 支持自定义选择器时，展开列表沿用设置界面的配色。 */
 @supports (appearance: base-select) and selector(select::picker(select)) {
@@ -700,7 +704,6 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
     }
 }
 #chat-settings-panel { margin-top: 1.5rem; border-top: 1px solid var(--chat-border); }
-#model-edit-modal .form-group input:focus-visible { outline: 2px solid var(--select-accent); outline-offset: 2px; }
 
 .settings-button {
     display: inline-flex;
@@ -726,7 +729,13 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 .settings-button-danger { border-color: #e7b8b8; color: #a61b1b; }
 .settings-button-danger:enabled:hover { background: #fff1f1; }
 .settings-button.close-setting { width: 2.5rem; padding: 0; }
-.settings-section-action { display: flex; width: min(9rem, 100%); margin: 0.5rem auto 0; }
+.settings-section-action {
+    display: flex;
+    width: min(7.5rem, 100%);
+    min-height: 2.125rem;
+    margin: 0.5rem auto 0;
+    padding: 0.35rem 0.625rem;
+}
 #preferences-fields:disabled .settings-select { opacity: 0.6; }
 
 #model-edit-modal .modal-content { max-height: 100%; overflow-y: auto; padding: 1.25rem; }
@@ -737,9 +746,20 @@ html.theme0 :is(.sidebar-btn, #menuBtn):hover { background: var(--menu-hover); }
 .model-key-field {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 0.5rem;
 }
 #model-api-key::-ms-reveal { display: none; }
 #model-edit-modal .settings-select { min-width: 0; width: 100%; }
-#model-edit-modal .modal-btns { display: flex; margin-top: 1rem; gap: 0.5rem; flex-wrap: wrap; }
-#model-edit-modal .modal-btns .settings-button { flex: 1 1 6rem; }
+#model-edit-modal .settings-button {
+    min-height: 2.125rem;
+    padding: 0.35rem 0.625rem;
+}
+#model-edit-modal .modal-btns {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+#model-edit-modal .modal-btns .settings-button { min-width: 4.5rem; }

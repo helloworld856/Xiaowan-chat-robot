@@ -5,7 +5,7 @@ import {compileModule, mountComponent, nextTick as tick} from './vue-harness.mjs
 
 const file = new URL('../src/components/SettingsDialog.vue', import.meta.url);
 const dialogs = compileModule(readFileSync(new URL('../src/ts/dialogs.ts', import.meta.url), 'utf8'));
-const defaults = {send_shortcut: 'enter', theme: 'theme0'};
+const defaults = {send_shortcut: 'enter', theme: 'theme0', chat_font_size: 'standard'};
 
 function mount(api = {}, props = {}) {
     const preferences = {...defaults};
@@ -46,7 +46,7 @@ const pending = () => Promise.withResolvers();
 
 test('preference drafts apply only after a successful save and reopen from the committed values', async () => {
     const saves = [];
-    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3'};
+    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3', chat_font_size: 'large'};
     const {element, act, select, session, preferences, alerts} = mount({
         settingsAPI: value => {
             if (!value) return Promise.resolve(saved(loaded));
@@ -60,8 +60,10 @@ test('preference drafts apply only after a successful save and reopen from the c
     await tick();
     assert.deepEqual(preferences, loaded);
     assert.equal(element('theme-select').value, 'theme3');
+    assert.equal(element('chat-font-size').value, 'large');
 
     select('theme-select', 'theme2');
+    select('chat-font-size', 'small');
     select('send-shortcut', 'enter');
     assert.equal(saves.length, 0);
     assert.deepEqual(preferences, loaded);
@@ -69,7 +71,7 @@ test('preference drafts apply only after a successful save and reopen from the c
     const submitted = act('preferences-form', 'submit');
     await tick();
     assert.equal(element('preferences-fields').props.disabled, true);
-    assert.deepEqual(saves.map(save => save.value), [{theme: 'theme2', send_shortcut: 'enter'}]);
+    assert.deepEqual(saves.map(save => save.value), [{theme: 'theme2', send_shortcut: 'enter', chat_font_size: 'small'}]);
     await act('preferences-form', 'submit');
     assert.equal(saves.length, 1);
     saves[0].resolve(saved(saves[0].value));
@@ -78,6 +80,7 @@ test('preference drafts apply only after a successful save and reopen from the c
     assert.match(alerts.at(-1), /保存成功/);
 
     select('theme-select', 'theme1');
+    select('chat-font-size', 'standard');
     select('send-shortcut', 'ctrl_enter');
     const failed = act('preferences-form', 'submit');
     saves[1].reject(new Error('测试保存失败'));
@@ -91,11 +94,13 @@ test('preference drafts apply only after a successful save and reopen from the c
     session.open();
     await tick();
     assert.equal(element('theme-select').value, 'theme2');
+    assert.equal(element('chat-font-size').value, 'small');
     assert.equal(element('send-shortcut').value, 'enter');
     session.reset();
     await tick();
     assert.equal(element('setting-container').open, false);
     assert.equal(element('theme-select').value, 'theme0');
+    assert.equal(element('chat-font-size').value, 'standard');
     assert.equal(element('preferences-fields').props.disabled, true);
 });
 
@@ -117,7 +122,7 @@ test('a late settings read can apply preferences without undoing a model switch'
     assert.equal(element('display-model').text, 'server-selected-model');
     assert.equal(element('display-model-status').text, '可用');
 
-    delayed.resolve(saved({send_shortcut: 'enter', theme: 'theme1'},
+    delayed.resolve(saved({...defaults, theme: 'theme1'},
         {model_merchant: 'deepseek', model_name: 'new-model'}));
     await loading;
     assert.equal(element('display-model').text, 'server-selected-model');
@@ -125,7 +130,7 @@ test('a late settings read can apply preferences without undoing a model switch'
 });
 
 test('opening settings retries an initial read failure and restores the saved controls', async () => {
-    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3'};
+    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3', chat_font_size: 'small'};
     let reads = 0;
     const {element, act, session, preferences, alerts} = mount({
         settingsAPI: async () => {

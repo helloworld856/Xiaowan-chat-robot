@@ -23,7 +23,8 @@ class UserDirectoryStore:
         self.models = PersonalModelStore(self.paths, catalog)
         initial = defaults or DefaultsConfig()
         self.preferences = FilePreferencesStore(
-            self.paths, legacy_preferences, Preferences(send_shortcut=initial.send_shortcut, theme=initial.theme),
+            self.paths, legacy_preferences,
+            Preferences(send_shortcut=initial.send_shortcut, theme=initial.theme, chat_font_size=initial.chat_font_size),
         )
 
     def prepare_new(self, user: User) -> User:

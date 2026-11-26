@@ -6,7 +6,7 @@ import {mountComponent, nextTick} from './vue-harness.mjs';
 const account = {id: 1, username: 'member', role: 'user'};
 const profile = {nickname: 'Saved nickname', avatar_url: '/avatars/system/fox.png'};
 const persona = {BOT_NAME: '小晚', BOT_AVATAR: '/avatars/xiaowan.png', USER_AVATAR: '/avatars/system/cat.png'};
-const preferences = {theme: 'theme3', send_shortcut: 'ctrl_enter'};
+const preferences = {theme: 'theme3', send_shortcut: 'ctrl_enter', chat_font_size: 'large'};
 
 function startupHarness(t, loadPersona = async () => persona) {
     const document = {documentElement: {className: 'theme0'}, title: ''};
@@ -86,6 +86,7 @@ test('startup loads profile before persona and applies server preferences withou
     assert.equal(app.element('test-chat').text, 'true|/avatars/system/fox.png|/avatars/xiaowan.png|ctrl_enter');
     assert.equal(app.document.title, '小晚');
     assert.equal(app.document.documentElement.className, 'theme3');
+    assert.equal(app.element('app-shell').props['data-chat-font-size'], 'large');
     assert.equal(app.storageAccesses(), 0);
 });
 
@@ -104,4 +105,5 @@ test('signout clears account data and ignores a late persona response', async t 
     assert.equal(app.element('test-menu').text, '');
     assert.equal(app.element('test-chat').text, 'false|||enter');
     assert.equal(app.document.documentElement.className, 'theme0');
+    assert.equal(app.element('app-shell').props['data-chat-font-size'], 'standard');
 });

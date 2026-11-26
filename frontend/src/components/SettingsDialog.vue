@@ -288,7 +288,7 @@ function reset() {
     modelOperation.value = null;
     merchant.value = 'deepseek';
     setProvider();
-    preferenceDraft.value = {send_shortcut: 'enter', theme: 'theme0'};
+    preferenceDraft.value = {send_shortcut: 'enter', theme: 'theme0', chat_font_size: 'standard'};
     preferencesDisabled.value = true;
     if (historyOperation.value === 'clearing') emit('clearing-history', false);
     historyOperation.value = 'idle';
@@ -347,6 +347,14 @@ defineExpose({open, load, reset});
                                     <option value="theme1">海阔天空</option>
                                     <option value="theme2">夏日海岸</option>
                                     <option value="theme3">樱雨绵绵</option>
+                                </select>
+                            </label>
+                            <label class="preference-row" for="chat-font-size">
+                                <span>聊天字号</span>
+                                <select id="chat-font-size" v-model="preferenceDraft.chat_font_size" class="settings-select">
+                                    <option value="small">小</option>
+                                    <option value="standard">标准</option>
+                                    <option value="large">大</option>
                                 </select>
                             </label>
                             <label class="preference-row" for="send-shortcut">

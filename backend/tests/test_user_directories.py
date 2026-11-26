@@ -108,12 +108,13 @@ class UserDirectoryTests(unittest.TestCase):
 
     def test_configured_defaults_apply_to_new_accounts_and_preserve_existing_files(self):
         self.store.prepare_new(self.member)
-        defaults = DefaultsConfig(theme='theme3', send_shortcut='ctrl_enter', avatar_id='frog')
+        defaults = DefaultsConfig(theme='theme3', send_shortcut='ctrl_enter', chat_font_size='small', avatar_id='frog')
         profiles = ProfileStore(self.store.paths, defaults=defaults)
         updated = UserDirectoryStore(profiles, self.legacy, defaults=defaults)
         new_user = User(3, 'NewMember', 'user')
         updated.prepare_new(new_user)
-        self.assertEqual(updated.preferences.get(new_user.id), Preferences(theme='theme3', send_shortcut='ctrl_enter'))
+        self.assertEqual(updated.preferences.get(new_user.id),
+                         Preferences(theme='theme3', send_shortcut='ctrl_enter', chat_font_size='small'))
         self.assertEqual(profiles.get(new_user.id, new_user.username).avatar_id, 'frog')
         self.assertEqual(updated.preferences.get(self.member.id), Preferences())
         self.assertEqual(profiles.get(self.member.id, self.member.username).avatar_id, 'cat')
@@ -126,18 +127,18 @@ class UserDirectoryTests(unittest.TestCase):
         self.assertEqual(self.store.preferences.get(self.member.id), Preferences())
         self.assertEqual(path.read_bytes(), contents)
 
-    def test_themes_survive_reload_and_remain_account_scoped(self):
+    def test_preferences_survive_reload_and_remain_account_scoped(self):
         self.store.ensure(self.admin)
         self.store.prepare_new(self.member)
-        self.store.preferences.update(self.member.id, Preferences(send_shortcut='ctrl_enter', theme='theme2'))
+        saved = {'send_shortcut': 'ctrl_enter', 'theme': 'theme2', 'chat_font_size': 'large'}
+        self.store.preferences.update(self.member.id, Preferences(**saved))
         reloaded = UserDirectoryStore(ProfileStore(self.root / 'users'), self.legacy)
-        self.assertEqual(reloaded.preferences.get(self.member.id).model_dump(),
-                         {'send_shortcut': 'ctrl_enter', 'theme': 'theme2'})
+        self.assertEqual(reloaded.preferences.get(self.member.id).model_dump(), saved)
         self.assertEqual(reloaded.preferences.get(self.admin.id).theme, 'theme0')
         self.assertEqual(json.loads(self.store.preferences.path_for(self.member.id).read_text(encoding='utf-8')),
-                         {'send_shortcut': 'ctrl_enter', 'theme': 'theme2'})
+                         saved)
         self.store.preferences.path_for(self.admin.id).write_text('{"send_shortcut":"ctrl_enter"}', encoding='utf-8')
-        self.assertEqual(reloaded.preferences.get(self.admin.id).theme, 'theme0')
+        self.assertEqual(reloaded.preferences.get(self.admin.id), Preferences(send_shortcut='ctrl_enter'))
 
     def test_legacy_lookup_does_not_block_or_overwrite_a_concurrent_save(self):
         updated = Preferences(send_shortcut='ctrl_enter')
