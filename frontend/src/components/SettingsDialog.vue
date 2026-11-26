@@ -348,7 +348,6 @@ defineExpose({open, load, reset});
                                     <option value="theme2">夏日海岸</option>
                                     <option value="theme3">樱雨绵绵</option>
                                     <option value="theme4">晚风夜色</option>
-                                    <option value="system">跟随系统</option>
                                 </select>
                             </label>
                             <label class="preference-row" for="chat-font-size">

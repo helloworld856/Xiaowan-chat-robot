@@ -1,17 +1,7 @@
-export type ThemeClass = 'theme0' | 'theme1' | 'theme2' | 'theme3' | 'theme4';
-
 export interface Preferences {
     chat_font_size: 'small' | 'standard' | 'large';
     send_shortcut: 'enter' | 'ctrl_enter';
-    theme: ThemeClass | 'system';
-}
-
-export const darkSchemeQuery = '(prefers-color-scheme: dark)';
-
-// 「跟随系统」在默认白和晚风夜色之间切换，其余主题原样使用。
-export function resolveTheme(theme: Preferences['theme'], prefersDark: boolean): ThemeClass {
-    if (theme === 'system') return prefersDark ? 'theme4' : 'theme0';
-    return theme;
+    theme: 'theme0' | 'theme1' | 'theme2' | 'theme3' | 'theme4';
 }
 
 export function shouldSendMessage(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'keyCode'>, shortcut: Preferences['send_shortcut']) {

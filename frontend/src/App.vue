@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
+import {computed, ref} from 'vue';
 import AccountMenu from './components/AccountMenu.vue';
 import AppDialogs from './components/AppDialogs.vue';
 import AuthScreen from './components/AuthScreen.vue';
@@ -11,7 +11,6 @@ import {AuthRequiredError, CancelledRequestError, getRequestGeneration, personaA
 import type {ProfileInfo} from './ts/api.ts';
 import type {ConfirmOptions} from './ts/dialogs.ts';
 import type {PersonaInfo} from './ts/global_config.ts';
-import {darkSchemeQuery, resolveTheme} from './ts/preferences.ts';
 import type {Preferences} from './ts/preferences.ts';
 
 const menu = ref<InstanceType<typeof AccountMenu> | null>(null);
@@ -43,16 +42,8 @@ function confirmAction(options: ConfirmOptions) {
 
 function applyPreferences(saved: Preferences) {
     preferences.value = {...saved};
-    applyTheme();
+    document.documentElement.className = saved.theme;
 }
-
-// 「跟随系统」时监听系统配色变化，其他主题不受影响。
-const darkScheme = typeof globalThis.matchMedia === 'function' ? globalThis.matchMedia(darkSchemeQuery) : null;
-function applyTheme() {
-    document.documentElement.className = resolveTheme(preferences.value.theme, darkScheme?.matches ?? false);
-}
-onMounted(() => darkScheme?.addEventListener('change', applyTheme));
-onBeforeUnmount(() => darkScheme?.removeEventListener('change', applyTheme));
 
 async function loadPersona() {
     const generation = getRequestGeneration();

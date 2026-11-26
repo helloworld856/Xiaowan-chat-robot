@@ -9,7 +9,7 @@ from app.account_logging import logger
 from app.accounts.files import UserDataPaths, protect_file, read_text, replace_json
 
 
-ThemeChoice = Literal['theme0', 'theme1', 'theme2', 'theme3', 'theme4', 'system']
+ThemeChoice = Literal['theme0', 'theme1', 'theme2', 'theme3', 'theme4']
 
 
 class Preferences(BaseModel):

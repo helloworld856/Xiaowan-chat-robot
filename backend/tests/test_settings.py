@@ -38,10 +38,10 @@ class SettingsTests(unittest.TestCase):
                 ModelSettings(model_merchant='deepseek', model_name='M', base_url=address)
         with self.assertRaises(ValidationError):
             Preferences(send_shortcut='unknown')
-        with self.assertRaises(ValidationError):
-            Preferences(theme='unknown')
-        for theme in ('theme4', 'system'):
-            self.assertEqual(Preferences(theme=theme).theme, theme)
+        for invalid_theme in ('unknown', 'system'):
+            with self.assertRaises(ValidationError):
+                Preferences(theme=invalid_theme)
+        self.assertEqual(Preferences(theme='theme4').theme, 'theme4')
         with self.assertRaises(ValidationError):
             Preferences(chat_font_size='unknown')
 

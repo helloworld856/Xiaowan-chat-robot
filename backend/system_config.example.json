@@ -103,7 +103,7 @@
     "chat_font_size": "standard",
     // 新账号发送快捷键。可选 enter 或 ctrl_enter。
     "send_shortcut": "enter",
-    // 新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵，theme4 晚风夜色，system 跟随系统。
+    // 新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵，theme4 晚风夜色。
     "theme": "theme0",
     // 新账号头像。可选 cat、fox、rabbit、bear、penguin、frog。
     "avatar_id": "cat"
