@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {compileModule, mountComponent, nextTick} from './vue-harness.mjs';
+import {compileModule, mountComponent} from './vue-harness.mjs';
 
 const chatFormat = compileModule(fs.readFileSync(new URL('../src/ts/chat_format.ts', import.meta.url), 'utf8'));
 const prefs = compileModule(fs.readFileSync(new URL('../src/ts/preferences.ts', import.meta.url), 'utf8'));
@@ -37,15 +37,14 @@ test('quote helpers compose, unwrap nested quotes, and parse cleanly', () => {
         quote: {speaker: '小晚', text: '杭州今天有小雨 记得穿暖和一点'},
         body: '明天要带伞吗？',
     });
-    // Quoting an already-quoted message unwraps the outer quote instead of nesting headers
     const nested = chatFormat.composeQuotedMessage('我也觉得', {speaker: '你', text: composed});
     assert.equal(nested, '【引用 你：明天要带伞吗？】\n我也觉得');
 });
 
-test('useChat streams detailed status, cancels in-flight sends back to draft/quote, regenerates, and deletes a round', async () => {
+test('useChat cancels in-flight sends back to draft/quote, regenerates latest round, and deletes a round', async () => {
     const canceledIds = [];
     const deletedRounds = [];
-    let streamHandler;
+    let chatHandler;
     let regenerateHandler;
 
     class AuthRequiredError extends Error {}
@@ -62,10 +61,8 @@ test('useChat streams detailed status, cancels in-flight sends back to draft/quo
             UserCancelledChatError,
             ChatNotStartedError,
             getRequestGeneration: () => 0,
-            chatAPI: async () => { throw new Error('should use stream'); },
-            chatStreamAPI: (text, options) => streamHandler(text, options),
-            regenerateChatAPI: async () => { throw new Error('should use regenerate stream'); },
-            regenerateChatStreamAPI: (round, options) => regenerateHandler(round, options),
+            chatAPI: (text, options) => chatHandler(text, options),
+            regenerateChatAPI: (round, options) => regenerateHandler(round, options),
             cancelChatAPI: async turnId => { canceledIds.push(turnId); return {ok: true, cancelled: true}; },
             deleteHistoryRoundAPI: async round => { deletedRounds.push(round); return {ok: true}; },
             historyAPI: async () => ({history_messages: []}),
@@ -81,35 +78,32 @@ test('useChat streams detailed status, cancels in-flight sends back to draft/quo
         scrollAfterRender() {},
     });
 
-    // 1. Quote + cancel restores quote and draft without leaving a bubble
+    // 1. Quote + cancel restores quote and draft without leaving a bubble or stage status
     let capturedOptions;
-    streamHandler = (_text, options) => new Promise(() => { capturedOptions = options; });
+    chatHandler = (_text, options) => new Promise(() => { capturedOptions = options; });
     state.setQuote('小晚', '今天18°C');
     state.draft.value = '明天呢？';
     const pendingSend = state.sendMessage();
     await flushAsync();
     assert.equal(state.cancellable.value, true);
     assert.equal(state.entries.value.length, 1);
-    capturedOptions.onStatus('tool:get_weather', '正在查询天气…');
-    assert.equal(state.typingStatus.value, '正在查询天气…');
+    assert.ok(capturedOptions.turnId);
+    assert.equal('typingStatus' in state, false);
 
     state.cancelSend();
     await pendingSend;
     assert.equal(state.entries.value.length, 0);
     assert.equal(state.cancellable.value, false);
     assert.equal(state.busy.value, false);
-    assert.equal(state.typingStatus.value, '');
     assert.equal(state.draft.value, '明天呢？');
     assert.deepEqual(state.quote.value, {speaker: '小晚', text: '今天18°C'});
-    assert.equal(canceledIds.length, 1);
+    assert.deepEqual(canceledIds, [capturedOptions.turnId]);
 
     // 2. Normal send succeeds, then regenerate replaces latest round, then delete removes it
-    streamHandler = async (_text, options) => {
-        options.onStatus('generating', '正在组织回复…');
-        return {response: ['第一版回复'], conversation_round: 4, saved: true, created_at: 1764150000000};
-    };
-    const sent = state.sendMessage();
-    await sent;
+    chatHandler = async () => ({
+        response: ['第一版回复'], conversation_round: 4, saved: true, created_at: 1764150000000,
+    });
+    await state.sendMessage();
     assert.equal(state.entries.value.length, 1);
     assert.equal(state.entries.value[0].round, 4);
     assert.deepEqual(state.entries.value[0].replies, ['第一版回复']);

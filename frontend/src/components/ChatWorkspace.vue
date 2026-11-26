@@ -51,7 +51,6 @@ const {
 } = chatState;
 const quote = chatState.quote ?? ref(null);
 const cancellable = chatState.cancellable ?? ref(false);
-const typingStatus = chatState.typingStatus ?? ref('');
 
 const locked = computed(() => busy.value || !props.ready || props.clearingHistory);
 const userAvatar = computed(() => props.profile?.avatar_url || props.persona?.USER_AVATAR || undefined);
@@ -422,16 +421,14 @@ defineExpose({loadHistory, clearHistory, reset});
                             @click="showAlert(`${entry.message}\n\n原消息：\n${entry.user}`)">查看发送结果</button>
                     </div>
                 </template>
-                <div v-if="isTyping" id="chat-typing" class="assistant_message" role="status"
-                    :aria-label="typingStatus || '对方正在输入'">
+                <div v-if="isTyping" id="chat-typing" class="assistant_message" role="status" aria-label="对方正在输入">
                     <div class="assistant_bag">
                         <div class="assistant_avatar"><img :src="botAvatar" alt=""></div>
                         <div class="assistant_triangle"></div>
-                        <div class="assistant_bubble chat-typing-dots">
-                            <span class="typing-dot" aria-hidden="true"></span>
-                            <span class="typing-dot" aria-hidden="true"></span>
-                            <span class="typing-dot" aria-hidden="true"></span>
-                            <em v-if="typingStatus" class="chat-typing-status">{{ typingStatus }}</em>
+                        <div class="assistant_bubble chat-typing-dots" aria-hidden="true">
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
                         </div>
                     </div>
                 </div>

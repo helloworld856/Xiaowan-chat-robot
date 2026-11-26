@@ -3,7 +3,7 @@ from time import time
 
 from app.account_logging import logger
 from app.chat.memory import MemoryManager, prompt_history
-from app.chat.progress import ChatCancelled, check_cancelled, report_stage
+from app.chat.progress import ChatCancelled, check_cancelled
 from app.chat.state import AIChatState
 from app.llm.token_counter import count_tokens
 from app.llm.output_parser import model_text, parse_model_json, replace_invalid_unicode, safe_parse_json
@@ -124,7 +124,7 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
 # 分析用户输入
 def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
-        report_stage('analyzing')
+        check_cancelled()
         logger.info('执行结点"analysis"...')
         user_input = state.get('user_input')
 
@@ -167,7 +167,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState
 # 生成回复结点
 def generate(state: AIChatState, memorier: MemoryManager, agents) -> AIChatState:
     try:
-        report_stage('generating')
+        check_cancelled()
         logger.info('执行结点"generate"...')
         user_input = state.get('user_input', '')
 

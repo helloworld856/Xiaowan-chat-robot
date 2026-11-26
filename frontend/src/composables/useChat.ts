@@ -1,8 +1,8 @@
 import {nextTick, reactive, ref} from 'vue';
 import {
     AuthRequiredError, CancelledRequestError, ChatNotStartedError, UserCancelledChatError,
-    cancelChatAPI, chatAPI, chatStreamAPI, deleteHistoryRoundAPI, getRequestGeneration,
-    historyAPI, regenerateChatAPI, regenerateChatStreamAPI
+    cancelChatAPI, chatAPI, deleteHistoryRoundAPI, getRequestGeneration,
+    historyAPI, regenerateChatAPI
 } from '../ts/api.ts';
 import {inputLimits} from '../ts/global_config.ts';
 import type {ChatResponse, ConversationItem} from '../ts/global_config.ts';
@@ -73,7 +73,6 @@ export function useChat(options: ChatOptions) {
     const busy = ref(false);
     const cancellable = ref(false);
     const isTyping = ref(false);
-    const typingStatus = ref('');
     let nextId = 0;
     let revision = 0;
     let finishReplyDelay: (() => void) | undefined;
@@ -215,7 +214,6 @@ export function useChat(options: ChatOptions) {
         if (data.response.length) await firstReplyDelay;
         if (!isCurrent()) return;
         isTyping.value = false;
-        typingStatus.value = '';
         for (const [index, text] of data.response.entries()) {
             if (!isCurrent()) return;
             turn.replies.push(text);
@@ -241,7 +239,7 @@ export function useChat(options: ChatOptions) {
 
     async function runTurnRequest(
         turn: ChatTurn,
-        invoke: (control: ActiveTurnControl, onStatus: (stage: string, label: string) => void) => Promise<ChatResponse>,
+        invoke: (control: ActiveTurnControl) => Promise<ChatResponse>,
         onAbortRestore: () => void,
         onErrorFallback: (error: unknown, isCurrent: () => boolean) => Promise<void> | void,
     ) {
@@ -254,7 +252,6 @@ export function useChat(options: ChatOptions) {
             settleCancel = () => reject(typeof UserCancelledChatError === 'function'
                 ? new UserCancelledChatError() : new Error('cancelled'));
         });
-        // Prevent unhandled rejection when cancelGate is not triggered.
         cancelGate.catch(() => {});
 
         const control: ActiveTurnControl = {
@@ -271,7 +268,6 @@ export function useChat(options: ChatOptions) {
         activeControl = control;
         setBusy(true);
         cancellable.value = true;
-        typingStatus.value = '';
         options.scrollAfterRender(true);
 
         // 请求与显示延时并行。延时结束仍未收到回复时，才显示正在输入。
@@ -282,15 +278,10 @@ export function useChat(options: ChatOptions) {
             options.scrollAfterRender(false);
         });
 
-        const onStatus = (_stage: string, label: string) => {
-            if (!responsePending || control.cancelled || !isCurrent()) return;
-            typingStatus.value = label;
-        };
-
         try {
             let data: ChatResponse;
             try {
-                data = await Promise.race([invoke(control, onStatus), cancelGate]).finally(() => {
+                data = await Promise.race([invoke(control), cancelGate]).finally(() => {
                     responsePending = false;
                     if (activeControl === control) cancellable.value = false;
                 });
@@ -298,7 +289,6 @@ export function useChat(options: ChatOptions) {
                 if (!isCurrent() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
                 finishReplyDelay?.();
                 isTyping.value = false;
-                typingStatus.value = '';
                 if (control.cancelled || isUserCancelled(error)) {
                     onAbortRestore();
                     return;
@@ -320,7 +310,6 @@ export function useChat(options: ChatOptions) {
             if (isCurrent()) {
                 finishReplyDelay?.();
                 isTyping.value = false;
-                typingStatus.value = '';
                 setBusy(false);
             }
         }
@@ -329,12 +318,8 @@ export function useChat(options: ChatOptions) {
     async function submitMessage(turn: ChatTurn) {
         await runTurnRequest(
             turn,
-            (control, onStatus) => typeof chatStreamAPI === 'function'
-                ? chatStreamAPI(turn.user, {
-                    turnId: control.turnId,
-                    signal: control.controller?.signal,
-                    onStatus,
-                })
+            control => typeof cancelChatAPI === 'function'
+                ? chatAPI(turn.user, {turnId: control.turnId, signal: control.controller?.signal})
                 : chatAPI(turn.user),
             () => {
                 entries.value = entries.value.filter(entry => entry !== turn);
@@ -370,7 +355,7 @@ export function useChat(options: ChatOptions) {
             round: null,
             user: composed,
             replies: [],
-            ...(typeof chatStreamAPI === 'function' ? {createdAt: Date.now()} : {}),
+            ...(typeof cancelChatAPI === 'function' ? {createdAt: Date.now()} : {}),
         });
         entries.value.push(turn);
         await submitMessage(turn);
@@ -419,13 +404,7 @@ export function useChat(options: ChatOptions) {
 
         await runTurnRequest(
             turn,
-            (control, onStatus) => typeof regenerateChatStreamAPI === 'function'
-                ? regenerateChatStreamAPI(round, {
-                    turnId: control.turnId,
-                    signal: control.controller?.signal,
-                    onStatus,
-                })
-                : regenerateChatAPI(round),
+            control => regenerateChatAPI(round, {turnId: control.turnId, signal: control.controller?.signal}),
             () => {
                 turn.replies = previousReplies;
                 turn.createdAt = previousCreatedAt;
@@ -467,7 +446,6 @@ export function useChat(options: ChatOptions) {
         entries.value = [];
         cancellable.value = false;
         isTyping.value = false;
-        typingStatus.value = '';
         setBusy(false);
     }
 
@@ -479,7 +457,7 @@ export function useChat(options: ChatOptions) {
     }
 
     return {
-        draft, quote, entries, busy, cancellable, isTyping, typingStatus,
+        draft, quote, entries, busy, cancellable, isTyping,
         setQuote, clearQuote, loadHistory, sendMessage, cancelSend,
         activateFailure, regenerateTurn, deleteTurn, clearHistory, reset,
     };

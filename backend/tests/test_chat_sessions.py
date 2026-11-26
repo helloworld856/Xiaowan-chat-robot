@@ -250,12 +250,12 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [' 😀晚 ', '晚'])
 
 
-    async def test_stream_reports_stages_and_cancel_discards_turn_without_saving(self):
+    async def test_cancel_discards_in_flight_turn_without_saving_and_single_delete_is_scoped(self):
         from fastapi import FastAPI
         from httpx import ASGITransport, AsyncClient
         from app.api.chat import router as chat_router
         from app.api.history import router as history_router
-        from app.chat.progress import check_cancelled, report_stage
+        from app.chat.progress import check_cancelled
         from app.chat.scheduler import ChatSessions
         from app.system_config import SystemConfig
 
@@ -267,13 +267,11 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         saved_rounds = []
 
         def run(self_, entry, user, text):
-            report_stage('analyzing')
-            report_stage('tool:get_weather')
+            check_cancelled()
             if text == 'cancel-me':
                 tool_entered.set()
                 release_tool.wait(3)
             check_cancelled()
-            report_stage('generating')
             saved_rounds.append(text)
             return {
                 'ai_response': ['晴天回复'],
@@ -304,37 +302,26 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
             patch('app.api.history.delete_history_round', side_effect=fake_delete),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
-                streamed = await client.post('/chat/stream', json={'user_input': '查杭州天气', 'turn_id': 'turn_ok'})
-                self.assertEqual(streamed.status_code, 200)
-                self.assertEqual(streamed.headers.get('x-accel-buffering'), 'no')
-                events = [
-                    __import__('json').loads(line.removeprefix('data: '))
-                    for line in streamed.text.splitlines() if line.startswith('data: ')
-                ]
-                stages = [event['stage'] for event in events if event['type'] == 'status']
-                self.assertEqual(stages, ['analyzing', 'tool:get_weather', 'generating'])
-                self.assertEqual(events[-1], {
-                    'type': 'done',
+                completed = await client.post('/chat', json={'user_input': '查杭州天气', 'turn_id': 'turn_ok'})
+                self.assertEqual(completed.status_code, 200)
+                self.assertEqual(completed.json(), {
                     'response': ['晴天回复'],
                     'conversation_round': 0,
                     'saved': True,
                     'created_at': 1764150000500,
                 })
 
-                # 测试进行中的请求取消后立即返回 cancelled，且不写入记录
+                # 进行中的请求取消后返回 499 CHAT_CANCELLED，且不写入记录
                 in_flight = asyncio.create_task(
-                    client.post('/chat/stream', json={'user_input': 'cancel-me', 'turn_id': 'turn_cancel'})
+                    client.post('/chat', json={'user_input': 'cancel-me', 'turn_id': 'turn_cancel'})
                 )
                 self.assertTrue(await asyncio.to_thread(tool_entered.wait, 3))
                 cancel_res = await client.post('/chat/cancel', json={'turn_id': 'turn_cancel'})
                 self.assertEqual(cancel_res.json(), {'ok': True, 'cancelled': True})
                 release_tool.set()
-                cancelled_stream = await in_flight
-                cancel_events = [
-                    __import__('json').loads(line.removeprefix('data: '))
-                    for line in cancelled_stream.text.splitlines() if line.startswith('data: ')
-                ]
-                self.assertTrue(any(event['type'] == 'cancelled' for event in cancel_events))
+                cancelled_res = await in_flight
+                self.assertEqual(cancelled_res.status_code, 499)
+                self.assertEqual(cancelled_res.json()['detail']['code'], 'CHAT_CANCELLED')
                 self.assertEqual(saved_rounds, ['查杭州天气'])
 
                 # 单轮删除路由验证

@@ -21,25 +21,27 @@ export function invalidateRequests(user?: AuthUser) {
     currentUser = user;
 }
 
-function toChatNotStarted(status: number, detailMessage?: unknown): ChatNotStartedError {
-    const retryable = status !== 422;
-    const fallback = status === 403 ? '请先在设置中配置个人模型和 API Key' :
-        retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
-    return new ChatNotStartedError(typeof detailMessage === 'string' ? detailMessage : fallback, retryable);
+export interface CancellableChatOptions {
+    turnId?: string;
+    signal?: AbortSignal;
 }
 
 async function requestJSON<T>(path: string, options: RequestInit, fallback: string,
-                              mode: 'session' | 'public' | 'logout' | 'session-mutation' = 'session'): Promise<T> {
+                              mode: 'session' | 'public' | 'logout' | 'session-mutation' = 'session',
+                              userSignal?: AbortSignal): Promise<T> {
     const generation = requestGeneration;
     // 写会话 Cookie 的请求需要正常结束，界面失效时只取消普通请求。
     const sessionBound = mode === 'session';
     const user = mode !== 'public' ? currentUser : undefined;
+    const signals: AbortSignal[] = [];
+    if (options.signal) signals.push(options.signal);
+    if (userSignal) signals.push(userSignal);
+    if (sessionBound) signals.push(sessionRequests.signal);
     let response: Response;
     try {
         response = await fetch(`${base_url}${path}`, {
             ...options, credentials: 'same-origin',
-            ...(sessionBound ? {signal: options.signal
-                ? AbortSignal.any([options.signal, sessionRequests.signal]) : sessionRequests.signal} : {}),
+            ...(signals.length ? {signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals)} : {}),
             headers: {
                 'Content-Type': 'application/json',
                 // 账号头用于发现旧标签页，真正的登录身份由 Cookie 决定。
@@ -49,10 +51,14 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
         });
     } catch (error) {
         if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
+        if (userSignal?.aborted) throw new UserCancelledChatError();
         throw error;
     }
     const body = await response.json().catch(() => null);
     if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
+    if (userSignal?.aborted || response.status === 499 || body?.detail?.code === 'CHAT_CANCELLED') {
+        throw new UserCancelledChatError();
+    }
     if (response.status === 401) {
         if ((sessionBound || mode === 'session-mutation') && generation === requestGeneration) {
             window.dispatchEvent(new Event('auth-required'));
@@ -62,144 +68,32 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
     // 后端明确表示未开始处理时，才给原消息加上失败标记。
     if (path.startsWith('/chat') && (response.status === 403 || response.status === 422 || response.status === 409 || response.status === 429 || response.status === 503) &&
         body?.detail?.code === 'CHAT_NOT_STARTED') {
-        throw toChatNotStarted(response.status, body.detail.message);
+        const retryable = response.status !== 422;
+        const message = response.status === 403 ? '请先在设置中配置个人模型和 API Key' :
+            retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
+        throw new ChatNotStartedError(typeof body.detail.message === 'string' ? body.detail.message : message, retryable);
     }
     if (!response.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);
     if (body === null) throw new Error(fallback);
     return body as T;
 }
 
-export interface ChatStreamOptions {
-    turnId?: string;
-    signal?: AbortSignal;
-    onStatus?: (stage: string, label: string) => void;
-}
-
-async function streamChatRequest(path: string, payload: Record<string, unknown>, fallback: string,
-                                 options: ChatStreamOptions = {}): Promise<ChatResponse> {
-    const generation = requestGeneration;
-    const signals: AbortSignal[] = [AbortSignal.timeout(180000), sessionRequests.signal];
-    if (options.signal) signals.push(options.signal);
-    let response: Response;
-    try {
-        response = await fetch(`${base_url}${path}`, {
-            method: 'POST',
-            credentials: 'same-origin',
-            signal: AbortSignal.any(signals),
-            headers: {
-                'Content-Type': 'application/json',
-                ...(currentUser ? {'X-Xiaowan-User': String(currentUser.id)} : {}),
-            },
-            body: JSON.stringify(payload),
-        });
-    } catch (error) {
-        if (generation !== requestGeneration) throw new CancelledRequestError();
-        if (options.signal?.aborted) throw new UserCancelledChatError();
-        throw error;
-    }
-
-    if (generation !== requestGeneration) throw new CancelledRequestError();
-    if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        if (generation !== requestGeneration) throw new CancelledRequestError();
-        if (response.status === 401) {
-            window.dispatchEvent(new Event('auth-required'));
-            throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
-        }
-        if (body?.detail?.code === 'CHAT_NOT_STARTED') {
-            throw toChatNotStarted(response.status, body.detail.message);
-        }
-        throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);
-    }
-
-    if (!response.body) {
-        if (options.signal?.aborted) throw new UserCancelledChatError();
-        throw new Error(fallback);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    try {
-        while (true) {
-            const {value, done} = await reader.read();
-            if (generation !== requestGeneration) throw new CancelledRequestError();
-            if (options.signal?.aborted) throw new UserCancelledChatError();
-            if (value) buffer += decoder.decode(value, {stream: !done});
-            else if (done) buffer += decoder.decode();
-
-            let boundary = buffer.indexOf('\n\n');
-            while (boundary >= 0) {
-                const rawBlock = buffer.slice(0, boundary);
-                buffer = buffer.slice(boundary + 2);
-                boundary = buffer.indexOf('\n\n');
-
-                const dataLines = rawBlock
-                    .split(/\r?\n/)
-                    .filter(line => line.startsWith('data:'))
-                    .map(line => line.slice(5).trimStart());
-                if (!dataLines.length) continue;
-                const event = JSON.parse(dataLines.join('\n'));
-                if (event.type === 'status') {
-                    if (typeof event.stage === 'string' && typeof event.label === 'string') {
-                        options.onStatus?.(event.stage, event.label);
-                    }
-                } else if (event.type === 'done') {
-                    return {
-                        response: Array.isArray(event.response) ? event.response : [],
-                        conversation_round: typeof event.conversation_round === 'number' ? event.conversation_round : null,
-                        saved: Boolean(event.saved),
-                        ...(typeof event.created_at === 'number' ? {created_at: event.created_at} : {}),
-                    };
-                } else if (event.type === 'cancelled') {
-                    throw new UserCancelledChatError();
-                } else if (event.type === 'error') {
-                    if (event.code === 'CHAT_NOT_STARTED') {
-                        throw toChatNotStarted(Number(event.status) || 503, event.message);
-                    }
-                    throw new Error(typeof event.message === 'string' ? event.message : fallback);
-                }
-            }
-            if (done) break;
-        }
-    } catch (error) {
-        if (generation !== requestGeneration) throw new CancelledRequestError();
-        if (options.signal?.aborted || error instanceof UserCancelledChatError) throw new UserCancelledChatError();
-        throw error;
-    } finally {
-        reader.releaseLock();
-    }
-
-    if (options.signal?.aborted) throw new UserCancelledChatError();
-    throw new Error(fallback);
-}
-
-export function chatAPI(userInput: string): Promise<ChatResponse> {
+export function chatAPI(userInput: string, options?: CancellableChatOptions): Promise<ChatResponse> {
+    const payload = options?.turnId
+        ? {user_input: userInput, turn_id: options.turnId}
+        : {user_input: userInput};
     return requestJSON('/chat', {
-        method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify({user_input: userInput})
-    }, '聊天请求失败');
+        method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify(payload)
+    }, '聊天请求失败', 'session', options?.signal);
 }
 
-export function chatStreamAPI(userInput: string, options: ChatStreamOptions = {}): Promise<ChatResponse> {
-    return streamChatRequest('/chat/stream', {
-        user_input: userInput,
-        ...(options.turnId ? {turn_id: options.turnId} : {}),
-    }, '聊天请求失败', options);
-}
-
-export function regenerateChatAPI(conversationRound: number): Promise<ChatResponse> {
+export function regenerateChatAPI(conversationRound: number, options?: CancellableChatOptions): Promise<ChatResponse> {
+    const payload = options?.turnId
+        ? {conversation_round: conversationRound, turn_id: options.turnId}
+        : {conversation_round: conversationRound};
     return requestJSON('/chat/regenerate', {
-        method: 'POST', signal: AbortSignal.timeout(180000),
-        body: JSON.stringify({conversation_round: conversationRound})
-    }, '重新生成失败，请稍后重试');
-}
-
-export function regenerateChatStreamAPI(conversationRound: number,
-                                        options: ChatStreamOptions = {}): Promise<ChatResponse> {
-    return streamChatRequest('/chat/regenerate/stream', {
-        conversation_round: conversationRound,
-        ...(options.turnId ? {turn_id: options.turnId} : {}),
-    }, '重新生成失败，请稍后重试', options);
+        method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify(payload)
+    }, '重新生成失败，请稍后重试', 'session', options?.signal);
 }
 
 export function cancelChatAPI(turnId?: string) {

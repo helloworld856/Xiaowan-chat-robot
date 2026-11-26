@@ -1,8 +1,4 @@
-import asyncio
-import json
-
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_serializer
 
 from app.account_logging import logger
@@ -72,60 +68,17 @@ def _raise_not_started(error: ChatNotStarted):
     ) from None
 
 
-def _stream_execution(execute):
-    loop = asyncio.get_running_loop()
-    events: asyncio.Queue[dict] = asyncio.Queue()
-
-    def push(payload: dict) -> None:
-        loop.call_soon_threadsafe(events.put_nowait, payload)
-
-    def on_stage(stage: str, label: str) -> None:
-        push({'type': 'status', 'stage': stage, 'label': label})
-
-    def on_cancel() -> None:
-        push({'type': 'cancelled'})
-
-    async def runner():
-        try:
-            result = await execute(on_stage, on_cancel)
-        except ChatCancelled:
-            events.put_nowait({'type': 'cancelled'})
-        except ChatNotStarted as error:
-            events.put_nowait({
-                'type': 'error',
-                'status': error.status_code,
-                'code': 'CHAT_NOT_STARTED',
-                'message': str(error),
-            })
-        except Exception as error:
-            logger.error('chat execution failed: %s', type(error).__name__)
-            events.put_nowait({'type': 'error', 'status': 500, 'message': 'AI 处理失败，请稍后重试'})
-        else:
-            events.put_nowait({'type': 'done', **_build_response(result).model_dump()})
-
-    task = asyncio.create_task(runner())
-    task.add_done_callback(lambda done: not done.cancelled() and done.exception())
-
-    async def event_stream():
-        while True:
-            event = await events.get()
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if event['type'] in ('done', 'cancelled', 'error'):
-                break
-
-    return StreamingResponse(
-        event_stream(),
-        media_type='text/event-stream',
-        headers={'X-Accel-Buffering': 'no'},
-    )
-
-
 @router.post('/chat', response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request):
     try:
         _validate_user_input(request, req.user_input)
-        # 调度使用认证后的账号，消息体只提供聊天内容。
-        result = await request.app.state.chat.send(request.state.user, req.user_input)
+        # 调度使用认证后的账号，带 turn_id 时支持主动取消且取消后不落库。
+        if req.turn_id is None:
+            result = await request.app.state.chat.send(request.state.user, req.user_input)
+        else:
+            result = await request.app.state.chat.send(request.state.user, req.user_input, turn_id=req.turn_id)
+    except ChatCancelled:
+        raise HTTPException(499, detail={'code': 'CHAT_CANCELLED', 'message': '已停止本次回复'}) from None
     except ChatNotStarted as error:
         _raise_not_started(error)
     except Exception as error:
@@ -135,23 +88,6 @@ async def chat(req: ChatRequest, request: Request):
     return _build_response(result)
 
 
-@router.post('/chat/stream')
-async def chat_stream(req: ChatRequest, request: Request):
-    try:
-        _validate_user_input(request, req.user_input)
-    except ChatNotStarted as error:
-        _raise_not_started(error)
-
-    user = request.state.user
-    sessions = request.app.state.chat
-    return _stream_execution(
-        lambda on_stage, on_cancel: sessions.send(
-            user, req.user_input, turn_id=req.turn_id, cancellable=True,
-            on_stage=on_stage, on_cancel=on_cancel,
-        )
-    )
-
-
 @router.post('/chat/regenerate', response_model=ChatResponse)
 async def regenerate_chat(req: RegenerateRequest, request: Request):
     try:
@@ -159,7 +95,7 @@ async def regenerate_chat(req: RegenerateRequest, request: Request):
             request.state.user, req.conversation_round, turn_id=req.turn_id,
         )
     except ChatCancelled:
-        raise HTTPException(499, '已取消生成') from None
+        raise HTTPException(499, detail={'code': 'CHAT_CANCELLED', 'message': '已停止本次回复'}) from None
     except ChatNotStarted as error:
         _raise_not_started(error)
     except Exception as error:
@@ -167,18 +103,6 @@ async def regenerate_chat(req: RegenerateRequest, request: Request):
         raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
 
     return _build_response(result)
-
-
-@router.post('/chat/regenerate/stream')
-async def regenerate_chat_stream(req: RegenerateRequest, request: Request):
-    user = request.state.user
-    sessions = request.app.state.chat
-    return _stream_execution(
-        lambda on_stage, on_cancel: sessions.regenerate(
-            user, req.conversation_round, turn_id=req.turn_id, cancellable=True,
-            on_stage=on_stage, on_cancel=on_cancel,
-        )
-    )
 
 
 @router.post('/chat/cancel')

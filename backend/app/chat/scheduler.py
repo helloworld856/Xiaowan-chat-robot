@@ -1,8 +1,7 @@
-"""Single-process chat scheduling, progress hooks, and cooperative cancellation."""
+"""Single-process chat scheduling and cooperative cancellation."""
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from contextvars import copy_context
@@ -12,12 +11,11 @@ from functools import partial
 from threading import Event
 from time import perf_counter
 from typing import Any
-from uuid import uuid4
 
 from app.account_logging import discard_logs_after, logger
 from app.accounts.repository import User
 from app.chat.memory import MemoryManager
-from app.chat.progress import ChatCancelled, STAGE_LABELS, chat_progress_context
+from app.chat.progress import ChatCancelled, chat_cancel_context
 from app.chat.state import AIChatState, create_initial_state
 from app.llm.configuration import AdminModelRuntime
 from app.llm.personal_models import PersonalModelStore
@@ -40,7 +38,6 @@ class ChatRuntime:
 class TurnHandle:
     turn_id: str
     cancel_event: Event
-    on_cancel: Callable[[], None] | None = None
     waiter: asyncio.Task | None = None
     running: bool = False
 
@@ -116,31 +113,16 @@ class ChatSessions:
                 entry.cancelling_worker = True
             if handle.waiter is not None and not handle.waiter.done():
                 handle.waiter.cancel()
-            if handle.on_cancel is not None:
-                handle.on_cancel()
         logger.info('chat turn cancel_requested count=%d', len(targets))
         return True
 
-    async def send(self, user: User, text: str, *, turn_id: str | None = None, cancellable: bool = False,
-                   on_stage: Callable[[str, str], None] | None = None,
-                   on_cancel: Callable[[], None] | None = None):
-        return await self._schedule(
-            user, text, regenerate_round=None, turn_id=turn_id,
-            cancellable=cancellable, on_stage=on_stage, on_cancel=on_cancel,
-        )
+    async def send(self, user: User, text: str, *, turn_id: str | None = None):
+        return await self._schedule(user, text, regenerate_round=None, turn_id=turn_id)
 
-    async def regenerate(self, user: User, conversation_round: int, *, turn_id: str | None = None,
-                         cancellable: bool = False, on_stage: Callable[[str, str], None] | None = None,
-                         on_cancel: Callable[[], None] | None = None):
-        return await self._schedule(
-            user, '', regenerate_round=conversation_round, turn_id=turn_id,
-            cancellable=cancellable, on_stage=on_stage, on_cancel=on_cancel,
-        )
+    async def regenerate(self, user: User, conversation_round: int, *, turn_id: str | None = None):
+        return await self._schedule(user, '', regenerate_round=conversation_round, turn_id=turn_id)
 
-    async def _schedule(self, user: User, text: str, *, regenerate_round: int | None,
-                        turn_id: str | None, cancellable: bool,
-                        on_stage: Callable[[str, str], None] | None,
-                        on_cancel: Callable[[], None] | None):
+    async def _schedule(self, user: User, text: str, *, regenerate_round: int | None, turn_id: str | None):
         start = perf_counter()
         user_id = user.id
         if self._closing:
@@ -159,20 +141,17 @@ class ChatSessions:
             entry = self._users[user_id] = AccountChat()
 
         handle: TurnHandle | None = None
-        if cancellable or turn_id is not None:
-            key = turn_id or uuid4().hex
-            handle = TurnHandle(turn_id=key, cancel_event=Event(), on_cancel=on_cancel)
-            entry.turns[key] = handle
-            if turn_id and turn_id in entry.cancelled_turns:
-                entry.turns.pop(key, None)
+        if turn_id is not None:
+            handle = TurnHandle(turn_id=turn_id, cancel_event=Event())
+            entry.turns[turn_id] = handle
+            if turn_id in entry.cancelled_turns:
+                entry.turns.pop(turn_id, None)
                 raise ChatCancelled()
 
         wait_budget = max(self._wait_timeout, 15.0) if entry.cancelling_worker else self._wait_timeout
         if queued:
             entry.waiting = True
             self._waiting += 1
-            if on_stage is not None:
-                on_stage('queued', STAGE_LABELS['queued'])
 
         account_acquired = False
         slot_acquired = False
@@ -233,9 +212,7 @@ class ChatSessions:
         if handle is not None:
             handle.running = True
         logger.info('chat queue_ms=%.1f', (perf_counter() - start) * 1000)
-        work = asyncio.create_task(
-            self._execute(entry, user, text, regenerate_round=regenerate_round, handle=handle, on_stage=on_stage)
-        )
+        work = asyncio.create_task(self._execute(entry, user, text, regenerate_round=regenerate_round, handle=handle))
         entry.worker = work
         work.add_done_callback(self._consume_error)
         # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
@@ -257,15 +234,14 @@ class ChatSessions:
 
     async def _execute(self, entry: AccountChat, user: User, text: str, *,
                        regenerate_round: int | None = None,
-                       handle: TurnHandle | None = None,
-                       on_stage: Callable[[str, str], None] | None = None):
+                       handle: TurnHandle | None = None):
         cancel_event = handle.cancel_event if handle is not None else None
         try:
             loop = asyncio.get_running_loop()
             runner = self._run if regenerate_round is None else partial(self._run_regenerate,
                                                                         regenerate_round=regenerate_round)
-            # 模型调用在线程池执行，复制上下文让线程日志、进度回调和取消信号都归属当前轮次。
-            with chat_progress_context(cancel_event, on_stage):
+            # 模型调用在线程池执行，复制上下文让线程日志和取消信号都归属当前账号与轮次。
+            with chat_cancel_context(cancel_event):
                 if cancel_event is not None:
                     with discard_logs_after(cancel_event):
                         return await loop.run_in_executor(self._executor, copy_context().run, runner, entry, user, text)
