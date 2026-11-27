@@ -1,12 +1,13 @@
 from contextlib import asynccontextmanager
 from functools import partial
+from logging import ERROR
 from pathlib import Path
 
 from dotenv import dotenv_values
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
-from app.account_logging import close_account_logs, logger
+from app.account_logging import close_account_logs, log_event, logger
 from app.accounts.auth_service import AuthService, hash_password
 from app.accounts.directory import UserDirectoryStore
 from app.accounts.files import UserDataPaths, protect_file
@@ -74,6 +75,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
     def startup():
         logger.info("version:%s", VERSION)
         initialize_schema(db)
+        log_event('db_schema_ready', system=True)
         admin = accounts.get_admin()
         if admin is None:
             # 只在空库读取初始密码，关闭变量展开以保留密码里的特殊字符。
@@ -88,6 +90,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
                                    f'{INITIAL_ADMIN_PASSWORD_MIN_LENGTH}–{INITIAL_ADMIN_PASSWORD_MAX_LENGTH} '
                                    '个字符的 ADMIN_INITIAL_PASSWORD，再启动后端')
             admin = accounts.initialize_admin(hash_password(password))
+            log_event('admin_initialized', system=True, user_id=admin.id)
         directories.recover_deletions(accounts)
         directories.migrate_legacy(accounts)
         directories.paths.bind(admin)
@@ -114,7 +117,13 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         except (OSError, ValueError):
             logger.warning('无法初始化管理员的个人目录，请检查文件权限与格式')
         if chat_config.clear_history_on_startup:
-            reset_chat_history(db)
+            try:
+                reset_chat_history(db)
+            except Exception as error:
+                log_event('startup_history_clear', level=ERROR, system=True, outcome='failed',
+                          error=type(error).__name__)
+                raise
+            log_event('startup_history_clear', system=True, outcome='succeeded')
         model_configuration.activate_saved_model(lambda: import_legacy_admin_model(
             legacy_model, legacy_environment(config_root),
             previous=directories.paths.file(admin.id, 'model.json'),

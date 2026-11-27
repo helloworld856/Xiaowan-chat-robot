@@ -1,10 +1,16 @@
 from contextlib import contextmanager
+from logging import WARNING
 from threading import BoundedSemaphore, Lock
 
 import pymysql
 
-from app.account_logging import logger
-from app.account_logging import account_log_context
+from app.account_logging import log_event
+
+
+def _log_pool_error(event: str, error: Exception) -> None:
+    code = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args else None
+    log_event(event, level=WARNING, system=True, error=type(error).__name__,
+              mysql_code=code if type(code) is int else None)
 
 
 class ConnectionPool:
@@ -22,13 +28,13 @@ class ConnectionPool:
     def _close_connection(connection):
         try:
             connection.close()
-        except (OSError, pymysql.MySQLError):
-            with account_log_context(None, None):
-                logger.warning('关闭数据库连接失败')
+        except (OSError, pymysql.MySQLError) as error:
+            _log_pool_error('db_connection_close_failed', error)
 
     @contextmanager
     def connection(self):
         if not self._slots.acquire(timeout=self._wait_timeout):
+            log_event('db_checkout_timeout', level=WARNING, system=True, timeout_seconds=self._wait_timeout)
             raise pymysql.OperationalError('等待数据库连接超时')
         connection = None
         try:
@@ -46,8 +52,13 @@ class ConnectionPool:
                     self._close_connection(failed)
                     if not isinstance(error, (OSError, pymysql.MySQLError)):
                         raise
+                    _log_pool_error('db_connection_discarded', error)
             if connection is None:
-                connection = self._connect()
+                try:
+                    connection = self._connect()
+                except (OSError, pymysql.MySQLError) as error:
+                    _log_pool_error('db_connection_open_failed', error)
+                    raise
             with self._lock:
                 if self._closed:
                     raise pymysql.OperationalError('数据库连接池已关闭')
@@ -58,7 +69,8 @@ class ConnectionPool:
                     try:
                         # 归还前清掉调用方留下的事务，避免下一次借用读到旧状态。
                         connection.rollback()
-                    except (OSError, pymysql.MySQLError):
+                    except (OSError, pymysql.MySQLError) as error:
+                        _log_pool_error('db_rollback_failed', error)
                         self._close_connection(connection)
                     else:
                         with self._lock:

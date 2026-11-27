@@ -172,6 +172,44 @@ class AccountStoreTests(unittest.TestCase):
         self.assertEqual(set(entry.name for entry in folder.iterdir()),
                          {'profile.json', 'model.json', 'preferences.json', 'logs'})
 
+    def test_registration_allocates_a_fresh_directory_when_the_name_is_occupied(self):
+        from app.accounts.directory import UserDirectoryStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.profile import ProfileStore
+
+        profiles = ProfileStore(self.root / 'users')
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(self.pool))
+        occupied = profiles.root / 'Member'
+        occupied.mkdir(parents=True)
+        note = occupied / 'note.txt'
+        note.write_text('existing directory', encoding='utf-8')
+        store = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)
+
+        user = store.register('Member', 'test credential hash')
+
+        self.assertFalse(user.uses_username_directory)
+        self.assertEqual(store.find('member').user, user)
+        self.assertEqual(profiles.path_for(user.id).parent, profiles.root / str(user.id))
+        self.assertTrue(profiles.path_for(user.id).is_file())
+        self.assertEqual(list(occupied.iterdir()), [note])
+
+    def test_registration_preparation_failure_releases_the_new_directory(self):
+        from app.accounts.directory import UserDirectoryStore
+        from app.accounts.preferences import UserPreferencesStore
+        from app.accounts.profile import ProfileStore
+
+        profiles = ProfileStore(self.root / 'users')
+        directories = UserDirectoryStore(profiles, UserPreferencesStore(self.pool))
+        store = SQLAccountStore(self.pool, prepare_user=directories.prepare_new)
+
+        with patch.object(directories.models, 'ensure', side_effect=OSError('write failed')):
+            with self.assertRaises(AccountStorageError):
+                store.register('Member', 'test credential hash')
+
+        self.assertIsNone(store.find('member'))
+        self.assertFalse((profiles.root / 'Member').exists())
+        self.assertTrue(store.register('Member', 'test credential hash').uses_username_directory)
+
     def test_new_numeric_and_windows_device_usernames_keep_separate_directories(self):
         from app.accounts.directory import UserDirectoryStore
         from app.accounts.preferences import UserPreferencesStore

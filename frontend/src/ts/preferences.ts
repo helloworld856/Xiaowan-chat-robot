@@ -1,12 +1,8 @@
 export interface Preferences {
+    chat_font_size: 'small' | 'standard' | 'large';
     send_shortcut: 'enter' | 'ctrl_enter';
     theme: 'theme0' | 'theme1' | 'theme2' | 'theme3';
 }
-
-export const preferences: Preferences = {
-    send_shortcut: 'enter',
-    theme: 'theme0'
-};
 
 export function shouldSendMessage(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'keyCode'>, shortcut: Preferences['send_shortcut']) {
     // 输入法确认与 Shift+Enter 保留给输入框，避免误发。

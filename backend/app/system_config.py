@@ -78,6 +78,9 @@ class ProfileConfig(_ConfigSection):
 
 
 class DefaultsConfig(_ConfigSection):
+    chat_font_size: Literal['small', 'standard', 'large'] = Field(
+        default='standard', description='新账号聊天字号。可选 small、standard 或 large。',
+    )
     send_shortcut: Literal['enter', 'ctrl_enter'] = Field(default='enter', description='新账号发送快捷键。可选 enter 或 ctrl_enter。')
     theme: Literal['theme0', 'theme1', 'theme2', 'theme3'] = Field(
         default='theme0', description='新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵。',

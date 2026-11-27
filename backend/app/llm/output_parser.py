@@ -10,6 +10,13 @@ from typing import Optional
 from app.account_logging import logger
 
 
+def replace_invalid_unicode(text: str) -> str:
+    # 容错解码会保留缺少配对的代理码点，无法直接写入 UTF-8。
+    if re.search(r'[\ud800-\udfff]', text):
+        return text.encode('utf-16-le', 'surrogatepass').decode('utf-16-le', 'replace')
+    return text
+
+
 def model_text(content: object) -> str:
     if isinstance(content, str):
         text = content
@@ -24,7 +31,8 @@ def model_text(content: object) -> str:
     else:
         return ''
     # 只保留可见正文，起始处未闭合的推理块也会去除。
-    return re.sub(r'^\s*(?:<think>.*?(?:</think>|$)\s*)+', '', text, flags=re.IGNORECASE | re.DOTALL).strip()
+    visible = re.sub(r'^\s*(?:<think>.*?(?:</think>|$)\s*)+', '', text, flags=re.IGNORECASE | re.DOTALL)
+    return replace_invalid_unicode(visible.strip())
 
 
 def parse_model_json(text: str, expected_keys: Collection[str] = ()) -> dict | None:

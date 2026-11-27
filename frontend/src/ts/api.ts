@@ -12,7 +12,6 @@ export class ChatNotStartedError extends Error {
     constructor(message: string, readonly retryable = true) { super(message); }
 }
 export function getRequestGeneration() { return requestGeneration; }
-export function canManageModel() { return currentUser?.role === 'admin'; }
 // 账号切换时取消旧请求，并用请求代数拦住迟到的响应。
 export function invalidateRequests(user?: AuthUser) {
     requestGeneration++;
@@ -22,8 +21,9 @@ export function invalidateRequests(user?: AuthUser) {
 }
 
 async function requestJSON<T>(path: string, options: RequestInit, fallback: string,
-                              mode: 'session' | 'public' | 'logout' = 'session'): Promise<T> {
+                              mode: 'session' | 'public' | 'logout' | 'session-mutation' = 'session'): Promise<T> {
     const generation = requestGeneration;
+    // 写会话 Cookie 的请求需要正常结束，界面失效时只取消普通请求。
     const sessionBound = mode === 'session';
     const user = mode !== 'public' ? currentUser : undefined;
     let response: Response;
@@ -46,7 +46,9 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
     const body = await response.json().catch(() => null);
     if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
     if (response.status === 401) {
-        if (sessionBound) window.dispatchEvent(new Event('auth-required'));
+        if ((sessionBound || mode === 'session-mutation') && generation === requestGeneration) {
+            window.dispatchEvent(new Event('auth-required'));
+        }
         throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
     }
     // 后端明确表示未开始处理时，才给原消息加上失败标记。
@@ -81,7 +83,7 @@ export function clearHistoryAPI() {
 export function deleteAccountAPI(current_password: string) {
     return requestJSON<{ok: boolean}>('/auth/account', {
         method: 'DELETE', body: JSON.stringify({current_password})
-    }, '注销账户失败，请稍后重试');
+    }, '注销账户失败，请稍后重试', 'session-mutation');
 }
 
 export function personaAPI() {
@@ -167,5 +169,5 @@ export function profileAPI(profile?: {nickname: string; avatar_id: AvatarId}) {
 export function changePasswordAPI(passwords: {current_password: string; new_password: string; confirm_password: string}) {
     return requestJSON<{ok: boolean}>('/auth/password', {
         method: 'POST', signal: AbortSignal.timeout(15000), body: JSON.stringify(passwords)
-    }, '密码修改失败，请重试');
+    }, '密码修改失败，请重试', 'session-mutation');
 }

@@ -1,6 +1,7 @@
 import json
+from logging import WARNING
 
-from app.account_logging import logger
+from app.account_logging import log_event, logger
 
 
 HISTORY_CACHE_LIMIT = 256
@@ -104,6 +105,8 @@ class MemoryManager:
                 older = _read_history(cursor, self.user_id, count)
             if len(older) != count:
                 self._stale = True
+                log_event('history_compression', level=WARNING, outcome='skipped', reason='history_changed',
+                          expected_rounds=count, available_rounds=len(older))
                 return
 
             prompt = f"""【已有摘要】
@@ -141,9 +144,11 @@ user 是用户，assistant 是{persona.BOT_NAME}。
                         history, has_older_history = self._read_recent_history(cursor)
                 self._commit(db)
         except Exception as error:
-            logger.warning('history compression failed: %s', type(error).__name__)
+            log_event('history_compression', level=WARNING, outcome='failed', error=type(error).__name__,
+                      attempted_rounds=count)
             return
 
         self.abstract_cache = summary
         self.history_cache = history
         self.has_older_history = has_older_history
+        log_event('history_compression', outcome='succeeded', rounds=removed, through_round=cutoff)

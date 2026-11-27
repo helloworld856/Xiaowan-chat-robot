@@ -13,6 +13,10 @@ from app.llm.model_catalog import (BaseURL, ModelAdapter, ModelCatalog, ModelEnd
 from app.llm.public_endpoint import PublicEndpoint
 
 
+class PersonalModelAddressChange(ValueError):
+    pass
+
+
 class PersonalModel(ModelSelection):
     api_key: ApiKey | None = None
     base_url: BaseURL | None = None
@@ -141,6 +145,8 @@ class PersonalModelStore:
         else:
             base_url = model.base_url or endpoint.base_url
             public_only = base_url != endpoint.base_url
+        if model.api_key is None and saved is not None and base_url != saved.base_url:
+            raise PersonalModelAddressChange('更换接口地址时，请重新填写此地址的 API Key')
         if public_only:
             PublicEndpoint(base_url)
         return ActivePersonalModel(model_merchant=merchant, model_name=name, api_key=key,

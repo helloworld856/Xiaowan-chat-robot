@@ -40,6 +40,8 @@ class SettingsTests(unittest.TestCase):
             Preferences(send_shortcut='unknown')
         with self.assertRaises(ValidationError):
             Preferences(theme='unknown')
+        with self.assertRaises(ValidationError):
+            Preferences(chat_font_size='unknown')
 
     def test_failed_write_keeps_previous_config(self):
         from pydantic import SecretStr
@@ -64,7 +66,8 @@ class SettingsTests(unittest.TestCase):
             'preferences': {'reply_length': 'short', 'split_reply': False, 'playback_mode': 'instant', 'reply_interval_ms': 2000, 'send_shortcut': 'ctrl_enter'}
         }), encoding='utf-8')
         loaded = self.store.get()
-        self.assertEqual(loaded.preferences.model_dump(), {'send_shortcut': 'ctrl_enter', 'theme': 'theme0'})
+        self.assertEqual(loaded.preferences.model_dump(),
+                         {'send_shortcut': 'ctrl_enter', 'theme': 'theme0', 'chat_font_size': 'standard'})
         self.assertEqual(loaded.model.model_name, 'MyModel')
 
 

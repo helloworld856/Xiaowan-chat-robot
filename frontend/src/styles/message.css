@@ -5,7 +5,7 @@
 .assistant_message {
     display: flex;
     align-items: flex-start;
-    margin-bottom: 1rem;
+    margin-bottom: 1.1rem;
     animation: messageFromRight 0.22s ease-out;
 }
 
@@ -31,8 +31,6 @@
 .assistant_avatar {
     width: 2.2rem;
     height: 2.2rem;
-    min-width: 2.2rem;
-    min-height: 2.2rem;
     border-radius: 50%;
     overflow: hidden;
     flex-shrink: 0;
@@ -48,14 +46,18 @@
 }
 
 /* --- 气泡通用 --- */
+[data-chat-font-size="small"] { --chat-font-size: 0.875rem; }
+[data-chat-font-size="large"] { --chat-font-size: 1.125rem; }
+
 .user_bubble,
 .assistant_bubble {
-    max-width: 50%;
-    padding: 0.8rem 1rem;
-    border-radius: 12px;
-    line-height: 1.6;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
+    min-width: 0;
+    max-width: min(65%, 34rem);
+    margin-top: 0.125rem;
+    padding: 0.55rem 0.8rem;
+    font-size: var(--chat-font-size, 1rem);
+    line-height: 1.65;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
 }
 
@@ -67,10 +69,9 @@
 }
 
 .user_bubble {
-    margin-top: 0.5rem;
     background: var(--user-bubble);
     color: var(--user-text);
-    border-radius: 12px 6px 12px 12px;
+    border-radius: 16px 8px 16px 16px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -98,6 +99,8 @@ html.theme0 .user_bubble { box-shadow: none; }
     animation-name: messageFromLeft;
 }
 
+.assistant_message:has(+ .assistant_message) { margin-bottom: 0.6rem; }
+
 .assistant_bag {
     display: flex;
     align-items: flex-start;
@@ -119,10 +122,9 @@ html.theme0 .user_bubble { box-shadow: none; }
 }
 
 .assistant_bubble {
-    margin-top: 0.5rem;
     background: var(--bot-bubble);
     color: var(--bot-text);
-    border-radius: 6px 12px 12px 12px;
+    border-radius: 8px 16px 16px 16px;
 }
 
 /* 等待回复时的三个圆点，独立于页面最初的加载动画 */
@@ -143,12 +145,6 @@ html.theme0 .user_bubble { box-shadow: none; }
 
 .chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
 .chat-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
-
-.chat-delivery {
-    color: var(--menu-text);
-    font-size: 0.85rem;
-    line-height: 1.5;
-}
 
 /* 失败标记附在原消息上，方便用户找到可重试的内容。 */
 .chat-send-failed {
@@ -174,15 +170,17 @@ html.theme0 .user_bubble { box-shadow: none; }
     outline-offset: -4px;
 }
 
-.chat-delivery-uncertain {
-    margin: 0 0 1rem auto;
-    width: fit-content;
-    max-width: 80%;
-    overflow-wrap: anywhere;
+.chat-delivery-action {
+    padding: 0.45rem 0.65rem;
+    border: 1px solid var(--input-border);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--menu-text);
+    font: inherit;
+    cursor: pointer;
 }
 
-.chat-delivery-uncertain summary { cursor: pointer; }
-.chat-delivery-uncertain p { margin-top: 0.3rem; white-space: pre-wrap; }
+.chat-delivery-action:hover { background: var(--menu-hover); }
 
 @keyframes chatTyping {
     0%, 60%, 100% { opacity: 0.4; transform: translateY(0); }
@@ -205,8 +203,9 @@ html.theme0 .user_bubble { box-shadow: none; }
 @media (max-width: 600px) {
     .user_bubble,
     .assistant_bubble {
-        max-width: 80%;
-        font-size: 0.9rem;
+        max-width: 85%;
+        padding-inline: 0.65rem;
+        font-size: var(--chat-font-size, 0.9375rem);
     }
     
     .user_avatar,
@@ -217,6 +216,7 @@ html.theme0 .user_bubble { box-shadow: none; }
     
     .user_triangle,
     .assistant_triangle {
+        margin-top: 0.58rem;
         border-width: 5px;
     }
 }

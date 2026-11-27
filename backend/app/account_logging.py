@@ -1,15 +1,19 @@
+import json
 import logging
 import os
 import re
+import time
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from threading import Event
 
 from app import config
-from app.accounts.files import DIRECTORY_MIGRATION_MARKER, UserDataPaths, protect_file, require_directory, require_file
-from app.accounts.repository import USERNAME_PATTERN
+from app.accounts.files import (DIRECTORY_MIGRATION_MARKER, UserDataPaths, _private_directory, protect_file,
+                                require_directory, require_file)
+from app.accounts.repository import USERNAME_PATTERN, User
 from app.system_config import LoggingConfig
 
 
@@ -59,23 +63,72 @@ def reset_active_logs(system_log: Path, paths: UserDataPaths) -> None:
             logger.warning('无法清空账号 %s 的日志（%s）', name, type(error).__name__)
 
 
-account_log = ContextVar[tuple[UserDataPaths, int] | None]('account_log', default=None)
+account_log = ContextVar[tuple[UserDataPaths, User] | None]('account_log', default=None)
+request_log = ContextVar[str | None]('request_log', default=None)
+cancelled_work_log = ContextVar[Event | None]('cancelled_work_log', default=None)
 
 
 @contextmanager
-def account_log_context(paths: UserDataPaths | None, user_id: int | None):
+def account_log_context(paths: UserDataPaths | None, user: User | None):
     # 把账号绑定到当前请求，退出时恢复原上下文，避免后续请求串用。
-    token = account_log.set((paths, user_id) if paths is not None and user_id is not None else None)
+    token = account_log.set((paths, user) if paths is not None and user is not None else None)
     try:
         yield
     finally:
         account_log.reset(token)
 
 
+@contextmanager
+def request_log_context(request_id: str):
+    token = request_log.set(request_id)
+    try:
+        yield
+    finally:
+        request_log.reset(token)
+
+
+@contextmanager
+def discard_logs_after(cancelled: Event):
+    token = cancelled_work_log.set(cancelled)
+    try:
+        yield
+    finally:
+        cancelled_work_log.reset(token)
+
+
+def log_event(event: str, *, level: int = logging.INFO, system: bool = False, **fields) -> None:
+    # 调用方只传事件代码和已知安全的元数据。
+    details = ''.join(f' {name}={_field_value(value)}' for name, value in fields.items() if value is not None)
+    logger.log(level, 'event=%s%s', event, details, extra={'system_event': system}, stacklevel=2)
+
+
+def _field_value(value) -> str:
+    text = str(value)
+    return text if re.fullmatch(r'[\w./:<>{}%+-]+', text) else json.dumps(text)
+
+
 class AccountLabel(logging.Filter):
     def filter(self, record):
-        context = account_log.get()
-        record.account_label = f' [账号 {context[1]}]' if context is not None else ''
+        context = None if getattr(record, 'system_event', False) else account_log.get()
+        record.account_label = f' [账号 {context[1].username}]' if context is not None else ''
+        in_request = request_log.get() is not None
+        # SDK 的告警可能包含请求 URL、上游响应或异常正文。
+        if (record.name != 'xiaowan' and in_request
+                or record.name == 'asyncio' and record.exc_info):
+            error = record.exc_info[0] if record.exc_info else None
+            record.msg = 'event=dependency_log source=%s%s'
+            record.args = (_field_value(record.name), f' error={error.__name__}' if error is not None else '')
+            record.exc_info = record.exc_text = record.stack_info = None
+        return True
+
+
+class SafeServerErrors(logging.Filter):
+    def filter(self, record):
+        if record.exc_info and record.getMessage().startswith(('Exception in ASGI application', 'Exception in ASGI framework')):
+            error = record.exc_info[0]
+            record.msg = 'event=asgi_failure error=%s'
+            record.args = (error.__name__ if error is not None else 'Unknown',)
+            record.exc_info = record.exc_text = record.stack_info = None
         return True
 
 
@@ -95,7 +148,8 @@ class AccountFileHandler(logging.Handler):
         super().__init__()
         self._options = dict(maxBytes=max_bytes, backupCount=_DEFAULTS.backup_count, delay=True, encoding='utf-8',
                              errors='backslashreplace')
-        self._system = RotatingFileHandler(path, **self._options)
+        self._system = PrivateLogFile(path, **self._options)
+        self.console: logging.Handler | None = None
         self._personal = OrderedDict()
         self._max_open = max_open
 
@@ -119,11 +173,15 @@ class AccountFileHandler(logging.Handler):
             pass
 
     def emit(self, record):
-        context = account_log.get()
-        if context is None:
-            self._system.handle(record)
+        cancelled = cancelled_work_log.get()
+        if cancelled is not None and cancelled.is_set():
             return
-        paths, user_id = context
+        context = None if getattr(record, 'system_event', False) else account_log.get()
+        if context is None:
+            self._emit_system(record)
+            return
+        paths, user = context
+        user_id = user.id
         key = (paths.root, user_id)
         try:
             handler = self._personal.get(key)
@@ -146,7 +204,18 @@ class AccountFileHandler(logging.Handler):
             fallback = logging.LogRecord(record.name, logging.WARNING, __file__, 0,
                                          '账号 %d 的运行日志写入失败（%s）', (user_id, type(error).__name__), None)
             fallback.account_label = ''
-            self._system.handle(fallback)
+            self._emit_system(fallback)
+
+    def _emit_system(self, record):
+        try:
+            self._system.handle(record)
+        except (OSError, ValueError) as error:
+            fallback = logging.LogRecord(record.name, logging.ERROR, __file__, 0,
+                                         'event=system_log_write_failed error=%s', (type(error).__name__,), None)
+            fallback.account_label = ''
+            (self.console or logging.lastResort).handle(fallback)
+        if self.console is not None:
+            self.console.handle(record)
 
     def close_accounts(self, paths: UserDataPaths | None = None, user_id: int | None = None) -> None:
         with self.lock:
@@ -168,9 +237,10 @@ def get_logger():
     logger.setLevel(logging.INFO)
     logger.propagate = False
     formatter = logging.Formatter('%(asctime)s %(levelname)s%(account_label)s %(message)s',
-                                  datefmt='%Y-%m-%d %H:%M:%S')
+                                  datefmt='%Y-%m-%dT%H:%M:%SZ')
+    formatter.converter = time.gmtime
     log_path = config.SYSTEM_LOG_PATH
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    _private_directory(log_path.parent)
     handler = AccountFileHandler(log_path)
     handler.setFormatter(formatter)
     handler.addFilter(AccountLabel())
@@ -188,6 +258,12 @@ def configure_logging(settings: LoggingConfig) -> None:
     for handler in logger.handlers:
         if isinstance(handler, AccountFileHandler):
             handler.configure(settings)
+
+
+def configure_system_console(console: logging.Handler) -> None:
+    for handler in logger.handlers:
+        if isinstance(handler, AccountFileHandler):
+            handler.console = console
 
 
 logger = get_logger()

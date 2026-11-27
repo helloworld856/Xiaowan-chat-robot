@@ -41,13 +41,7 @@
     color: inherit;
     font: inherit;
     font-size: 14px;
-    outline: none;
-    transition: border-color 120ms, box-shadow 120ms;
 }
-.login-card input:focus { border-color: #52525b; box-shadow: 0 0 0 3px rgb(24 24 27 / 6%); }
-.login-error { margin-top: 12px; font-size: 13px; line-height: 1.5; color: #b42318; overflow-wrap: anywhere; }
-.login-error:empty { display: none; }
-.login-error[data-tone="success"] { color: #166534; }
 .login-primary {
     width: 100%;
     height: 40px;

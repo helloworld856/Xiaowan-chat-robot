@@ -173,7 +173,12 @@ class MemoryIsolationTests(unittest.TestCase):
             restored.refresh_if_needed()
             self.assertEqual(restored.abstract_cache, 'summary-1')
             self.assertTrue(restored.has_older_history)
-            restored.compress_history(agent)
+            with self.assertLogs('xiaowan', level='INFO') as recorded:
+                restored.compress_history(agent)
+            events = '\n'.join(recorded.output)
+            self.assertIn('event=history_compression outcome=succeeded rounds=2 through_round=3', events)
+            self.assertNotIn('private-', events)
+            self.assertNotIn('summary-2', events)
 
             self.assertIn('private-0', prompts[0])
             self.assertIn('private-1', prompts[0])

@@ -1,6 +1,6 @@
 # 小晚AI角色对话软件
 
-版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
+版本 `1.0.0`。小晚是支持多账号的 AI 聊天应用。前端使用 Vue 3、TypeScript 和 Vite，后端使用 FastAPI、LangGraph 和 MySQL，通过外部 API 调用 DeepSeek 或通义千问。每个账号拥有自己的对话，历史过长时自动压缩为摘要。
 
 ## 主要功能
 
@@ -33,7 +33,10 @@
 │   └── system_config.example.json  # 全局配置模板
 ├── frontend/
 │   ├── index.html                  # 前端页面入口
-│   ├── src/ts/                     # TypeScript 逻辑，入口为 main.ts
+│   ├── src/main.ts                 # Vue 应用入口
+│   ├── src/components/             # 聊天、登录、设置和个人资料组件
+│   ├── src/composables/            # 会话和聊天状态
+│   ├── src/ts/                     # API 客户端、类型和共享工具
 │   ├── src/styles/                 # 页面样式和主题
 │   ├── public/                     # 头像、网站图标等静态资源
 │   ├── tests/                      # 前端测试
@@ -72,7 +75,7 @@ npm --prefix frontend run build
 
 如果服务器已有自定义的 `backend/settings.json`，更新前请保留一份本地副本供迁移。这个文件由 Git 忽略，启动时仍可读取。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`，新安装从全局配置读取默认模型。
 
-`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、快捷键和头像。`chat` 管理并发、消息长度、历史压缩和启动时的历史清理。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
+`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度、历史压缩和启动时的历史清理。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
 
 ## 聊天设置
 
@@ -84,9 +87,9 @@ npm --prefix frontend run build
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。每条消息最多 8000 个字符。
 
-管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。后端使用对应账号的厂商配置，同厂商切换模型会共用地址和密钥，密钥留空时沿用已保存的值。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
+管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。同厂商在同一地址切换模型时，可以沿用已保存的密钥。更换接口地址时需重新填写该地址的 API Key。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
 
-在“设置 → 偏好”中切换主题或发送快捷键后，系统自动把两项都保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`。刷新、换浏览器和重启后都能恢复已保存的偏好。旧偏好文件缺少主题字段时使用默认白。
+在“设置 → 偏好”中修改主题、聊天字号或发送快捷键后，点击“保存偏好”使修改生效。聊天字号有小、标准、大三档，对历史消息和新消息都生效。偏好保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`，刷新、换浏览器和重启后都能恢复。旧偏好文件缺少主题字段时使用默认白，缺少字号字段时使用标准字号。
 
 回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
 
@@ -110,7 +113,7 @@ npm --prefix frontend run build
 
 菜单的“个人资料”可以修改昵称和选择六张系统头像，默认使用小猫。注册时创建 `backend/user_data/<用户名>/profile.json`，目录名保留注册时的大小写。纯数字用户名和 Windows 保留设备名的目录加 `~` 前缀，例如 `~123`。后端启动时会把已有账号的数字目录整体改为用户名目录。目标目录已存在时会记录冲突并保留原来的数字目录。头像素材位于 `frontend/public/avatars/system/`。
 
-终端显示 Uvicorn 的启动进度和监听地址。已认证账号的运行日志写入各自目录中的 `logs/app.log`，记录请求结果、回复条数、Token 和耗时。启动、匿名请求等系统日志写入 `backend/log_config/app.log`。默认每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
+已认证账号的运行日志写入 `backend/user_data/<账号目录名>/logs/app.log`，以 `[账号 admin]` 这样的用户名标签记录请求结果、每轮聊天的节点执行、回复条数、Token 和耗时。启动、匿名请求、认证审计、全局模型切换和数据库连接池事件写入 `backend/log_config/app.log`。日志使用 UTC 时间，访问记录使用路由模板并省略查询参数。系统级告警和错误也写到标准错误，通过 systemd 启动时可在 `journalctl` 查阅。默认每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
 
 聊天、历史、人设、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
 

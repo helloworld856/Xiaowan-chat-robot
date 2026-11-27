@@ -80,7 +80,7 @@ class StartupConfigTests(unittest.TestCase):
         self.assertEqual(console.getvalue(), '')
 
     def test_launcher_clears_active_logs_before_writing_new_messages(self):
-        script = '''
+        script = r'''
 import logging
 import runpy
 import sys
@@ -96,10 +96,11 @@ files.BACKEND_ROOT = Path(sys.argv[1]).parent
 system_config.BACKEND_ROOT = files.BACKEND_ROOT
 
 def start_server(app, **options):
-    uvicorn.Config(app, **options)
-    from app.account_logging import logger
-    from app.account_logging import account_log_context
+    server_config = uvicorn.Config(app, **options)
+    assert not server_config.access_log
+    from app.account_logging import account_log_context, logger, request_log_context
     from app.accounts.files import UserDataPaths
+    from app.accounts.repository import User
 
     server = logging.getLogger('uvicorn.error')
     server.info('Started server process [%d]', 123)
@@ -107,13 +108,19 @@ def start_server(app, **options):
     server.info('Application startup complete.')
     server.info('Uvicorn running on %s://%s:%d (Press CTRL+C to quit)', 'http', '127.0.0.1', 8000)
     server.error('runtime server error')
+    with request_log_context('internal-request-id'):
+        logger.warning('request warning')
+    try:
+        raise RuntimeError('private ASGI failure text')
+    except RuntimeError:
+        server.exception('Exception in ASGI application\n')
     logging.getLogger('uvicorn.access').info('%s - "%s %s HTTP/%s" %d',
                                              '127.0.0.1', 'GET', '/version', '1.1', 200)
     warnings.warn('dependency warning')
     paths = UserDataPaths()
-    with account_log_context(paths, 1):
+    with account_log_context(paths, User(1, 'First', 'user')):
         logger.info('first account event')
-    with account_log_context(paths, 2):
+    with account_log_context(paths, User(2, 'Second', 'user')):
         logger.warning('second account event')
 
 uvicorn.run = start_server
@@ -146,9 +153,11 @@ launcher['main']()
                         'Application startup complete.', 'Uvicorn running on http://127.0.0.1:8000'):
             self.assertIn(message, result.stderr)
             self.assertIn(message, contents)
-        for message in ('runtime server error', 'GET /version HTTP/1.1', 'dependency warning'):
+        for message in ('runtime server error', 'event=asgi_failure', 'dependency warning', 'request warning'):
             self.assertIn(message, contents)
-            self.assertNotIn(message, result.stderr)
+            self.assertIn(message, result.stderr)
+        for message in ('GET /version HTTP/1.1', 'private ASGI failure text', 'Traceback', 'internal-request-id'):
+            self.assertNotIn(message, contents + result.stderr)
         for user_id, message in ((1, 'first account event'), (2, 'second account event')):
             account_log = (users / str(user_id) / 'logs' / 'app.log').read_text(encoding='utf-8')
             self.assertIn(message, account_log)
@@ -201,7 +210,8 @@ launcher['main']()
         with patch.dict(sys.modules, {'uvicorn': uvicorn}), \
                 patch('logging.basicConfig'), patch('logging.captureWarnings'), \
                 patch.object(logging.getLogger('uvicorn'), 'setLevel'), \
-                patch.object(logging.getLogger('uvicorn.error'), 'handlers', []), \
+                patch.object(logging.getLogger('uvicorn.error'), 'filters', []), \
+                patch('app.account_logging.configure_system_console'), \
                 patch.object(files, 'BACKEND_ROOT', self.root), \
                 patch.object(config, 'SYSTEM_LOG_PATH', self.root / 'app.log'), \
                 patch('app.system_config.load_system_config', settings), \
@@ -212,4 +222,5 @@ launcher['main']()
             launcher['main']()
         settings.assert_called_once_with(migrate=True)
         reset_logs.assert_not_called()
-        uvicorn.run.assert_called_once_with('app.main:app', host='127.0.0.1', port=8123, workers=1, log_config=None)
+        uvicorn.run.assert_called_once_with('app.main:app', host='127.0.0.1', port=8123, workers=1,
+                                           log_config=None, access_log=False)

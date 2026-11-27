@@ -7,6 +7,16 @@
     box-sizing: border-box;
 }
 
+.caret-filter-defs { position: absolute; pointer-events: none; }
+
+@media (forced-colors: none) {
+    :is(textarea, input:not([type]), input[type="text"], input[type="password"], input[type="search"], input[type="url"]):focus {
+        outline: none;
+        caret-color: #00f;
+        filter: url(#text-caret);
+    }
+}
+
 /*提示弹窗*/
 #alert-window-container{
     display: none;
@@ -54,8 +64,7 @@
 }
 .alert-window .alert-window-content p{
     line-height: 1.6;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
 }
 
@@ -209,6 +218,11 @@ body {
     line-height: 1.6;
 }
 
+#app {
+    width: 100%;
+    height: 100%;
+}
+
 /* --- 主聊天布局 --- */
 .chat-layout {
     display: flex;
@@ -218,7 +232,6 @@ body {
     height: 100%;
     margin: 0 auto;
     padding: 1.5rem 1rem;
-    gap: 1rem;
 }
 
 /* 窄屏时，聊天内容从两侧操作按钮下方开始。 */
@@ -227,11 +240,13 @@ body {
 }
 
 @media (max-width: 600px) {
-    .chat-layout { padding: 3.5rem 0.5rem 0.75rem; gap: 0.75rem; }
+    .chat-layout { padding: 3.5rem 0.5rem 0.75rem; }
 }
 
 /* --- 聊天容器 --- */
 #chat-container {
+    --dock-inset: clamp(0.5rem, 2vw, 1rem);
+    --dock-bottom: max(var(--dock-inset), env(safe-area-inset-bottom));
     flex: 1;
     min-height: 0;
     position: relative;
@@ -247,9 +262,13 @@ body {
 
 /* 消息历史在容器内滚动，顶部和输入区保持可用。 */
 #chatBox {
+    --composer-clearance: calc(var(--composer-height, 2.5rem) + var(--dock-bottom) + 0.5rem);
     height: 100%;
     padding: 1.2rem;
+    padding-bottom: var(--composer-clearance);
+    scroll-padding-bottom: var(--composer-clearance);
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     scroll-behavior: smooth;
 }
 
@@ -277,8 +296,8 @@ body {
 #comeToBottom {
     display: none;
     position: absolute;
-    bottom: 1rem;
-    right: 1rem;
+    bottom: calc(100% + 0.5rem);
+    right: 0;
     width: 2.5rem;
     height: 2.5rem;
     background: var(--chat-bg);
@@ -303,33 +322,39 @@ body {
 }
 
 /* --- 输入区域 --- */
+.chat-dock {
+    position: absolute;
+    inset-inline: var(--dock-inset);
+    bottom: var(--dock-bottom);
+}
+
 #inputArea {
+    --composer-radius: 1rem;
     display: flex;
     align-items: flex-end;
-    flex-shrink: 0;
-    gap: 1rem;
+    gap: 0.625rem;
 }
 
 #chat-composer {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 2.75rem;
+    display: flex;
+    align-items: flex-start;
     flex: 1;
     min-width: 0;
-    background: var(--chat-bg);
-    border-radius: 20px;
-    box-shadow: var(--chat-shadow);
+    border: 1px solid var(--input-border);
+    border-radius: var(--composer-radius);
+    background: var(--input-bg);
+    box-shadow: 0 3px 14px rgb(33 51 75 / 12%);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
 }
 
 #userInput {
     width: 100%;
-    height: 2.75rem;
+    height: 2.375rem;
     min-width: 0;
-    padding: 0.625rem 0.75rem;
+    padding: 0.4375rem 0.75rem;
     border: none;
     border-radius: inherit;
-    outline: none;
     background: transparent;
     color: var(--bot-text);
     font: inherit;
@@ -348,29 +373,14 @@ body {
     color: #878787;
 }
 
-#chat-composer:has(#userInput:focus), #review-search:focus {
-    outline: 2px solid var(--select-accent);
-    outline-offset: 2px;
-}
-
-html.theme0 #chat-composer {
-    background: var(--input-bg);
-    border: 1px solid var(--input-border);
-    box-shadow: none;
-}
-
 html.theme0 #userInput::placeholder { color: #5d6b7c; }
-html.theme0 :is(#chat-composer:has(#userInput:focus), #review-search:focus) {
-    outline-color: #737373;
-}
 
 #chat-input-toggle:not([hidden]) {
     display: grid;
     place-items: center;
-    place-self: start center;
+    flex: none;
     width: 2.5rem;
-    height: 2.5rem;
-    margin-top: 0.125rem;
+    height: 2.375rem;
     border: 0;
     border-radius: 0.75rem;
     background: transparent;
@@ -399,9 +409,11 @@ html.theme0 :is(#chat-composer:has(#userInput:focus), #review-search:focus) {
 
 /* 发送按钮 */
 .sendbtn {
-    padding: 0.8rem 1.2rem;
+    flex: none;
+    min-height: 2.5rem;
+    padding: 0.45rem 1rem;
     border: none;
-    border-radius: 50px;
+    border-radius: var(--composer-radius);
     background: var(--btn-bg);
     color: var(--btn-text);
     font-size: 0.95rem;
@@ -411,8 +423,8 @@ html.theme0 :is(#chat-composer:has(#userInput:focus), #review-search:focus) {
 }
 
 html.theme0 .sendbtn {
-    --btn-bg: #000;
-    --btn-hover: #262626;
+    --btn-bg: #383838;
+    --btn-hover: #484848;
 }
 
 .sendbtn:hover:not(:disabled) {

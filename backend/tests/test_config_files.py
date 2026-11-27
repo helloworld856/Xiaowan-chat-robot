@@ -201,6 +201,23 @@ class ConfigFileTests(unittest.TestCase):
         self.assertEqual(data['providers']['deepseek']['api_key'], 'first-key')
         self.assertEqual(set(data['providers']['deepseek']), {'base_url', 'model_name', 'api_key'})
 
+    def test_personal_model_requires_explicit_key_for_an_address_change(self):
+        from app.llm.personal_models import PersonalModel, PersonalModelStore
+
+        store = PersonalModelStore(self.root / 'users')
+        model = PersonalModel(model_merchant='deepseek', model_name='first', api_key='original-test-key')
+        self.assertTrue(store.update(12, model, ()))
+        custom = PersonalModel(model_merchant='deepseek', model_name='second', base_url='https://models.example.test/v1')
+        with self.assertRaisesRegex(ValueError, '重新填写'):
+            store.selection(12, custom)
+        self.assertTrue(store.update(12, PersonalModel(**custom.model_dump(exclude={'api_key'}),
+                                                       api_key='replacement-test-key'), ()))
+        same_address = store.selection(12, custom)
+        self.assertEqual(same_address.base_url, custom.base_url)
+        self.assertEqual(same_address.api_key.get_secret_value(), 'replacement-test-key')
+        with self.assertRaisesRegex(ValueError, '重新填写'):
+            store.selection(12, custom.model_copy(update={'base_url': ''}))
+
     def test_grouped_personal_config_keeps_the_active_record_and_backs_up_other_profiles(self):
         from app.llm.personal_models import PersonalModelStore
 

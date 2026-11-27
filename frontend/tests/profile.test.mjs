@@ -1,193 +1,208 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
-import {runInNewContext} from 'node:vm';
-
-test('applying a saved profile updates the menu and all existing user avatars', () => {
-    const source = fs.readFileSync(new URL('../src/ts/profile.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    const images = [{src: '/old.png'}, {src: '/old.png'}];
-    const avatars = [{title: 'old'}, {title: 'old'}];
-    const menu = {textContent: 'admin'};
-    const userWindow = {USER_AVATAR: '/old.png', USER_NAME: 'admin'};
-    const exports = {};
-    runInNewContext(compiled, {
-        exports, require: () => ({}), window: userWindow,
-        document: {getElementById: () => menu, querySelectorAll: selector => selector === '.user_avatar img' ? images : avatars}
-    });
-    exports.applyProfile({username: 'admin', nickname: '小林', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png', avatars: [], default_avatar_id: 'cat'});
-    assert.equal(menu.textContent, '小林');
-    assert.equal(userWindow.USER_NAME, '小林');
-    assert.equal(userWindow.USER_AVATAR, '/avatars/system/fox.png');
-    assert.deepEqual(images.map(image => image.src), ['/avatars/system/fox.png', '/avatars/system/fox.png']);
-    assert.deepEqual(avatars.map(avatar => avatar.title), ['小林', '小林']);
-});
-
-function profileHarness(api, inputLimits) {
-    const source = fs.readFileSync(new URL('../src/ts/profile.ts', import.meta.url), 'utf8');
-    const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-    const elements = new Map();
-    const makeElement = () => ({
-        value: '', disabled: false, hidden: false, open: false,
-        classList: {toggle() {}, remove() {}}, listeners: new Map(),
-        addEventListener(name, listener) { this.listeners.set(name, listener); },
-        querySelectorAll() { return []; }, replaceChildren() {}, append() {},
-        reset() {}, focus() {}, setAttribute() {}, reportValidity() { return true; },
-        showModal() { this.open = true; }, close() { this.open = false; }
-    });
-    const getElement = id => {
-        if (!elements.has(id)) elements.set(id, makeElement());
-        return elements.get(id);
-    };
-    const menu = makeElement();
-    const posts = [];
-    const events = [];
-    const alerts = [];
-    class AuthRequiredError extends Error {}
-    class CancelledRequestError extends Error {}
-    const exports = {};
-    runInNewContext(compiled, {
-        exports, window: {dispatchEvent(event) { events.push(event.type); }}, Event, Error,
-        document: {getElementById: getElement, querySelectorAll: () => []},
-        require: name => ({
-            './ui.ts': {menuBtn: makeElement(), menuSelect: [menu], showAlert: message => alerts.push(message)},
-            './confirm.ts': {confirmAction: api.confirmAction},
-            './global_config.ts': {inputLimits},
-            './api.ts': {
-                AuthRequiredError, CancelledRequestError, getRequestGeneration: () => 0,
-                canManageModel: () => api.admin === true,
-                profileAPI: async payload => {
-                    if (payload) posts.push(payload);
-                    return api.profileAPI(payload);
-                },
-                changePasswordAPI: api.changePasswordAPI,
-                deleteAccountAPI: api.deleteAccountAPI
-            }
-        })[name]
-    });
-    return {exports, getElement, menu, posts, events, alerts};
-}
+import {mountComponent, nextTick} from './vue-harness.mjs';
 
 const savedProfile = {
-    username: 'admin', nickname: 'Saved', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png', avatars: [], default_avatar_id: 'cat'
+    username: 'member', nickname: 'Saved', avatar_id: 'fox', avatar_url: '/avatars/system/fox.png',
+    avatars: [
+        {id: 'cat', name: '猫', url: '/avatars/system/cat.png'},
+        {id: 'fox', name: '狐狸', url: '/avatars/system/fox.png'}
+    ],
+    default_avatar_id: 'cat'
 };
 
-test('account deletion requires confirmation and is unavailable to the built-in administrator', async () => {
-    let confirmation = null;
+function profileHarness(t, {
+    load = async () => savedProfile,
+    save = async payload => ({...savedProfile, ...payload}),
+    limits = {},
+    isAdmin = false,
+    confirm = async () => null,
+    remove = async () => {}
+} = {}) {
+    const alerts = [];
+    const posts = [];
+    const profiles = [];
     const passwords = [];
-    const api = {
-        profileAPI: async () => savedProfile,
-        confirmAction: async (_, _description, _action, passwordRequired) => {
-            assert.equal(passwordRequired, true);
-            return confirmation;
+    const deletions = [];
+    const events = [];
+    let generation = 0;
+    const window = new EventTarget();
+    const previousWindow = globalThis.window;
+    globalThis.window = window;
+    for (const type of ['credential-change-start', 'credential-change-end', 'password-changed', 'account-deleted']) {
+        window.addEventListener(type, () => events.push(type));
+    }
+    const view = mountComponent(new URL('../src/components/ProfileDialog.vue', import.meta.url), {
+        imports: {
+            '../ts/api.ts': {
+                AuthRequiredError: class extends Error {},
+                CancelledRequestError: class extends Error {},
+                getRequestGeneration: () => generation,
+                profileAPI: payload => {
+                    if (!payload) return load();
+                    posts.push(payload);
+                    return save(payload);
+                },
+                async deleteAccountAPI(password) { deletions.push(password); await remove(); },
+                async changePasswordAPI(payload) { passwords.push(payload); }
+            },
+            '../ts/global_config.ts': {
+                inputLimits: {max_nickname_chars: 32, password_min_length: 8, password_max_length: 20, ...limits}
+            }
         },
-        deleteAccountAPI: async password => { passwords.push(password); }
-    };
-    const {exports, getElement, menu, events} = profileHarness(api);
-    exports.initProfile();
-    const button = getElement('profile-delete-account');
-    const click = () => button.listeners.get('click')();
-    api.admin = true;
-    await menu.listeners.get('click')();
-    assert.equal(button.disabled, true);
-    await click();
-    assert.deepEqual(passwords, []);
-    getElement('profile-dialog').close();
-    api.admin = false;
-    await menu.listeners.get('click')();
-    await click();
-    assert.deepEqual(passwords, []);
-    confirmation = 'current-test-password';
-    await click();
-    assert.deepEqual(passwords, [confirmation]);
-    assert.deepEqual(events, ['account-deleted']);
-});
-
-// 保存前需要真实资料，网络错误与取消都不能让空表单提交。
-test('a failed profile read cannot save an uninitialized or cancelled draft', async () => {
-    const {exports, getElement, menu, posts} = profileHarness({
-        profileAPI: async () => { throw new Error('GET failed'); }
-    });
-    exports.applyProfile(savedProfile);
-    exports.initProfile();
-    await menu.listeners.get('click')();
-    assert.equal(getElement('profile-fields').disabled, true);
-    assert.equal(getElement('profile-save').disabled, true);
-    getElement('profile-nickname').value = 'New nickname';
-    await getElement('profile-form').listeners.get('submit')({preventDefault() {}});
-    assert.equal(posts.length, 0);
-});
-
-test('a configured nickname limit counts Unicode characters', async () => {
-    const {exports, getElement, menu, posts, alerts} = profileHarness({
-        profileAPI: async payload => ({...savedProfile, ...payload})
-    }, {max_nickname_chars: 3});
-    exports.initProfile();
-    await menu.listeners.get('click')();
-    const nickname = getElement('profile-nickname');
-    const submit = () => getElement('profile-form').listeners.get('submit')({preventDefault() {}});
-    nickname.value = '🙂🙂🙂🙂';
-    await submit();
-    assert.equal(posts.length, 0);
-    assert.match(alerts.at(-1), /3/);
-    nickname.value = '🙂🙂🙂';
-    await submit();
-    assert.equal(posts[0].nickname, '🙂🙂🙂');
-});
-
-test('profile save shows its result and keeps edits available after a failed request', async () => {
-    let fail = true;
-    let rejectSave;
-    const {exports, getElement, menu, alerts} = profileHarness({
-        profileAPI: async payload => {
-            if (!payload) return savedProfile;
-            if (fail) return new Promise((_, reject) => { rejectSave = reject; });
-            return {...savedProfile, ...payload};
+        props: {
+            isAdmin,
+            showAlert: message => alerts.push(message),
+            confirmAction: confirm,
+            onProfileChange: profile => profiles.push(profile)
         }
-    }, {max_nickname_chars: 32});
-    exports.initProfile();
-    await menu.listeners.get('click')();
-    const nickname = getElement('profile-nickname');
-    const submit = () => getElement('profile-form').listeners.get('submit')({preventDefault() {}});
-    nickname.value = 'New name';
-    const pending = submit();
-    const statusWhileSaving = getElement('profile-status').textContent;
-    const disabledWhileSaving = getElement('profile-save').disabled;
+    });
+    t.after(() => {
+        view.unmount();
+        if (previousWindow === undefined) delete globalThis.window;
+        else globalThis.window = previousWindow;
+    });
+    return {...view, alerts, posts, profiles, passwords, deletions, events, signOut() {
+        generation++;
+        view.session.reset();
+    }};
+}
+
+test('loading profile shares the saved data and allows selecting the default avatar', async t => {
+    const app = profileHarness(t);
+    await app.session.open();
+    assert.equal(app.element('profile-display-name').text, 'Saved');
+    assert.equal(app.element('profile-preview').props.src, savedProfile.avatar_url);
+    assert.deepEqual(app.profiles, [savedProfile]);
+    app.act('profile-default-avatar');
+    await nextTick();
+    assert.equal(app.element('profile-preview').props.src, '/avatars/system/cat.png');
+    await app.act('profile-form', 'submit');
+    assert.equal(app.posts[0].avatar_id, 'cat');
+});
+
+test('account deletion requires confirmation and is unavailable to the built-in administrator', async t => {
+    let confirmation = null;
+    const app = profileHarness(t, {
+        isAdmin: true,
+        confirm: async options => {
+            assert.equal(options.password, true);
+            assert.equal(options.destructive, true);
+            return confirmation;
+        }
+    });
+    await app.session.open();
+    await app.act('profile-delete-account');
+    assert.equal(app.alerts.at(-1), '内置管理员账号不能注销。');
+    assert.deepEqual(app.deletions, []);
+    app.update({isAdmin: false});
+    await app.act('profile-delete-account');
+    assert.deepEqual(app.deletions, []);
+    confirmation = 'current-test-password';
+    await app.act('profile-delete-account');
+    assert.deepEqual(app.deletions, [confirmation]);
+    assert.deepEqual(app.events, ['credential-change-start', 'account-deleted', 'credential-change-end']);
+});
+
+test('successful account deletion reports the session change even after the profile is reset', async t => {
+    let finish;
+    const app = profileHarness(t, {
+        confirm: async () => 'current-test-password',
+        remove: () => new Promise(resolve => { finish = resolve; })
+    });
+    await app.session.open();
+    const deletion = app.act('profile-delete-account');
+    await nextTick();
+    assert.deepEqual(app.events, ['credential-change-start']);
+    app.signOut();
+    finish();
+    await deletion;
+    assert.deepEqual(app.events, ['credential-change-start', 'account-deleted', 'credential-change-end']);
+});
+
+test('a failed profile read cannot save an uninitialized draft', async t => {
+    const app = profileHarness(t, {load: async () => { throw new Error('GET failed'); }});
+    await app.session.open();
+    assert.deepEqual(app.alerts, ['GET failed']);
+    assert.equal(app.element('profile-fields').props.disabled, true);
+    assert.equal(app.element('profile-save').props.disabled, true);
+    app.input('profile-nickname', 'New nickname');
+    await app.act('profile-form', 'submit');
+    assert.deepEqual(app.posts, []);
+});
+
+test('signout between applying and rendering a profile keeps the form cleared', async t => {
+    const app = profileHarness(t);
+    app.update({onProfileChange: () => queueMicrotask(() => app.signOut())});
+    await app.session.open();
+    assert.equal(app.element('profile-nickname').value, '');
+    assert.equal(app.element('profile-save').props.disabled, true);
+});
+
+test('profile save uses a nickname filled directly into the input', async t => {
+    const app = profileHarness(t);
+    await app.session.open();
+    app.element('profile-nickname').value = ' Autofilled nickname ';
+    app.act('profile-default-avatar');
+    await nextTick();
+    assert.equal(app.element('profile-nickname').value, ' Autofilled nickname ');
+    await app.act('profile-form', 'submit');
+    assert.equal(app.posts[0].nickname, 'Autofilled nickname');
+});
+
+test('a configured nickname limit counts Unicode characters', async t => {
+    const app = profileHarness(t, {limits: {max_nickname_chars: 3}});
+    await app.session.open();
+    app.input('profile-nickname', '🙂🙂🙂🙂');
+    await app.act('profile-form', 'submit');
+    assert.deepEqual(app.posts, []);
+    assert.match(app.alerts.at(-1), /3/);
+    app.input('profile-nickname', '🙂🙂🙂');
+    await app.act('profile-form', 'submit');
+    assert.equal(app.posts[0].nickname, '🙂🙂🙂');
+});
+
+test('profile save uses alerts, has no progress text and keeps the draft after failure', async t => {
+    let rejectSave;
+    const app = profileHarness(t, {save: async payload => {
+        if (rejectSave) return {...savedProfile, ...payload};
+        return new Promise((_, reject) => { rejectSave = reject; });
+    }});
+    await app.session.open();
+    app.input('profile-nickname', 'New name');
+    const pending = app.act('profile-form', 'submit');
+    await nextTick();
+    assert.throws(() => app.element('profile-status'), /missing element/);
+    assert.equal(app.element('profile-save').props.disabled, true);
     rejectSave(new Error('保存个人资料失败'));
     await pending;
-    assert.equal(statusWhileSaving, '');
-    assert.equal(disabledWhileSaving, true);
-    assert.deepEqual(alerts, ['保存个人资料失败']);
-    assert.equal(nickname.value, 'New name');
-    assert.equal(getElement('profile-dialog').open, true);
-    assert.equal(getElement('profile-save').disabled, false);
-
-    fail = false;
-    await submit();
-    assert.equal(alerts.at(-1), '个人资料已保存。');
-    assert.equal(getElement('profile-dialog').open, false);
-    assert.equal(getElement('current-username').textContent, 'New name');
+    assert.deepEqual(app.alerts, ['保存个人资料失败']);
+    assert.equal(app.element('profile-nickname').value, 'New name');
+    assert.equal(app.element('profile-dialog').open, true);
+    await app.act('profile-form', 'submit');
+    assert.equal(app.alerts.at(-1), '个人资料已保存。');
+    assert.equal(app.element('profile-dialog').open, false);
+    assert.equal(app.profiles.at(-1).nickname, 'New name');
 });
 
-test('changing a password enforces the configured length range', async () => {
-    const changes = [];
-    const {exports, getElement} = profileHarness({
-        changePasswordAPI: async payload => { changes.push(payload); return {ok: true}; }
-    }, {password_min_length: 8, password_max_length: 20});
-    exports.initProfile();
-    getElement('profile-current-password').value = 'Old!12';
+test('changing a password enforces character limits and signals the auth flow', async t => {
+    const app = profileHarness(t);
+    await app.session.open();
+    await app.act('profile-open-password');
+    app.element('profile-current-password').value = 'Old!12';
     const submit = async value => {
-        getElement('profile-new-password').value = value;
-        getElement('profile-confirm-password').value = value;
-        await getElement('profile-password-form').listeners.get('submit')({preventDefault() {}});
+        app.element('profile-new-password').value = value;
+        app.element('profile-confirm-password').value = value;
+        await app.act('profile-password-form', 'submit');
     };
     await submit('Short!1');
     await submit('🙂'.repeat(21));
-    assert.equal(changes.length, 0);
-    assert.match(getElement('profile-password-status').textContent, /8–20/);
+    assert.equal(app.passwords.length, 0);
+    assert.match(app.alerts.at(-1), /8–20/);
     const valid = '🙂'.repeat(20);
     await submit(valid);
-    assert.equal(changes[0].new_password, valid);
-    assert.equal(changes[0].current_password, 'Old!12');
+    assert.equal(app.passwords[0].new_password, valid);
+    assert.equal(app.passwords[0].current_password, 'Old!12');
+    assert.equal(app.element('profile-current-password').value, '');
+    assert.deepEqual(app.events, ['credential-change-start', 'password-changed', 'credential-change-end']);
 });

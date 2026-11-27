@@ -108,8 +108,14 @@ restore_dist=false
 had_dist=false
 backend_restart='未尝试'
 cleanup() {
-    local status=$?
+    local status=$? recorded
     trap - EXIT
+    # 登记已完成时，保留通过健康检查的前端及临时备份。
+    if $restore_dist && [[ $target != "$deployed" ]] &&
+        IFS= read -r recorded < "$state_dir/revisions" && [[ $recorded == "$target" ]]; then
+        printf '已登记版本 %s，前端换版目录保留在 %s。\n' "$target" "$work_dir" >&2
+        exit "$status"
+    fi
     if (( status != 0 )); then
         printf '更新失败。当前 Git HEAD：%s；上次通过健康检查：%s。\n' \
             "$(git rev-parse --verify HEAD || printf '未知')" "$deployed" >&2

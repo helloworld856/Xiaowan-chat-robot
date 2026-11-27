@@ -21,6 +21,6 @@
     "allowJs": true                      // 允许项目包含 JavaScript 源文件
   },
 
-  // 一次检查浏览器源码、自定义全局类型和 Vite 配置。
-  "include": ["src", "global.d.ts", "vite.config.mts"]
+  // 一次检查 Vue 组件、浏览器源码和 Vite 配置。
+  "include": ["src", "vite.config.mts"]
 }

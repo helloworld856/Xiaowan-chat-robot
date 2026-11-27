@@ -1,229 +1,313 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
-import {runInNewContext} from 'node:vm';
+import {readFileSync} from 'node:fs';
+import {compileModule, mountComponent, nextTick as tick} from './vue-harness.mjs';
 
-const source = fs.readFileSync(new URL('../src/ts/settings.ts', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+const file = new URL('../src/components/SettingsDialog.vue', import.meta.url);
+const dialogs = compileModule(readFileSync(new URL('../src/ts/dialogs.ts', import.meta.url), 'utf8'));
+const defaults = {send_shortcut: 'enter', theme: 'theme0', chat_font_size: 'standard'};
 
-test('the model API key starts masked, opts out of autocomplete and has a reveal button', () => {
-    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-    const field = html.match(/<input\b[^>]*\bid="model-api-key"[^>]*>/)?.[0] ?? '';
-    assert.match(field, /\btype="password"/);
-    assert.match(field, /\bautocomplete="off"/);
-    const button = html.match(/<button\b[^>]*\bid="toggle-model-key"[^>]*>/)?.[0] ?? '';
-    assert.match(button, /\btype="button"/);
-    assert.match(button, /\baria-controls="model-api-key"/);
-});
-
-test('only the relevant model fields are visible and active for each role', () => {
-    let admin = true;
-    const nodes = new Map();
-    function element(id) {
-        if (!nodes.has(id)) nodes.set(id, {disabled: false});
-        return nodes.get(id);
-    }
-    const exports = {};
-    runInNewContext(compiled, {
-        exports,
-        require: () => ({canManageModel: () => admin}),
-        document: {getElementById: element, querySelectorAll: selector => [element(selector)]}
-    });
-
-    for (admin of [true, false]) {
-        exports.updateSettingsPermissions();
-        assert.equal(element('model-base-url').disabled, false);
-        assert.equal(element('model-api-key').disabled, false);
-        assert.equal(element('model-api-key').required, true);
-        assert.equal(element('model-api-key').placeholder, '');
-    }
-});
-
-// 改变异步返回顺序，验证先完成的模型切换不会被旧读取覆盖。
-test('preferences apply only when manually saved and show the result in an alert', async () => {
-    const nodes = new Map();
-    function element(id) {
-        if (!nodes.has(id)) nodes.set(id, {
-            value: '', disabled: false, listeners: new Map(), reset() {},
-            replaceChildren(...children) { this.children = children; }, querySelectorAll: () => [],
-            reportValidity: () => true, focus() { this.listeners.get('focus')?.(); },
-            addEventListener(name, handler) { this.listeners.set(name, handler); }
-        });
-        return nodes.get(id);
-    }
-    const before = {model_merchant: 'deepseek', model_name: 'deepseek-v4-flash', base_url: ''};
-    const modelConfig = {model_valid: true, model: before};
-    const preferences = {send_shortcut: 'enter', theme: 'theme0'};
-    const themeSelect = element('theme-select');
-    const documentElement = {className: 'theme0'};
-    const themeUtils = {};
-    const utils = fs.readFileSync(new URL('../src/ts/utils.ts', import.meta.url), 'utf8');
-    runInNewContext(ts.transpileModule(utils, {compilerOptions: {module: ts.ModuleKind.CommonJS}}).outputText, {
-        exports: themeUtils, require: () => ({}), document: {documentElement},
-        localStorage: {setItem() { throw new Error('Preferences must not use browser storage'); }}
-    });
-    let finishSettings;
-    let admin = true;
-    const saves = [];
+function mount(api = {}, props = {}) {
+    const preferences = {...defaults};
     const alerts = [];
-    const submittedModels = [];
-    const exports = {};
-    runInNewContext(compiled, {
-        exports,
-        Error,
-        Option: function(label, value) { this.label = label; this.value = value; },
-        require: name => ({
-            './api.ts': {
-                canManageModel: () => admin,
-                getRequestGeneration: () => 1,
-                modelAPI: async (model, testOnly, key, personal) => {
-                    submittedModels.push({address: model.base_url, key, personal, testOnly});
-                    return {status: true, info: ''};
-                },
-                settingsAPI: value => {
-                    if (value) return new Promise((resolve, reject) => {
-                        saves.push({
-                            preferences: {...value},
-                            finish: () => resolve({model: modelConfig.model, model_ready: true, preferences: {...value}}),
-                            reject
-                        });
-                    });
-                    return new Promise(resolve => { finishSettings = resolve; });
-                }
-            },
-            './global_config.ts': {modelConfig},
-            './preferences.ts': {preferences},
-            './ui.ts': {
-                openPopup() {}, resetPopup() {}, closePopup: async () => true,
-                closeMenu() {}, menuBtn: element('menuBtn'), menuSelect: [null, element('settings')],
-                showAlert: message => alerts.push(message)
-            },
-            './utils.ts': themeUtils
-        })[name],
-        document: {getElementById: element, querySelector: element, querySelectorAll: () => []}
-    });
-    exports.initSettings();
-    const settings = exports.loadSettings();
-    element('modelSelect').value = 'tongyi';
-    element('modelName').value = 'qwen-plus';
-    element('model-config-form').listeners.get('submit')({preventDefault() {}});
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(element('display-model').textContent, 'qwen-plus');
-    finishSettings({model: before, model_ready: true, preferences: {send_shortcut: 'ctrl_enter', theme: 'theme3'}});
-    await settings;
-    assert.equal(element('display-model').textContent, 'qwen-plus');
-    assert.equal(element('send-shortcut').value, 'ctrl_enter');
-    assert.equal(documentElement.className, 'theme3');
-    assert.equal(themeSelect.value, 'theme3');
-    themeSelect.value = 'theme2';
-    themeSelect.listeners.get('change')?.();
-    const shortcut = element('send-shortcut');
-    shortcut.value = 'enter';
-    shortcut.listeners.get('change')?.();
-    assert.equal(saves.length, 0);
-    assert.equal(documentElement.className, 'theme3');
-    assert.equal(preferences.send_shortcut, 'ctrl_enter');
+    return {
+        ...mountComponent(file, {
+            imports: {'../ts/api.ts': {getRequestGeneration: () => 1, ...api}, '../ts/dialogs.ts': dialogs},
+            props: {
+                isAdmin: true, chatBusy: false, preferences, showAlert: message => alerts.push(message),
+                confirmAction: async () => null, onPreferencesChange: next => Object.assign(preferences, next), ...props
+            }
+        }),
+        preferences,
+        alerts
+    };
+}
 
-    const submitPreferences = () => element('preferences-form').listeners.get('submit')({preventDefault() {}});
-    const saved = submitPreferences();
-    assert.deepEqual(saves.map(save => save.preferences), [{theme: 'theme2', send_shortcut: 'enter'}]);
-    await submitPreferences();
+const catalog = {
+    default_provider: 'tongyi',
+    providers: {
+        tongyi: {
+            default_model: 'server-selected-model', default_address: 'https://default.example/v1',
+            names: ['server-selected-model', 'saved-model'], saved_model: 'server-selected-model',
+            saved_address: 'https://saved-address.example/v1', has_saved_key: true
+        },
+        deepseek: {
+            default_model: 'new-model', default_address: 'https://deepseek.example/v1',
+            names: ['new-model'], saved_model: null, saved_address: null, has_saved_key: false
+        }
+    }
+};
+
+function saved(preferences = defaults, model = null) {
+    return {preferences, model, model_ready: Boolean(model), model_options: structuredClone(catalog)};
+}
+
+const pending = () => Promise.withResolvers();
+
+test('preference drafts apply only after a successful save and reopen from the committed values', async () => {
+    const saves = [];
+    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3', chat_font_size: 'large'};
+    const {element, act, select, session, preferences, alerts} = mount({
+        settingsAPI: value => {
+            if (!value) return Promise.resolve(saved(loaded));
+            const request = pending();
+            saves.push({...request, value: {...value}});
+            return request.promise;
+        }
+    });
+    await session.load();
+    session.open();
+    await tick();
+    assert.deepEqual(preferences, loaded);
+    assert.equal(element('theme-select').value, 'theme3');
+    assert.equal(element('chat-font-size').value, 'large');
+
+    select('theme-select', 'theme2');
+    select('chat-font-size', 'small');
+    select('send-shortcut', 'enter');
+    assert.equal(saves.length, 0);
+    assert.deepEqual(preferences, loaded);
+
+    const submitted = act('preferences-form', 'submit');
+    await tick();
+    assert.equal(element('preferences-fields').props.disabled, true);
+    assert.deepEqual(saves.map(save => save.value), [{theme: 'theme2', send_shortcut: 'enter', chat_font_size: 'small'}]);
+    await act('preferences-form', 'submit');
     assert.equal(saves.length, 1);
-    saves[0].finish();
-    await saved;
-    assert.equal(preferences.theme, 'theme2');
-    assert.equal(preferences.send_shortcut, 'enter');
-    assert.equal(documentElement.className, 'theme2');
+    saves[0].resolve(saved(saves[0].value));
+    await submitted;
+    assert.deepEqual(preferences, saves[0].value);
     assert.match(alerts.at(-1), /保存成功/);
 
-    themeSelect.value = 'theme1';
-    shortcut.value = 'ctrl_enter';
-    const failed = submitPreferences();
+    select('theme-select', 'theme1');
+    select('chat-font-size', 'standard');
+    select('send-shortcut', 'ctrl_enter');
+    const failed = act('preferences-form', 'submit');
     saves[1].reject(new Error('测试保存失败'));
     await failed;
-    assert.equal(shortcut.value, 'ctrl_enter');
-    assert.equal(themeSelect.value, 'theme1');
-    assert.equal(preferences.send_shortcut, 'enter');
-    assert.equal(documentElement.className, 'theme2');
+    assert.equal(element('theme-select').value, 'theme1');
+    assert.equal(element('send-shortcut').value, 'ctrl_enter');
+    assert.deepEqual(preferences, saves[0].value);
     assert.match(alerts.at(-1), /保存失败/);
 
-    await element('.close-setting').listeners.get('click')();
-    element('settings').listeners.get('click')({stopPropagation() {}});
-    assert.equal(themeSelect.value, 'theme2');
-    assert.equal(shortcut.value, 'enter');
-    assert.equal(saves.length, 2);
+    await act('setting-container', 'cancel');
+    session.open();
+    await tick();
+    assert.equal(element('theme-select').value, 'theme2');
+    assert.equal(element('chat-font-size').value, 'small');
+    assert.equal(element('send-shortcut').value, 'enter');
+    session.reset();
+    await tick();
+    assert.equal(element('setting-container').open, false);
+    assert.equal(element('theme-select').value, 'theme0');
+    assert.equal(element('chat-font-size').value, 'standard');
+    assert.equal(element('preferences-fields').props.disabled, true);
+});
 
-    exports.resetSettings();
-    assert.equal(documentElement.className, 'theme0');
-    assert.equal(themeSelect.value, 'theme0');
+test('a late settings read can apply preferences without undoing a model switch', async () => {
+    let next = Promise.resolve(saved());
+    const {element, act, session, preferences} = mount({
+        settingsAPI: () => next,
+        modelAPI: async () => ({status: true})
+    });
+    await session.load();
+    const delayed = pending();
+    next = delayed.promise;
+    const loading = session.load();
 
-    const configured = exports.loadSettings();
-    finishSettings({model: null, model_ready: false, preferences, model_options: {
-        default_provider: 'tongyi', providers: {
-            tongyi: {default_model: 'server-selected-model', names: ['server-selected-model', 'saved-model'],
-                     saved_model: 'server-selected-model', saved_address: 'https://saved-address.example/v1', has_saved_key: true},
-            deepseek: {default_model: 'new-model', default_address: 'https://default.example/v1', names: ['new-model'],
-                       saved_model: 'new-model', saved_address: null, has_saved_key: false}
-        }
-    }});
-    await configured;
-    element('open-modify-btn').listeners.get('click')();
+    await act('open-modify-btn');
     assert.equal(element('modelSelect').value, 'tongyi');
     assert.equal(element('modelName').value, 'server-selected-model');
-    assert.deepEqual(element('modelName').children.map(child => child.value), ['server-selected-model', 'saved-model']);
+    await act('model-config-form', 'submit');
+    assert.equal(element('display-model').text, 'server-selected-model');
+    assert.equal(element('display-model-status').text, '可用');
+
+    delayed.resolve(saved({...defaults, theme: 'theme1'},
+        {model_merchant: 'deepseek', model_name: 'new-model'}));
+    await loading;
+    assert.equal(element('display-model').text, 'server-selected-model');
+    assert.equal(preferences.theme, 'theme1');
+});
+
+test('opening settings retries an initial read failure and restores the saved controls', async () => {
+    const loaded = {send_shortcut: 'ctrl_enter', theme: 'theme3', chat_font_size: 'small'};
+    let reads = 0;
+    const {element, act, session, preferences, alerts} = mount({
+        settingsAPI: async () => {
+            if (++reads < 3) throw new Error('读取设置失败，请稍后重试');
+            return saved(loaded);
+        }
+    });
+    await assert.rejects(session.load(), /读取设置失败/);
+    assert.equal(element('preferences-fields').props.disabled, true);
+    assert.equal(element('open-modify-btn').props.disabled, true);
+
+    await session.open();
+    await tick();
+    assert.equal(element('setting-container').open, true);
+    assert.equal(element('preferences-fields').props.disabled, true);
+    assert.match(alerts.at(-1), /读取设置失败/);
+
+    await act('setting-container', 'cancel');
+    await session.open();
+    await tick();
+    assert.equal(reads, 3);
+    assert.equal(element('preferences-fields').props.disabled, false);
+    assert.equal(element('open-modify-btn').props.disabled, false);
+    assert.equal(element('theme-select').value, 'theme3');
+    assert.deepEqual(preferences, loaded);
+});
+
+test('the model editor offers only providers in the configured catalog', async () => {
+    const available = saved();
+    delete available.model_options.providers.deepseek;
+    const {element, act, session} = mount({settingsAPI: async () => available});
+    await session.load();
+    await act('open-modify-btn');
+    assert.deepEqual(element('modelSelect').options.map(option => option.value), ['tongyi']);
+});
+
+test('the model editor masks API keys, clears autofill, and preserves provider address semantics', async () => {
+    const calls = [];
+    const {element, act, select, session, update, alerts} = mount({
+        settingsAPI: async () => saved(),
+        modelAPI: async (model, testOnly, key, personal) => {
+            calls.push({...model, testOnly, key, personal});
+            return {status: true, info: '验证通过'};
+        }
+    });
+    await session.load();
+    await act('open-modify-btn');
     const key = element('model-api-key');
-    assert.equal(key.required, false);
-    assert.equal(key.placeholder, '********');
-    assert.equal(key.value, '');
-    const toggleKey = element('toggle-model-key').listeners.get('click');
-    key.value = 'browser-login-password';
-    toggleKey();
-    assert.equal(key.type, 'password');
-    assert.equal(key.value, '');
-    const testConnection = element('test-model-btn').listeners.get('click');
-    key.value = 'browser-login-password';
-    testConnection();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(key.value, '');
-    assert.deepEqual(submittedModels.at(-1), {address: undefined, key: undefined, personal: false, testOnly: true});
-    admin = false;
-    element('open-modify-btn').listeners.get('click')();
-    assert.equal(key.placeholder, '********');
-    assert.equal(key.value, '');
-    element('model-config-form').listeners.get('submit')({preventDefault() {}});
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(submittedModels.at(-1).key, undefined);
-    element('modelName').value = 'saved-model';
-    assert.equal(element('model-base-url').value, 'https://saved-address.example/v1');
-    element('modelSelect').value = 'deepseek';
-    element('modelSelect').listeners.get('change')();
-    assert.equal(key.required, true);
-    assert.equal(key.placeholder, '');
-    assert.equal(key.value, '');
+    const toggle = element('toggle-model-key');
     const address = element('model-base-url');
-    assert.equal(address.value, 'https://default.example/v1');
+    assert.equal(key.props.type, 'password');
+    assert.equal(key.props.autocomplete, 'off');
+    assert.equal(toggle.props.type, 'button');
+    assert.equal(toggle.props['aria-controls'], 'model-api-key');
+    assert.equal(key.props.required, false);
+    assert.equal(key.props.placeholder, '********');
+    assert.equal(key.value, '');
+    await act('model-address-help');
+    assert.match(alerts.at(-1), /服务器批准/);
+    assert.equal(address.value, 'https://saved-address.example/v1');
+    assert.deepEqual(element('modelName').options.map(option => option.value), catalog.providers.tongyi.names);
+
     key.value = 'browser-login-password';
-    const count = submittedModels.length;
-    testConnection();
-    assert.equal(submittedModels.length, count);
+    await act('toggle-model-key');
+    assert.equal(key.props.type, 'password');
+    assert.equal(key.value, '');
+    key.value = 'browser-login-password';
+    await act('test-model-btn');
+    assert.deepEqual(calls.at(-1), {
+        model_merchant: 'tongyi', model_name: 'server-selected-model',
+        base_url: undefined, key: undefined, testOnly: true, personal: false
+    });
+    assert.equal(element('display-model-status').text, '未就绪');
+    assert.equal(alerts.at(-1), '验证通过');
+
+    update({isAdmin: false});
+    await act('open-modify-btn');
+    assert.equal(element('open-modify-btn').text, '配置个人模型');
+    assert.equal(element('submit-model-btn').text, '保存模型');
+    await act('model-address-help');
+    assert.match(alerts.at(-1), /公网 HTTPS/);
+    assert.match(alerts.at(-1), /更换或恢复地址时，请重新填写 API Key/);
+    const change = () => act('model-base-url', 'input');
+    address.validity = {typeMismatch: true};
+    address.value = 'invalid address';
+    change();
+    await act('test-model-btn');
+    assert.equal(calls.length, 1);
+    assert.equal(address.focused, true);
+    assert.match(alerts.at(-1), /有效的接口地址/);
+    address.validity = {typeMismatch: false};
+    address.value = catalog.providers.tongyi.default_address;
+    change();
+    await act('test-model-btn');
+    assert.deepEqual(calls.at(-1), {
+        model_merchant: 'tongyi', model_name: 'server-selected-model',
+        base_url: '', key: undefined, testOnly: true, personal: true
+    });
+
+    select('modelSelect', 'deepseek');
+    await tick();
+    assert.equal(key.props.required, true);
+    assert.equal(key.props.placeholder, '');
+    assert.equal(address.value, catalog.providers.deepseek.default_address);
+    key.value = 'browser-login-password';
+    await act('test-model-btn');
+    assert.equal(calls.length, 2);
+    assert.equal(key.value, '');
+    assert.equal(key.focused, true);
+    assert.match(alerts.at(-1), /请填写此厂商的 API Key/);
+
+    key.value = 'browser-login-password';
+    act('model-api-key', 'beforeinput', {isTrusted: true, inputType: 'insertText'});
     assert.equal(key.value, '');
     key.value = 'typed-api-key';
-    key.listeners.get('input')({isTrusted: true, inputType: 'insertText'});
-    assert.equal(key.type, 'password');
-    toggleKey();
-    assert.equal(key.type, 'text');
+    act('model-api-key', 'input', {isTrusted: true, inputType: 'insertText'});
+    await act('toggle-model-key');
+    assert.equal(key.props.type, 'text');
     assert.equal(key.value, 'typed-api-key');
-    toggleKey();
-    assert.equal(key.type, 'password');
-    toggleKey();
-    address.value = 'https://custom.example/v1';
-    testConnection();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(key.type, 'password');
-    assert.deepEqual(submittedModels.at(-1), {address: 'https://custom.example/v1', key: 'typed-api-key', personal: true, testOnly: true});
-    toggleKey();
-    element('cancel-modify-btn').listeners.get('click')();
-    assert.equal(key.type, 'password');
+
+    key.autofilled = true;
+    key.value = 'browser-login-password';
+    await act('model-api-key', 'input', {isTrusted: true, inputType: 'insertText'});
+    assert.equal(key.props.type, 'password');
     assert.equal(key.value, '');
+    key.autofilled = false;
+
+    key.value = 'typed-api-key';
+    act('model-api-key', 'input', {isTrusted: true, inputType: 'insertText'});
+    await act('toggle-model-key');
+    address.value = 'https://custom.example/v1';
+    change();
+    await act('test-model-btn');
+    assert.equal(key.props.type, 'password');
+    assert.deepEqual(calls.at(-1), {
+        model_merchant: 'deepseek', model_name: 'new-model',
+        base_url: 'https://custom.example/v1', key: 'typed-api-key', testOnly: true, personal: true
+    });
+    await act('toggle-model-key');
+    await act('cancel-modify-btn');
+    assert.equal(key.props.type, 'password');
+    assert.equal(key.value, '');
+});
+
+test('clearing history requires confirmation and emits completion after the server succeeds', async () => {
+    const confirmation = pending();
+    const deletion = pending();
+    const events = [];
+    const {act, element, update, alerts} = mount({
+        clearHistoryAPI: () => {
+            events.push('delete');
+            return deletion.promise;
+        }
+    }, {
+        chatBusy: true,
+        confirmAction: options => {
+            assert.equal(options.destructive, true);
+            assert.match(options.description, /所有聊天记录和聊天摘要/);
+            events.push('confirm');
+            return confirmation.promise;
+        },
+        onClearingHistory: busy => events.push(busy),
+        onHistoryCleared: () => events.push('cleared')
+    });
+
+    await act('clear-chat-history');
+    assert.match(alerts.at(-1), /当前回复完成/);
+    assert.deepEqual(events, []);
+    update({chatBusy: false});
+    const operation = act('clear-chat-history');
+    assert.deepEqual(events, ['confirm']);
+    confirmation.resolve('');
+    await tick();
+    assert.deepEqual(events, ['confirm', true, 'delete']);
+    assert.equal(alerts.length, 1);
+    deletion.resolve({ok: true});
+    await operation;
+    assert.deepEqual(events, ['confirm', true, 'delete', 'cleared', false]);
+    assert.match(alerts.at(-1), /聊天记录已清空/);
 });

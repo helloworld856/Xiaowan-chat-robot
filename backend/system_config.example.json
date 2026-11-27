@@ -99,6 +99,8 @@
   },
   // 新账号的初始偏好和头像。
   "defaults": {
+    // 新账号聊天字号。可选 small、standard 或 large。
+    "chat_font_size": "standard",
     // 新账号发送快捷键。可选 enter 或 ctrl_enter。
     "send_shortcut": "enter",
     // 新账号主题。theme0 默认白，theme1 海阔天空，theme2 夏日海岸，theme3 樱雨绵绵。

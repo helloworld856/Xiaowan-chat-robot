@@ -3,144 +3,365 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {runInNewContext} from 'node:vm';
+import {mountComponent, nextTick} from './vue-harness.mjs';
 
-const source = fs.readFileSync(new URL('../src/ts/chat.ts', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
+const sourcePath = new URL('../src/composables/useChat.ts', import.meta.url);
+const compiled = fs.existsSync(sourcePath) && ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}
+}).outputText;
 
-// 用受控的接口和 DOM 记录验证发送流程，无需启动后端。
-function harness(chatAPI, historyAPI, maxMessageChars = 8000) {
-    const rows = [];
-    const confirmed = [];
-    const sendBtn = {disabled: false};
-    const inputBox = {value: '原文'};
-    const history = [];
-    const timings = [];
+class ChatNotStartedError extends Error {
+    constructor(message, retryable = true) {
+        super(message);
+        this.retryable = retryable;
+    }
+}
+
+const saved = (round, user = '原文', assistant = ['回复']) => ({conversation_round: round, user, assistant});
+const flushAsync = () => new Promise(setImmediate);
+
+async function harness({chatAPI, historyAPI, maxMessageChars = 8000} = {}) {
+    assert.ok(compiled, 'the Vue chat state module is missing');
+    const vue = await import('vue');
     const alerts = [];
-    class ChatNotStartedError extends Error {
-        constructor(message, retryable = true) {
-            super(message);
-            this.retryable = retryable;
-        }
-    }
-    function element(tag) {
-        return {
-            tag, children: [], isConnected: true, events: {}, dataset: {},
-            append(...children) { this.children.push(...children); },
-            prepend(child) { child.parentElement = this; this.children.unshift(child); },
-            addEventListener(name, handler) { this.events[name] = handler; },
-            setAttribute() {},
-            remove() {
-                this.isConnected = false;
-                if (this.parentElement) {
-                    const siblings = this.parentElement.children;
-                    siblings.splice(siblings.indexOf(this), 1);
-                    this.parentElement = undefined;
-                }
-                const index = rows.indexOf(this);
-                if (index >= 0) rows.splice(index, 1);
-            }
-        };
-    }
+    const timings = [];
+    const locks = [];
+    const delays = [];
+    let resolveDelay;
+    let generation = 0;
     const exports = {};
     runInNewContext(compiled, {
         exports,
         require(name) {
-            if (name === './api.ts') return {
-                chatAPI: text => chatAPI(text, ChatNotStartedError, inputBox), historyAPI,
+            if (name === 'vue') return vue;
+            if (name === '../ts/api.ts') return {
+                chatAPI, historyAPI, ChatNotStartedError,
                 AuthRequiredError: class extends Error {}, CancelledRequestError: class extends Error {},
-                ChatNotStartedError, getRequestGeneration: () => 0
+                getRequestGeneration: () => generation
             };
-            if (name === './ui.ts') return {
-                inputBox, sendBtn, chatBox: {appendChild: row => { row.remove(); row.isConnected = true; rows.push(row); }},
-                lockSendBtn() { sendBtn.disabled = true; }, unlockSendBtn() { sendBtn.disabled = false; },
-                showTypingIndicator() {}, hideTypingIndicator() {}, scrollToBottom() {}, showAlert(message) { alerts.push(message); }
-            };
-            if (name === './global_config.ts') return {inputLimits: {max_message_chars: maxMessageChars}};
-            if (name === './composer.ts') return {clearChatInput() { inputBox.value = ''; }};
-            return {
-                addUserMessage(text) { const row = element('user'); row.textContent = text; rows.push(row); return row; },
-                async addAssistantMessage(messages, _isCurrent, firstReply) { confirmed.push(...messages); firstReply?.(); },
-                showChatHistory(items) { history.push(...items); }
-            };
+            if (name === '../ts/global_config.ts') return {inputLimits: {max_message_chars: maxMessageChars}};
+            throw new Error('Unexpected dependency: ' + name);
         },
-        document: {createElement: element, getElementById: () => inputBox},
-        window: {alert() {}},
         performance: {now: () => 1, clearMeasures() {}, measure: name => timings.push(name)},
-        requestAnimationFrame: callback => callback()
+        setTimeout(callback, delay) { resolveDelay = callback; delays.push(delay); return 1; },
+        clearTimeout() { resolveDelay = undefined; }
     });
-    return {...exports, rows, confirmed, inputBox, history, timings, alerts};
+    const state = exports.useChat({
+        canSend: () => true,
+        showAlert: message => alerts.push(message),
+        onBusyChange: busy => locks.push(busy),
+        scrollAfterRender() {}
+    });
+    state.draft.value = '原文';
+    return {...state, alerts, timings, locks, delays,
+        nextReply: async () => { resolveDelay?.(); await flushAsync(); },
+        nextAccount: () => { generation++; state.reset(); }
+    };
 }
+
+// Copy data out of the VM so strict assertions compare objects from the same realm.
+const snapshot = value => JSON.parse(JSON.stringify(value));
+
+test('a fast first reply waits 700 ms after sending without showing a typing bubble', async () => {
+    const app = await harness({async chatAPI() {
+        return {response: ['回复'], conversation_round: 1, saved: true};
+    }});
+    const sending = app.sendMessage();
+    await flushAsync();
+    const [turn] = app.entries.value;
+    assert.equal(turn.user, '原文');
+    assert.deepEqual(snapshot(turn.replies), []);
+    assert.equal(app.isTyping.value, false);
+    assert.equal(app.busy.value, true);
+    assert.deepEqual(app.delays, [700]);
+    await app.nextReply();
+    await sending;
+    assert.deepEqual(snapshot(turn.replies), ['回复']);
+    assert.equal(app.isTyping.value, false);
+});
+
+test('a slow first reply shows typing after 700 ms and needs no additional delay', async () => {
+    let resolveSend;
+    const app = await harness({chatAPI: () => new Promise(resolve => { resolveSend = resolve; })});
+    const sending = app.sendMessage();
+    assert.equal(app.isTyping.value, false);
+    await app.nextReply();
+    assert.equal(app.isTyping.value, true);
+    resolveSend({response: ['回复'], conversation_round: 1, saved: true});
+    await sending;
+    assert.deepEqual(snapshot(app.entries.value[0].replies), ['回复']);
+    assert.deepEqual(app.delays, [700]);
+    assert.equal(app.isTyping.value, false);
+});
+
+test('changing account cancels the first reply delay before a bubble appears', async () => {
+    const app = await harness({async chatAPI() {
+        return {response: ['旧账号回复'], conversation_round: 1, saved: true};
+    }});
+    const sending = app.sendMessage();
+    await flushAsync();
+    const [turn] = app.entries.value;
+    app.nextAccount();
+    await sending;
+    assert.deepEqual(snapshot(turn.replies), []);
+    assert.equal(app.entries.value.length, 0);
+    assert.equal(app.isTyping.value, false);
+    assert.equal(app.busy.value, false);
+});
 
 test('the chat limit counts Unicode characters and preserves an oversized draft', async () => {
     const sent = [];
-    const app = harness(async text => {
+    const app = await harness({maxMessageChars: 3, async chatAPI(text) {
         sent.push(text);
         return {response: ['回复'], conversation_round: 1, saved: true};
-    }, undefined, 3);
+    }});
     const valid = '🙂🙂🙂';
-    app.inputBox.value = valid + '好';
+    app.draft.value = valid + '好';
     await app.sendMessage();
-    assert.equal(sent.length, 0);
-    assert.equal(app.inputBox.value, valid + '好');
+    assert.deepEqual(sent, []);
+    assert.equal(app.draft.value, valid + '好');
     assert.match(app.alerts[0], /3/);
-    app.inputBox.value = valid;
-    await app.sendMessage();
+    app.draft.value = valid;
+    const sending = app.sendMessage();
+    await app.nextReply();
+    await sending;
     assert.deepEqual(sent, [valid]);
 });
 
-test('a retryable failure uses a red marker that resends the original and clears after retry', async () => {
-    const sent = [];
-    const app = harness(async (text, Rejected, input) => {
-        sent.push(text);
-        if (sent.length === 1) { input.value = '新草稿'; throw new Rejected('当前聊天较忙'); }
-        return {response: ['回复'], conversation_round: 1, saved: true};
-    }, async () => assert.fail('rejection must not need history'));
-    await app.sendMessage();
-    assert.equal(app.inputBox.value, '新草稿');
-    assert.equal(app.rows.length, 1);
-    const marker = app.rows[0].children[0];
-    assert.equal(marker.className, 'chat-send-failed');
-    assert.equal(marker.tag, 'button');
-    assert.equal(marker.textContent, '!');
-    assert.equal(marker.title, '发送失败');
-    await marker.events.click();
-    assert.deepEqual(sent, ['原文', '原文']);
-    assert.equal(app.rows.length, 1);
-    assert.equal(app.rows[0].children.length, 0);
-    assert.equal(app.inputBox.value, '新草稿');
-    assert.deepEqual(app.confirmed, ['回复']);
-    assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
-});
-
-test('a missing personal model shows the existing alert and the original can be retried after setup', async () => {
+test('a retryable rejection resends the original, retains its key, and keeps the new draft', async () => {
     const message = '请先在设置中配置个人模型和 API Key';
-    let calls = 0;
-    const app = harness(async (text, Rejected) => {
-        assert.equal(text, '原文');
-        if (++calls === 1) throw new Rejected(message);
-        return {response: ['个人模型回复'], conversation_round: 1, saved: true};
-    }, async () => assert.fail('validation must not need history'));
-    await app.sendMessage();
-    assert.equal(app.rows[0].textContent, '原文');
+    const sent = [];
+    const app = await harness({
+        async chatAPI(text) {
+            sent.push(text);
+            if (sent.length === 1) throw new ChatNotStartedError(message);
+            return {response: ['个人模型回复'], conversation_round: 1, saved: true};
+        },
+        async historyAPI() { assert.fail('definite rejection does not need history'); }
+    });
+    const sending = app.sendMessage();
+    assert.equal(app.isTyping.value, false);
+    app.draft.value = '新草稿';
+    await sending;
+    const [turn] = app.entries.value;
+    assert.equal(turn.failure.message, message);
+    assert.equal(turn.failure.retryable, true);
     assert.deepEqual(app.alerts, [message]);
-    const [marker] = app.rows[0].children;
-    assert.equal(app.rows[0].children.length, 1);
-    assert.equal(marker.textContent, '!');
-    assert.equal(marker.title, '发送失败');
-    await marker.events.click();
-    assert.deepEqual(app.alerts, [message]);
-    assert.equal(calls, 2);
-    assert.deepEqual(app.confirmed, ['个人模型回复']);
+    assert.equal(app.isTyping.value, false);
+    const retrying = app.activateFailure(turn);
+    await app.nextReply();
+    await retrying;
+    assert.deepEqual(sent, ['原文', '原文']);
+    assert.equal(app.entries.value.length, 1);
+    assert.equal(app.entries.value[0].id, turn.id);
+    assert.equal(turn.round, 1);
+    assert.equal(turn.failure, undefined);
+    assert.equal(app.draft.value, '新草稿');
+    assert.deepEqual(snapshot(turn.replies), ['个人模型回复']);
+    assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
+    assert.deepEqual(app.locks, [true, false, true, false]);
 });
 
-test('an uncertain send refreshes history without offering a duplicate send', async () => {
+test('a permanent rejection shows its reason when activated and never resends', async () => {
     let calls = 0;
-    const saved = {conversation_round: 1, user: '原文', assistant: ['已保存的回复']};
-    const app = harness(async () => { calls++; throw new Error('transport closed'); }, async () => ({history_messages: [saved]}));
+    const app = await harness({async chatAPI() {
+        calls++;
+        throw new ChatNotStartedError('消息过长', false);
+    }});
     await app.sendMessage();
-    assert.deepEqual(app.history, [saved]);
+    await app.activateFailure(app.entries.value[0]);
     assert.equal(calls, 1);
-    assert.equal(app.rows.some(row => row.tag === 'user'), false);
-    assert.equal(app.rows.length, 1);
-    assert.equal(app.rows[0].children.some(child => child.tag === 'button'), false);
+    assert.deepEqual(app.alerts, ['消息过长', '消息过长']);
+});
+
+test('an uncertain send refreshes history and retains the original only in a notice', async () => {
+    let calls = 0;
+    const item = saved(1, '原文', ['已保存的回复']);
+    const app = await harness({
+        async chatAPI() { calls++; throw new Error('transport closed'); },
+        async historyAPI() { return {history_messages: [item]}; }
+    });
+    await app.sendMessage();
+    const [turn, notice] = app.entries.value;
+    assert.equal(calls, 1);
+    assert.equal(turn.round, item.conversation_round);
+    assert.deepEqual(snapshot(turn.replies), item.assistant);
+    assert.equal(notice.kind, 'notice');
+    assert.equal(notice.user, '原文');
+    assert.match(notice.message, /已刷新聊天记录/);
+    assert.deepEqual(app.alerts, [notice.message]);
+    assert.equal(notice.failure, undefined);
+});
+
+test('reply delay is recalculated for each bubble and never waits after the last', async () => {
+    const replies = ['hello', 'a'.repeat(20), 'b'.repeat(100), 'last'];
+    const app = await harness({
+        async chatAPI() { return {response: replies, conversation_round: null, saved: false}; }
+    });
+    const sending = app.sendMessage();
+    await app.nextReply();
+    const [turn] = app.entries.value;
+    assert.deepEqual(snapshot(turn.replies), ['hello']);
+    assert.deepEqual(app.timings, ['xiaowan.chat.first-reply']);
+    assert.equal(app.isTyping.value, false);
+    await app.nextReply();
+    await app.nextReply();
+    await app.nextReply();
+    await sending;
+    assert.deepEqual(app.delays, [700, 1500, 3000, 5000]);
+    assert.deepEqual(snapshot(turn.replies), replies);
+    assert.equal(turn.round, null);
+    assert.match(app.alerts[0], /未保存/);
+});
+
+test('changing account cancels delayed replies, clears the draft, and unlocks the chat', async () => {
+    const app = await harness({
+        async chatAPI() { return {response: ['first', 'second', 'third'], conversation_round: 0, saved: true}; }
+    });
+    const sending = app.sendMessage();
+    await app.nextReply();
+    const [turn] = app.entries.value;
+    assert.deepEqual(snapshot(turn.replies), ['first']);
+    app.draft.value = '新草稿';
+    app.nextAccount();
+    await sending;
+    assert.deepEqual(snapshot(turn.replies), ['first']);
+    assert.equal(app.entries.value.length, 0);
+    assert.equal(app.draft.value, '');
+    assert.equal(app.busy.value, false);
+});
+
+test('history merges missing rounds in order and keeps unsent bubbles and stable keys', async () => {
+    let history = [saved(0), saved(2)];
+    const app = await harness({
+        async chatAPI() { throw new ChatNotStartedError('发送失败'); },
+        async historyAPI() { return {history_messages: history}; }
+    });
+    await app.loadHistory();
+    await app.sendMessage();
+    const keys = [...app.entries.value.map(turn => turn.id)];
+    history = [saved(0), saved(1), saved(2)];
+    await app.loadHistory();
+    assert.deepEqual([...app.entries.value.map(turn => turn.round)], [0, 1, 2, null]);
+    assert.deepEqual([...app.entries.value.filter(turn => turn.round !== 1).map(turn => turn.id)], keys);
+});
+
+test('a history refresh and a successful send with the same round converge on the optimistic key', async () => {
+    let resolveSend;
+    let history = [saved(0), saved(1)];
+    const app = await harness({
+        chatAPI: () => new Promise(resolve => { resolveSend = resolve; }),
+        async historyAPI() { return {history_messages: history}; }
+    });
+    await app.loadHistory();
+    app.draft.value = '另一个本地消息';
+    const sending = app.sendMessage();
+    const optimisticKey = app.entries.value.at(-1).id;
+    // Simulate a second history request returning the just-saved round before the send response.
+    history = [...history, saved(2, '另一个本地消息', ['另外的回复']), saved(3)];
+    await app.loadHistory();
+    resolveSend({response: ['另外的回复'], conversation_round: 2, saved: true});
+    await app.nextReply();
+    await sending;
+    const turns = app.entries.value;
+    assert.deepEqual([...turns.map(turn => turn.round)], [0, 1, 2, 3]);
+    assert.equal(turns[2].id, optimisticKey);
+});
+
+test('a send confirmation stays in round order when older history arrives during the send', async () => {
+    let resolveSend;
+    let history = [saved(0)];
+    const app = await harness({
+        chatAPI: () => new Promise(resolve => { resolveSend = resolve; }),
+        async historyAPI() { return {history_messages: history}; }
+    });
+    await app.loadHistory();
+    const sending = app.sendMessage();
+    const optimisticKey = app.entries.value.at(-1).id;
+    history = [...history, saved(1), saved(2)];
+    await app.loadHistory();
+    resolveSend({response: ['最新的回复'], conversation_round: 3, saved: true});
+    await app.nextReply();
+    await sending;
+    assert.deepEqual(Array.from(app.entries.value, turn => turn.round), [0, 1, 2, 3]);
+    assert.equal(app.entries.value.at(-1).id, optimisticKey);
+});
+
+test('clearing history keeps the draft and ignores in-flight history from before clearing', async () => {
+    let resolveHistory;
+    const app = await harness({historyAPI: () => new Promise(resolve => { resolveHistory = resolve; })});
+    const loading = app.loadHistory();
+    app.clearHistory();
+    resolveHistory({history_messages: [saved(0)]});
+    await loading;
+    assert.equal(app.entries.value.length, 0);
+    assert.equal(app.draft.value, '原文');
+});
+
+async function workspaceHarness(t, initialEntries = []) {
+    const {ref} = await import('vue');
+    const entries = ref(initialEntries);
+    const body = {};
+    let activeElement;
+    const globals = {
+        window: new EventTarget(),
+        document: {body, get activeElement() { return activeElement?.parent ? activeElement : body; }},
+        ResizeObserver: class { observe() {} disconnect() {} },
+        Element: class { closest(selector) { return selector === 'dialog[open]' ? this : null; } }
+    };
+    const originals = new Map();
+    for (const [name, value] of Object.entries(globals)) {
+        originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+        Object.defineProperty(globalThis, name, {configurable: true, value});
+    }
+    let app;
+    t.after(() => {
+        app?.unmount();
+        for (const [name, original] of originals) {
+            if (original) Object.defineProperty(globalThis, name, original);
+            else delete globalThis[name];
+        }
+    });
+    app = mountComponent(new URL('../src/components/ChatWorkspace.vue', import.meta.url), {
+        imports: {
+            './ChatComposer.vue': {__esModule: true, default: {render: () => null}},
+            '../composables/useChat.ts': {useChat: () => ({
+                entries, draft: ref(''), busy: ref(false), isTyping: ref(false), reset() {}
+            })}
+        },
+        props: {ready: true, shortcut: 'enter', profile: null, persona: null, clearingHistory: false, showAlert() {}}
+    });
+    const toggle = app.element('sidebar-zone').children[0];
+    toggle.props.onClick();
+    await nextTick();
+    const list = app.element('review-list');
+    list.querySelectorAll = () => list.children.filter(child => child.tag === 'button');
+    list.contains = node => node?.parent === list;
+    for (const result of list.querySelectorAll()) {
+        result.focus = () => { activeElement = result; };
+    }
+    return {entries, toggle, list, ...globals};
+}
+
+test('history search keeps keyboard focus when an optimistic result becomes uncertain', async t => {
+    const app = await workspaceHarness(t, [
+        {kind: 'turn', id: 'round-0', round: 0, user: '旧消息', replies: ['旧回复']},
+        {kind: 'turn', id: 'local-1', round: null, user: '新消息', replies: []}
+    ]);
+    const [optimistic, older] = app.list.querySelectorAll();
+    optimistic.focus();
+    app.entries.value[1] = {kind: 'notice', id: 'local-1', user: '新消息', message: '待确认'};
+    await nextTick();
+    await nextTick();
+    assert.ok(app.document.activeElement === older, 'focus should move to the remaining result');
+});
+
+test('Escape in a modal leaves the history sidebar open', async t => {
+    const app = await workspaceHarness(t);
+    const escape = Object.assign(new Event('keydown', {cancelable: true, bubbles: true}), {key: 'Escape'});
+    Object.defineProperty(escape, 'target', {value: new app.Element()});
+    assert.equal(app.toggle.props['aria-expanded'], true);
+    app.window.dispatchEvent(escape);
+    await nextTick();
+    assert.equal(app.toggle.props['aria-expanded'], true);
 });
