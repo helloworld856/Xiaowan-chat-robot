@@ -111,17 +111,42 @@ class PortraitIntegrationTests(unittest.IsolatedAsyncioTestCase):
             request.state.user = user
             return await call_next(request)
 
+        portraits.update(user.id, UserPortrait(learned=['喜欢听雨声']))
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
             initial = await client.get('/portrait')
             self.assertEqual(initial.status_code, 200)
-            self.assertEqual(initial.json()['auto_learn'], True)
-            updated = await client.post('/portrait', json={
+            self.assertEqual(initial.json(), {
+                'manual': {'call_me': '', 'city': '', 'birthday': '', 'occupation': '', 'chat_preference': ''},
+                'auto_learn': True,
+                'has_learned': True,
+            })
+            self.assertNotIn('learned', initial.json())
+
+            # 接口禁止前端读取或篡改后台记住的印象列表
+            rejected = await client.post('/portrait', json={
+                'manual': {'call_me': '小陈'},
+                'learned': ['试图篡改'],
+            })
+            self.assertEqual(rejected.status_code, 422)
+
+            # 关闭自动记录开关时保留已有印象不删除
+            paused = await client.post('/portrait', json={
                 'manual': {'call_me': '小陈', 'city': '苏州', 'birthday': '', 'occupation': '工程师', 'chat_preference': ''},
-                'learned': ['喜欢听雨声'],
+                'auto_learn': False,
+            })
+            self.assertEqual(paused.status_code, 200)
+            self.assertEqual(paused.json()['auto_learn'], False)
+            self.assertEqual(paused.json()['has_learned'], True)
+            self.assertEqual(portraits.get(user.id).learned, ['喜欢听雨声'])
+
+            # 重新开启自动记录开关后，聊天仍可继续积累新印象
+            resumed = await client.post('/portrait', json={
+                'manual': {'call_me': '小陈', 'city': '苏州', 'birthday': '', 'occupation': '工程师', 'chat_preference': ''},
                 'auto_learn': True,
             })
-            self.assertEqual(updated.status_code, 200)
-            self.assertEqual(updated.json()['manual']['city'], '苏州')
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(resumed.json()['auto_learn'], True)
 
         pool = SQLitePool(Path(folder.name) / 'chat.sqlite')
         sessions = ChatSessions(pool.connection, portraits=portraits)
@@ -133,7 +158,6 @@ class PortraitIntegrationTests(unittest.IsolatedAsyncioTestCase):
             return 'summary'
 
         agents = (
-            FakeAgent(lambda _: '{"intent":"分享宠物","emotion":"开心","pace":"简短","answer":"接话"}'),
             FakeAgent(summarize_or_learn),
             FakeAgent(lambda prompt: (answer_prompts.append(prompt), '{"reply":["团子这名字好可爱"]}')[1]),
         )
@@ -149,3 +173,13 @@ class PortraitIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('喜欢听雨声', answer_prompts[0])
         self.assertEqual(portraits.get(user.id).learned, ['喜欢听雨声', '养了一只叫团子的橘猫'])
         self.assertEqual(portraits.get(user.id).manual.city, '苏州')
+
+        # 清空印象接口只清除 learned，保留手动资料与开关状态
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            cleared = await client.delete('/portrait/learned')
+            self.assertEqual(cleared.status_code, 200)
+            self.assertEqual(cleared.json(), {'ok': True, 'has_learned': False})
+            after = portraits.get(user.id)
+            self.assertEqual(after.learned, [])
+            self.assertEqual(after.manual.city, '苏州')
+            self.assertEqual(after.auto_learn, True)

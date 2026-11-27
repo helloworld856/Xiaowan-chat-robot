@@ -111,3 +111,110 @@ def safe_parse_json(content: object, default_result: Optional[dict] = None, *,
 
     logger.warning('%s：未收到可用的 JSON，使用默认值', stage)
     return deepcopy(default_result)
+
+
+def chunk_visible_text(content: object) -> str:
+    """从单个流式消息块中提取可见文本片段，跳过推理/思考内容块。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+                parts.append(block['text'])
+        return ''.join(parts)
+    return ''
+
+
+_REPLY_ARRAY_RE = re.compile(r'"reply"\s*:\s*\[')
+
+
+class ReplyBubbleStreamParser:
+    """增量解析模型流式输出的 {"reply": ["...", ...]}，每条气泡闭合时立即产出。"""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._buffer = ''
+        self._pos = 0
+        self._state = 'find_reply'
+        self._str_start = 0
+        self._escaped = False
+        self.emitted: list[str] = []
+
+    @property
+    def raw_text(self) -> str:
+        return self._buffer
+
+    def feed(self, piece: str) -> list[str]:
+        if not piece:
+            return []
+        self._buffer += piece
+        new_bubbles: list[str] = []
+
+        if self._state == 'find_reply':
+            buf = self._buffer
+            cursor = self._pos
+            # 跳过开头可能出现的 <think>...</think> 推理块；未闭合时继续等待。
+            while True:
+                while cursor < len(buf) and buf[cursor].isspace():
+                    cursor += 1
+                if buf[cursor:cursor + 7].lower() == '<think>':
+                    end_tag = buf.lower().find('</think>', cursor + 7)
+                    if end_tag == -1:
+                        return []
+                    cursor = end_tag + 8
+                    continue
+                break
+            match = _REPLY_ARRAY_RE.search(buf, cursor)
+            if not match:
+                return []
+            self._pos = match.end()
+            self._state = 'in_array'
+
+        buf = self._buffer
+        n = len(buf)
+        while self._pos < n and self._state != 'done':
+            if self._state == 'in_array':
+                ch = buf[self._pos]
+                if ch.isspace() or ch == ',':
+                    self._pos += 1
+                elif ch == ']':
+                    self._state = 'done'
+                    self._pos += 1
+                elif ch == '"':
+                    self._str_start = self._pos
+                    self._pos += 1
+                    self._escaped = False
+                    self._state = 'in_string'
+                else:
+                    # 遇到非预期结构时停止增量提取，交由结束时的完整容错解析兜底。
+                    self._state = 'done'
+            elif self._state == 'in_string':
+                ch = buf[self._pos]
+                if self._escaped:
+                    self._escaped = False
+                    self._pos += 1
+                elif ch == '\\':
+                    self._escaped = True
+                    self._pos += 1
+                elif ch == '"':
+                    raw_literal = buf[self._str_start:self._pos + 1]
+                    self._pos += 1
+                    self._state = 'in_array'
+                    try:
+                        decoded = json.loads(raw_literal, strict=False)
+                    except ValueError:
+                        decoded = None
+                    if isinstance(decoded, str):
+                        cleaned = replace_invalid_unicode(decoded)
+                        if cleaned.strip():
+                            self.emitted.append(cleaned)
+                            new_bubbles.append(cleaned)
+                else:
+                    self._pos += 1
+
+        return new_bubbles

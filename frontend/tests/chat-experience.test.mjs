@@ -109,6 +109,33 @@ test('useChat cancels in-flight sends back to draft/quote and records timestamps
     assert.equal(state.entries.value[0].createdAt, 1764150000000);
     assert.deepEqual(state.entries.value[0].replies, ['第一版回复']);
     assert.deepEqual(alerts, []);
+
+    // 3. Streamed bubbles appear immediately via onBubble before the turn resolves
+    let finishStream;
+    let streamOnBubble;
+    chatHandler = (_text, options) => {
+        streamOnBubble = options.onBubble;
+        return new Promise(resolve => { finishStream = resolve; });
+    };
+    state.draft.value = '流式测试';
+    const streamingSend = state.sendMessage();
+    await flushAsync();
+    assert.equal(typeof streamOnBubble, 'function');
+    streamOnBubble('第一条流式气泡');
+    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡']);
+    assert.equal(state.isTyping.value, false);
+    streamOnBubble('第二条流式气泡');
+    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡', '第二条流式气泡']);
+    finishStream({
+        response: ['第一条流式气泡', '第二条流式气泡'],
+        conversation_round: 5,
+        saved: true,
+        created_at: 1764150005000,
+    });
+    await streamingSend;
+    assert.equal(state.entries.value[1].round, 5);
+    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡', '第二条流式气泡']);
+    assert.equal(state.busy.value, false);
 });
 
 test('ChatComposer switches between send and stop, and displays/clears quote bar', async () => {

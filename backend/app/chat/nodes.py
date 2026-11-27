@@ -1,20 +1,35 @@
 import re
+from collections.abc import Callable
 from time import time
 
 from app.account_logging import logger
 from app.chat.memory import MemoryManager, format_history_dialogue
 from app.chat.progress import ChatCancelled, check_cancelled
 from app.chat.state import AIChatState
+from app.llm.output_parser import (
+    ReplyBubbleStreamParser,
+    chunk_visible_text,
+    model_text,
+    parse_model_json,
+    replace_invalid_unicode,
+)
 from app.llm.persona import persona
 from app.llm.token_counter import count_tokens
-from app.llm.output_parser import model_text, parse_model_json, replace_invalid_unicode, safe_parse_json
-from app.system_config import ChatConfig
 from app.prompt_loader import load_prompt
+from app.system_config import ChatConfig
 
 
 DEFAULT_COMPRESSION_TOKENS = ChatConfig().history_compression_tokens
-DEFAULT_ANALYSIS = {'intent': '一般对话', 'emotion': '不确定', 'pace': '简短', 'answer': '日常互动'}
 DEFAULT_REPLY = '嗯...我刚刚有点没组织好语言，你再说一遍嘛'
+
+
+def unpack_agents(agents):
+    """兼容 (summary, reply) 与旧测试传入的 (analysis, summary, reply)。"""
+    if len(agents) == 2:
+        return agents[0], agents[1]
+    if len(agents) == 3:
+        return agents[1], agents[2]
+    raise ValueError(f'unexpected agents tuple length: {len(agents)}')
 
 
 def get_last_message(response: dict):
@@ -103,7 +118,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
             t += 4 * o
 
             if memorier.has_older_history or t > compression_tokens:
-                _, summary_agent, _ = agents
+                summary_agent, _ = unpack_agents(agents)
                 memorier.compress_history(summary_agent)
                 check_cancelled()
 
@@ -124,7 +139,7 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
     # 保存失败时仍返回回复，由接口明确告知前端。
     state['saved'] = memorier.record_message(state['message'])
 
-    logger.info('本轮对话 %d：回复 %d 条，分析与回复 Token %s，耗时 %.2f 秒，保存%s',
+    logger.info('本轮对话 %d：回复 %d 条，回复 Token %s，耗时 %.2f 秒，保存%s',
                 state['message']['conversation_round'] + 1, len(state['ai_response']),
                 state['total_tokens'] or '未返回', time() - state['start_time'],
                 '成功' if state['saved'] else '失败')
@@ -132,55 +147,56 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
     return state
 
 
-# AI结点定义
-# 分析用户输入
-def analysis(state: AIChatState, memorier: MemoryManager, agents, *,
-             recent_window_rounds: int | None = None) -> AIChatState:
-    try:
+def _is_assistant_chunk(chunk) -> bool:
+    msg_type = getattr(chunk, 'type', '')
+    return msg_type in ('AIMessageChunk', 'ai')
+
+
+def _is_tool_chunk(chunk) -> bool:
+    msg_type = getattr(chunk, 'type', '')
+    return msg_type in ('ToolMessage', 'ToolMessageChunk', 'tool')
+
+
+def _stream_reply(reply_agent, answer_prompt: str, on_bubble: Callable[[str], None]):
+    """流式调用回复代理，每闭合一条气泡立即回调，并返回最终文本、用量和结束原因。"""
+    parser = ReplyBubbleStreamParser()
+    total_tokens = 0
+    finish_reason = None
+
+    for item in reply_agent.stream(
+        {"messages": [{"role": "user", "content": answer_prompt}]},
+        config={"recursion_limit": 6},
+        stream_mode="messages",
+    ):
         check_cancelled()
-        logger.info('执行结点"analysis"...')
-        user_input = state.get('user_input')
+        chunk = item[0] if isinstance(item, tuple) else item
+        if _is_tool_chunk(chunk):
+            # 工具调用后的新一轮回复重新收集气泡，避免误混入前置缓冲。
+            if not parser.emitted:
+                parser.reset()
+            continue
+        if not _is_assistant_chunk(chunk):
+            continue
 
-        # 构建分析提示
-        analysis_prompt = load_prompt(
-            "analysis_prompt",
-            user_portrait=state.get('user_portrait') or '暂无',
-            history=_context_history(memorier, recent_window_rounds),
-            abstract=_memory_context(state, memorier),
-            user_input=user_input
-        )
+        tokens = get_total_tokens(chunk)
+        if tokens > 0:
+            total_tokens = tokens
+        metadata = getattr(chunk, 'response_metadata', None)
+        if isinstance(metadata, dict) and metadata.get('finish_reason'):
+            finish_reason = metadata['finish_reason']
 
-        analysis_agent, _, _ = agents
-        response = analysis_agent.invoke(
-            {
-                "messages": [{"role": "user", "content": analysis_prompt}]
-            }
-        )
-        check_cancelled()
-        last_message = get_last_message(response)
+        piece = chunk_visible_text(getattr(chunk, 'content', ''))
+        if piece:
+            for bubble in parser.feed(piece):
+                on_bubble(bubble)
 
-        # 提取出回复并转成字典格式（使用容错解析）
-        defaults = DEFAULT_ANALYSIS
-        ai_response = safe_parse_json(last_message.content, defaults, expected_keys=defaults.keys(), stage='消息分析')
-
-        state['analysis_result'] = {}
-        for field, default in defaults.items():
-            value = ai_response.get(field)
-            state['analysis_result'][field] = replace_invalid_unicode(value) if isinstance(value, str) else default
-        state['total_tokens'] += get_total_tokens(last_message)
-
-        logger.info('结点"analysis"执行完成！')
-        return state
-    except ChatCancelled:
-        raise
-    except Exception as error:
-        logger.error('analysis node failed: %s', type(error).__name__)
-        raise
+    return parser.raw_text, total_tokens, finish_reason, parser.emitted
 
 
 # 生成回复结点
 def generate(state: AIChatState, memorier: MemoryManager, agents, *,
-             recent_window_rounds: int | None = None) -> AIChatState:
+             recent_window_rounds: int | None = None,
+             on_bubble: Callable[[str], None] | None = None) -> AIChatState:
     try:
         check_cancelled()
         logger.info('执行结点"generate"...')
@@ -192,20 +208,27 @@ def generate(state: AIChatState, memorier: MemoryManager, agents, *,
             history=_context_history(memorier, recent_window_rounds),
             abstract=_memory_context(state, memorier),
             user_input=user_input,
-            intent=state['analysis_result'].get('intent', '一般对话'),
-            emotion=state['analysis_result'].get('emotion', '不确定'),
-            pace=state['analysis_result'].get('pace', '简短'),
-            answer=state['analysis_result'].get('answer', '日常互动')
         )
 
-        _, _, reply_agent = agents
-        response = reply_agent.invoke(
-            {"messages": [{"role": "user", "content": answer_prompt}]},
-            config={"recursion_limit": 6}
-        )
-        check_cancelled()
-        last_message = get_last_message(response)
-        text = model_text(last_message.content)
+        _, reply_agent = unpack_agents(agents)
+        emitted: list[str] = []
+        finish_reason = None
+        if on_bubble is not None and callable(getattr(reply_agent, 'stream', None)):
+            raw_content, tokens, finish_reason, emitted = _stream_reply(reply_agent, answer_prompt, on_bubble)
+            text = model_text(raw_content)
+        else:
+            response = reply_agent.invoke(
+                {"messages": [{"role": "user", "content": answer_prompt}]},
+                config={"recursion_limit": 6}
+            )
+            check_cancelled()
+            last_message = get_last_message(response)
+            text = model_text(last_message.content)
+            tokens = get_total_tokens(last_message)
+            metadata = getattr(last_message, 'response_metadata', None)
+            if isinstance(metadata, dict):
+                finish_reason = metadata.get('finish_reason')
+
         ai_response = parse_model_json(text, ('reply',))
         # 纯文本可直接显示，疑似损坏的结构化输出用默认回复兜底。
         if ai_response is None:
@@ -213,9 +236,8 @@ def generate(state: AIChatState, memorier: MemoryManager, agents, *,
             if text and not text.startswith(('{', '[', '```')) and not structured_field:
                 ai_response = {'reply': [text]}
             else:
-                metadata = getattr(last_message, 'response_metadata', None)
                 reason = 'invalid_json_or_missing_reply' if text else 'empty_visible_text'
-                if isinstance(metadata, dict) and metadata.get('finish_reason') == 'length':
+                if finish_reason == 'length':
                     reason = 'truncated_output'
                 logger.warning('回复生成：模型输出无法解析，使用默认回复 reason=%s', reason)
                 ai_response = {'reply': [DEFAULT_REPLY], 'inner monologue': [], 'emotion': '困惑', 'action': ''}
@@ -229,7 +251,13 @@ def generate(state: AIChatState, memorier: MemoryManager, agents, *,
         messages = [replace_invalid_unicode(part) for part in reply if isinstance(part, str) and part.strip()]
         if not messages:
             logger.warning('回复生成：模型输出缺少有效回复，使用默认回复')
-        state['ai_response'] = messages or [DEFAULT_REPLY]
+        final_messages = messages or [DEFAULT_REPLY]
+        state['ai_response'] = final_messages
+
+        # 流式回调若未能提前吐出（例如纯文本/容错兜底/非流式假代理），在此补发未推送的气泡。
+        if on_bubble is not None and len(emitted) < len(final_messages):
+            for bubble in final_messages[len(emitted):]:
+                on_bubble(bubble)
 
         monologue = ai_response.get('inner monologue', '')
         if not isinstance(monologue, str) and (
@@ -242,7 +270,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents, *,
         state['ai_emotion'] = emotion if isinstance(emotion, str) else ''
         state['ai_action'] = action if isinstance(action, str) else ''
 
-        state['total_tokens'] += get_total_tokens(last_message)
+        state['total_tokens'] += tokens
 
         # 记录对话
         state['message']['user'] = user_input

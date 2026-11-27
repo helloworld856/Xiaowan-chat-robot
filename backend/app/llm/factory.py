@@ -6,7 +6,7 @@ from os import getenv
 import httpx
 from langchain.agents import create_agent
 from app.llm.model_catalog import ModelAdapter
-from app.llm.persona import ANALYSIS_PERSONA, TEXT_COMPRESS_PERSONA, persona
+from app.llm.persona import TEXT_COMPRESS_PERSONA, persona
 from app.llm.public_endpoint import public_http_clients
 from app.account_logging import logger
 from tools_config.registry import CHAT_TOOLS
@@ -63,12 +63,11 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
 
 def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_url: str, adapter: ModelAdapter,
                   public_only: bool = False):
-    """根据厂商配置创建分析、压缩和聊天代理。"""
+    """根据厂商配置创建摘要和聊天代理。"""
     try:
         logger.info('初始化模型代理')
-        # 分析和摘要使用较低温度，角色回复留更多表达空间。
+        # 摘要使用较低温度，角色回复留更多表达空间。
         agent_options = (
-            (ANALYSIS_PERSONA, 0.1, [], False),
             (TEXT_COMPRESS_PERSONA, 0.1, [], False),
             (persona.FRIEND_PERSONA, 0.8, CHAT_TOOLS, True),
         )

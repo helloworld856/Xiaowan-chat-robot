@@ -206,10 +206,10 @@ class ChatStateTests(unittest.TestCase):
         first = create_initial_state(1)
         second = create_initial_state(7)
         first['message']['assistant'].append('private')
-        first['analysis_result']['intent'] = 'private'
+        first['ai_response'].append('private')
         self.assertEqual(second['message']['assistant'], [])
         self.assertEqual(second['message']['conversation_round'], 7)
-        self.assertEqual(second['analysis_result'], {})
+        self.assertEqual(second['ai_response'], [])
 
 
 class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
@@ -311,3 +311,68 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(cancelled_res.status_code, 499)
                 self.assertEqual(cancelled_res.json()['detail']['code'], 'CHAT_CANCELLED')
                 self.assertEqual(saved_rounds, ['查杭州天气'])
+
+    async def test_chat_stream_emits_bubbles_then_done_and_validates_before_streaming(self):
+        import json as _json
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+        from app.api.chat import router as chat_router
+        from app.chat.scheduler import ChatSessions
+        from app.system_config import SystemConfig
+
+        sessions = ChatSessions(None, max_running=2, max_waiting=2, wait_timeout=1.0)
+        self.addAsyncCleanup(sessions.drain)
+
+        def run(self_, entry, user, text, *, on_bubble=None):
+            if on_bubble is not None:
+                on_bubble('第一条气泡')
+                on_bubble('第二条气泡')
+            return {
+                'ai_response': ['第一条气泡', '第二条气泡'],
+                'message': {
+                    'conversation_round': 3,
+                    'user': text,
+                    'assistant': ['第一条气泡', '第二条气泡'],
+                    'created_at': 1764150000900,
+                },
+                'saved': True,
+            }
+
+        app = FastAPI()
+        app.state.system_config = SystemConfig(chat={'max_message_chars': 20})
+        app.state.chat = sessions
+        app.include_router(chat_router)
+
+        @app.middleware('http')
+        async def authenticate(request, call_next):
+            request.state.user = FIRST_USER
+            return await call_next(request)
+
+        with patch.object(ChatSessions, '_run', run):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+                bad = await client.post('/chat/stream', json={'user_input': '   '})
+                self.assertEqual(bad.status_code, 422)
+                self.assertEqual(bad.json()['detail']['code'], 'CHAT_NOT_STARTED')
+
+                res = await client.post('/chat/stream', json={'user_input': '你好呀', 'turn_id': 'turn_stream_1'})
+                self.assertEqual(res.status_code, 200)
+                self.assertIn('text/event-stream', res.headers['content-type'])
+                events = []
+                for block in res.text.strip().split('\n\n'):
+                    ev, data = None, None
+                    for line in block.splitlines():
+                        if line.startswith('event:'):
+                            ev = line.split(':', 1)[1].strip()
+                        elif line.startswith('data:'):
+                            data = _json.loads(line.split(':', 1)[1].strip())
+                    events.append((ev, data))
+                self.assertEqual(events, [
+                    ('bubble', {'text': '第一条气泡'}),
+                    ('bubble', {'text': '第二条气泡'}),
+                    ('done', {
+                        'response': ['第一条气泡', '第二条气泡'],
+                        'conversation_round': 3,
+                        'saved': True,
+                        'created_at': 1764150000900,
+                    }),
+                ])

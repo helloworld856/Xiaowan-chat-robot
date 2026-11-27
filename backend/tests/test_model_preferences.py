@@ -16,17 +16,16 @@ class ModelSettingsTests(unittest.TestCase):
         }), patch.object(factory, 'create_agent', side_effect=lambda **kwargs: kwargs):
             for base_url in ('https://api.deepseek.com', 'https://api.deepseek.com/v1/'):
                 with self.subTest(base_url=base_url):
-                    analysis, summary, reply = factory.create_agents(
+                    summary, reply = factory.create_agents(
                         'deepseek', 'test-placeholder', 'deepseek-v4-flash', base_url=base_url, adapter='openai',
                     )
-                    self.assertNotIn('extra_body', analysis['model'])
                     self.assertNotIn('extra_body', summary['model'])
                     self.assertEqual(reply['model']['extra_body']['response_format'], {'type': 'json_object'})
                     self.assertIs(reply['tools'], factory.CHAT_TOOLS)
 
             custom = factory.create_agents('deepseek', 'test-placeholder', 'custom',
                                            base_url='https://example.com/v1', adapter='openai')
-            self.assertNotIn('extra_body', custom[2]['model'])
+            self.assertNotIn('extra_body', custom[1]['model'])
 
     def test_deepseek_sends_json_mode_alongside_existing_tools(self):
         requests = []
@@ -42,8 +41,8 @@ class ModelSettingsTests(unittest.TestCase):
         with httpx.Client(transport=httpx.MockTransport(complete), trust_env=False) as client:
             clients = types.SimpleNamespace(Client=lambda **_: client, AsyncClient=httpx.AsyncClient)
             with patch.object(factory, 'httpx', clients):
-                _, _, reply = factory.create_agents('deepseek', 'test-placeholder', 'deepseek-v4-flash',
-                                                    base_url='https://api.deepseek.com', adapter='openai')
+                _, reply = factory.create_agents('deepseek', 'test-placeholder', 'deepseek-v4-flash',
+                                                 base_url='https://api.deepseek.com', adapter='openai')
             result = reply.invoke({'messages': [{'role': 'user', 'content': '返回一条 JSON 消息。'}]})
 
         request, = requests
@@ -95,7 +94,7 @@ class ModelSettingsTests(unittest.TestCase):
         self.assertEqual(native['model_kwargs']['temperature'], 0.1)
         self.assertEqual(native['model_kwargs']['max_tokens'], 10)
         self.assertEqual(native['model_kwargs']['base_address'], 'https://dashscope.aliyuncs.com/api/v1')
-        self.assertEqual(len(custom), 3)
+        self.assertEqual(len(custom), 2)
         for agent in custom:
             self.assertEqual(agent['model']['base_url'], 'https://example.com/v1')
             self.assertEqual(agent['model']['model'], 'Custom-V2')

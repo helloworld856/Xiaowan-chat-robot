@@ -104,12 +104,37 @@ class UserPortraitStore:
             replace_json(path, portrait.model_dump())
         return portrait
 
-    def update_learned(self, user_id: int, learned: list[str]) -> UserPortrait | None:
+    def update_manual(self, user_id: int, manual: ManualPortrait, *, auto_learn: bool | None = None) -> UserPortrait:
+        """只更新用户手动填写的资料与自动记录开关，保留后台已积累的印象不删除。"""
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            current = self.get(user_id)
+            next_auto_learn = current.auto_learn if auto_learn is None else auto_learn
+            updated = UserPortrait(manual=manual, learned=current.learned, auto_learn=next_auto_learn)
+            self.paths.ensure_directory(user_id)
+            replace_json(path, updated.model_dump())
+            return updated
+
+    def clear_learned(self, user_id: int) -> UserPortrait:
+        """清空单个账号已积累的印象，保留手动填写的资料与自动记录开关。"""
+        path = self.path_for(user_id)
+        with self.paths.lock(user_id):
+            current = self.get(user_id)
+            updated = UserPortrait(manual=current.manual, learned=[], auto_learn=current.auto_learn)
+            if path.exists() or current.learned:
+                self.paths.ensure_directory(user_id)
+                replace_json(path, updated.model_dump())
+            return updated
+
+    def update_learned(self, user_id: int, learned: list[str], *,
+                       expected_previous: list[str] | None = None) -> UserPortrait | None:
         """只更新自动记忆区，不覆盖用户手动填写区与开关设置。"""
         path = self.path_for(user_id)
         with self.paths.lock(user_id):
             current = self.get(user_id)
             if not current.auto_learn:
+                return None
+            if expected_previous is not None and current.learned != expected_previous:
                 return None
             updated = UserPortrait(manual=current.manual, learned=learned, auto_learn=True)
             if updated.learned == current.learned:

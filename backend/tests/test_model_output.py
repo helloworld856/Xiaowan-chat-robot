@@ -99,7 +99,7 @@ class ModelOutputTests(unittest.TestCase):
         self.assertIn('empty_visible_text', logs.output[0])
         self.assertNotIn('未结束的推理', logs.output[0])
 
-    def test_history_is_formatted_as_natural_dialogue_and_analysis_carries_pace(self):
+    def test_history_is_formatted_as_natural_dialogue_and_injected_into_answer_prompt(self):
         from app.chat.memory import format_history_dialogue
         from app.chat.state import create_initial_state
 
@@ -119,19 +119,54 @@ class ModelOutputTests(unittest.TestCase):
             next_round=1,
             refresh_if_needed=lambda: None,
         )
-        analysis_agent = Mock()
-        analysis_agent.invoke.return_value = {'messages': [SimpleNamespace(
-            content='{"intent":"倾诉疲惫","emotion":"累","pace":"展开","answer":"先接住对方的累"}',
-            usage_metadata={'total_tokens': 5},
-        )]}
         reply_agent = Mock()
         reply_agent.invoke.return_value = {'messages': [SimpleNamespace(
             content='{"reply":["今天忙坏了吧","回去赶紧歇会"]}',
             usage_metadata={'total_tokens': 6},
         )]}
-        analyzed = nodes.analysis(nodes.start_node(state, memory, ()), memory, (analysis_agent, None, reply_agent))
-        self.assertEqual(analyzed['analysis_result']['pace'], '展开')
-        nodes.generate(analyzed, memory, (analysis_agent, None, reply_agent))
+        nodes.generate(nodes.start_node(state, memory, ()), memory, (None, reply_agent))
         answer_prompt = reply_agent.invoke.call_args.args[0]['messages'][0]['content']
-        self.assertIn('建议篇幅：展开', answer_prompt)
         self.assertIn('对方：刚下班\n小晚：辛苦啦', answer_prompt)
+        self.assertIn('默认只回 1 到 2 条短气泡', answer_prompt)
+
+    def test_stream_parser_emits_bubbles_incrementally_and_skips_think_blocks(self):
+        p = parser.ReplyBubbleStreamParser()
+        chunks = [
+            '<think>先想一下', ' {"reply":["不要发出去"]}</think>\n',
+            '{"reply":["第一', '条\\n带换行"', ', "第二\\"句\\""', ', "   "', ']}',
+        ]
+        seen = []
+        for piece in chunks:
+            seen.append(p.feed(piece))
+        self.assertEqual(seen, [[], [], [], ['第一条\n带换行'], ['第二"句"'], [], []])
+        self.assertEqual(p.emitted, ['第一条\n带换行', '第二"句"'])
+
+    def test_generate_streams_bubbles_before_completion(self):
+        from app.chat.state import create_initial_state
+
+        state = create_initial_state()
+        state['user_input'] = '今天下雨了'
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=0,
+                                 refresh_if_needed=lambda: None)
+
+        class StreamingReplyAgent:
+            def stream(self, payload, config=None, stream_mode=None):
+                self.payload = payload
+                yield (SimpleNamespace(type='AIMessageChunk', content='{"reply":["我也最爱'), {})
+                yield (SimpleNamespace(type='AIMessageChunk', content='下雨天宅着","没啥事'), {})
+                yield (SimpleNamespace(
+                    type='AIMessageChunk', content='就别出去了呗"]}',
+                    usage_metadata={'total_tokens': 19},
+                    response_metadata={'finish_reason': 'stop'},
+                ), {})
+
+        streamed = []
+        result = nodes.generate(
+            nodes.start_node(state, memory, ()),
+            memory,
+            (None, StreamingReplyAgent()),
+            on_bubble=streamed.append,
+        )
+        self.assertEqual(streamed, ['我也最爱下雨天宅着', '没啥事就别出去了呗'])
+        self.assertEqual(result['ai_response'], streamed)
+        self.assertEqual(result['total_tokens'], 19)

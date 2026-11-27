@@ -479,12 +479,7 @@ class EpisodeWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(sessions.drain)
         user = User(1, 'First', 'admin')
 
-        analysis_prompts: list[str] = []
         answer_prompts: list[str] = []
-
-        def analyze(prompt: str) -> str:
-            analysis_prompts.append(prompt)
-            return '{"intent":"聊天","emotion":"平静","pace":"简短","answer":"自然回应"}'
 
         def summarize(prompt: str) -> str:
             if '情景事件记忆卡片' in prompt:
@@ -504,7 +499,7 @@ class EpisodeWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
             answer_prompts.append(prompt)
             return '{"reply":["好呀，我都记着呢"]}'
 
-        agents = (FakeAgent(analyze), FakeAgent(summarize), FakeAgent(answer))
+        agents = (FakeAgent(summarize), FakeAgent(answer))
         inputs = [
             '我在准备 ByteDance 的 React 面试',
             '最近每天都在刷题',
@@ -529,14 +524,12 @@ class EpisodeWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
             fifth = await sessions.send(user, 'Any tips for my React interview tomorrow?')
             self.assertTrue(fifth['saved'])
 
-        latest_analysis = analysis_prompts[-1]
         latest_answer = answer_prompts[-1]
-        for prompt in (latest_analysis, latest_answer):
-            self.assertIn('用户在准备 ByteDance 的 React 前端面试', prompt)
-            self.assertIn('今天天气挺凉快的', prompt)
-            self.assertIn('晚饭喝了一碗热汤', prompt)
-            # 滑出 recent_window_rounds=2 的早期原话不再直接塞入短期对话流
-            self.assertNotIn('最近每天都在刷题', prompt)
+        self.assertIn('用户在准备 ByteDance 的 React 前端面试', latest_answer)
+        self.assertIn('今天天气挺凉快的', latest_answer)
+        self.assertIn('晚饭喝了一碗热汤', latest_answer)
+        # 滑出 recent_window_rounds=2 的早期原话不再直接塞入短期对话流
+        self.assertNotIn('最近每天都在刷题', latest_answer)
 
         # 清空历史进入 maintenance 时，会终止在途后台归档任务，禁止旧任务在清空后写回记忆卡片
         async with sessions.maintenance(user.id):

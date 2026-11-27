@@ -24,6 +24,7 @@ export function invalidateRequests(user?: AuthUser) {
 export interface CancellableChatOptions {
     turnId?: string;
     signal?: AbortSignal;
+    onBubble?: (text: string) => void;
 }
 
 async function requestJSON<T>(path: string, options: RequestInit, fallback: string,
@@ -78,10 +79,134 @@ async function requestJSON<T>(path: string, options: RequestInit, fallback: stri
     return body as T;
 }
 
+function handleChatErrorResponse(path: string, response: Response, body: any, fallback: string,
+                                 sessionBound: boolean, generation: number, userSignal?: AbortSignal): never {
+    if (sessionBound && generation !== requestGeneration) throw new CancelledRequestError();
+    if (userSignal?.aborted || response.status === 499 || body?.detail?.code === 'CHAT_CANCELLED') {
+        throw new UserCancelledChatError();
+    }
+    if (response.status === 401) {
+        if (sessionBound && generation === requestGeneration) {
+            window.dispatchEvent(new Event('auth-required'));
+        }
+        throw new AuthRequiredError(typeof body?.detail === 'string' ? body.detail : '请先登录');
+    }
+    if (path.startsWith('/chat') && (response.status === 403 || response.status === 422 || response.status === 409 || response.status === 429 || response.status === 503) &&
+        body?.detail?.code === 'CHAT_NOT_STARTED') {
+        const retryable = response.status !== 422;
+        const message = response.status === 403 ? '请先在设置中配置个人模型和 API Key' :
+            retryable ? '消息尚未发送，请重试' : '消息尚未发送，请修改后重新发送';
+        throw new ChatNotStartedError(typeof body.detail.message === 'string' ? body.detail.message : message, retryable);
+    }
+    throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);
+}
+
+async function requestChatStream(payload: {user_input: string; turn_id?: string},
+                                 options: CancellableChatOptions): Promise<ChatResponse> {
+    const path = '/chat/stream';
+    const generation = requestGeneration;
+    const signals: AbortSignal[] = [AbortSignal.timeout(180000), sessionRequests.signal];
+    if (options.signal) signals.push(options.signal);
+    let response: Response;
+    try {
+        response = await fetch(`${base_url}${path}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            signal: AbortSignal.any(signals),
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'text/event-stream',
+                ...(currentUser ? {'X-Xiaowan-User': String(currentUser.id)} : {}),
+            },
+            body: JSON.stringify(payload),
+        });
+    } catch (error) {
+        if (generation !== requestGeneration) throw new CancelledRequestError();
+        if (options.signal?.aborted) throw new UserCancelledChatError();
+        throw error;
+    }
+
+    if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        handleChatErrorResponse(path, response, body, '聊天请求失败', true, generation, options.signal);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/event-stream') || !response.body) {
+        const body = await response.json().catch(() => null);
+        if (generation !== requestGeneration) throw new CancelledRequestError();
+        if (options.signal?.aborted) throw new UserCancelledChatError();
+        if (body === null) throw new Error('聊天请求失败');
+        return body as ChatResponse;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResponse: ChatResponse | null = null;
+
+    const processBlock = (block: string) => {
+        let eventName = 'message';
+        const dataLines: string[] = [];
+        for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+        }
+        if (!dataLines.length) return;
+        const parsed = JSON.parse(dataLines.join('\n'));
+        if (eventName === 'bubble') {
+            if (typeof parsed?.text === 'string' && parsed.text) options.onBubble?.(parsed.text);
+        } else if (eventName === 'done') {
+            finalResponse = parsed as ChatResponse;
+        } else if (eventName === 'cancelled') {
+            throw new UserCancelledChatError();
+        } else if (eventName === 'error') {
+            throw new Error(typeof parsed?.message === 'string' ? parsed.message : '聊天请求失败');
+        }
+    };
+
+    try {
+        while (true) {
+            const {value, done} = await reader.read();
+            if (generation !== requestGeneration) throw new CancelledRequestError();
+            if (options.signal?.aborted) throw new UserCancelledChatError();
+            if (value) buffer += decoder.decode(value, {stream: true}).replace(/\r\n/g, '\n');
+            if (done) buffer += decoder.decode().replace(/\r\n/g, '\n');
+
+            let sep = buffer.indexOf('\n\n');
+            while (sep !== -1) {
+                const block = buffer.slice(0, sep).trim();
+                buffer = buffer.slice(sep + 2);
+                if (block) processBlock(block);
+                sep = buffer.indexOf('\n\n');
+            }
+            if (done) {
+                const trailing = buffer.trim();
+                if (trailing) processBlock(trailing);
+                break;
+            }
+        }
+    } catch (error) {
+        if (generation !== requestGeneration) throw new CancelledRequestError();
+        if (options.signal?.aborted) throw new UserCancelledChatError();
+        throw error;
+    } finally {
+        reader.releaseLock();
+    }
+
+    if (generation !== requestGeneration) throw new CancelledRequestError();
+    if (options.signal?.aborted) throw new UserCancelledChatError();
+    if (finalResponse === null) throw new Error('聊天请求失败');
+    return finalResponse;
+}
+
 export function chatAPI(userInput: string, options?: CancellableChatOptions): Promise<ChatResponse> {
     const payload = options?.turnId
         ? {user_input: userInput, turn_id: options.turnId}
         : {user_input: userInput};
+    if (options?.onBubble) {
+        return requestChatStream(payload, options);
+    }
     return requestJSON('/chat', {
         method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify(payload)
     }, '聊天请求失败', 'session', options?.signal);
@@ -126,15 +251,21 @@ export interface ManualPortrait {
 
 export interface UserPortrait {
     manual: ManualPortrait;
-    learned: string[];
     auto_learn: boolean;
+    has_learned?: boolean;
 }
 
-export function portraitAPI(portrait?: UserPortrait): Promise<UserPortrait> {
+export function portraitAPI(portrait?: {manual: ManualPortrait; auto_learn: boolean}): Promise<UserPortrait> {
     return requestJSON<UserPortrait>('/portrait', {
         method: portrait ? 'POST' : 'GET', signal: AbortSignal.timeout(15000),
         ...(portrait ? {body: JSON.stringify(portrait)} : {})
     }, portrait ? '保存用户画像失败，请稍后重试' : '读取用户画像失败，请稍后重试');
+}
+
+export function clearLearnedPortraitAPI() {
+    return requestJSON<{ok: boolean; has_learned: boolean}>('/portrait/learned', {
+        method: 'DELETE', signal: AbortSignal.timeout(15000),
+    }, '清空印象失败，请稍后重试');
 }
 
 export function modelAPI(model: ModelInfo, testOnly = false, apiKey?: string, personal = false) {

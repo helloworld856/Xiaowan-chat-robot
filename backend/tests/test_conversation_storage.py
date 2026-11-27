@@ -323,7 +323,6 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await sessions.send(user, 'second turn'))['saved'])
         self.assertTrue(first['saved'])
         self.assertEqual(first['ai_response'], ['回复'])
-        self.assertIsInstance(first['analysis_result']['intent'], str)
         self.assertEqual(first['ai_monologue'], [])
 
     async def test_next_turn_follows_committed_history_after_failed_save(self):
@@ -338,11 +337,11 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(sessions.drain)
         prompts = []
 
-        def analyze(prompt):
+        def answer(prompt):
             prompts.append(prompt)
-            return '{"intent":"对话"}'
+            return '{"reply":["回复"]}'
 
-        agents = (FakeAgent(analyze), FakeAgent(lambda _: 'summary'), FakeAgent(lambda _: '{"reply":["回复"]}'))
+        agents = (FakeAgent(lambda _: 'summary'), FakeAgent(answer))
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
             patch('app.chat.nodes.count_tokens', return_value=1),
@@ -377,14 +376,13 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(sessions.drain)
         prompts = []
 
-        def analyze(prompt):
+        def answer(prompt):
             prompts.append(prompt)
-            return '{"intent":"对话"}'
+            return '{"reply":["回复"]}'
 
         agents = (
-            FakeAgent(analyze),
             FakeAgent(lambda _: 'committed summary'),
-            FakeAgent(lambda _: '{"reply":["回复"]}'),
+            FakeAgent(answer),
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),
@@ -415,17 +413,16 @@ class ConversationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(release.set)
         observed = []
 
-        def analysis(prompt):
+        def reply(prompt):
             observed.append(prompt)
             if 'private-A-first' in prompt and not first_entered.is_set():
                 first_entered.set()
                 release.wait(3)
-            return '{"intent":"对话"}'
+            return '{"reply":["回复"]}'
 
         agents = (
-            FakeAgent(analysis),
             FakeAgent(lambda _: 'summary'),
-            FakeAgent(lambda _: '{"reply":["回复"]}'),
+            FakeAgent(reply),
         )
         with (
             patch.object(ChatSessions, '_snapshot_agents', return_value=agents),

@@ -187,25 +187,35 @@ export function useChat(options: ChatOptions) {
         entries.value.splice(position, 0, turn);
     }
 
+    function recordFirstReplyTiming(startedAt: number, isCurrent: () => boolean) {
+        void nextTick(() => {
+            if (!isCurrent()) return;
+            performance.clearMeasures(firstReplyMetric);
+            performance.measure(firstReplyMetric, {start: startedAt, end: performance.now()});
+        });
+    }
+
     async function revealReplies(turn: ChatTurn, data: ChatResponse, firstReplyDelay: Promise<void>,
-                                 startedAt: number, isCurrent: () => boolean) {
+                                 startedAt: number, streamedCount: number, isCurrent: () => boolean) {
         if (typeof data.created_at === 'number') turn.createdAt = data.created_at;
         if (data.saved && data.conversation_round !== null) confirmRound(turn, data.conversation_round);
-        if (data.response.length) await firstReplyDelay;
+        if (streamedCount === 0 && data.response.length) await firstReplyDelay;
         if (!isCurrent()) return;
         isTyping.value = false;
-        for (const [index, text] of data.response.entries()) {
+        const remaining = data.response.slice(streamedCount);
+        for (const [index, text] of remaining.entries()) {
             if (!isCurrent()) return;
             turn.replies.push(text);
             options.scrollAfterRender(false);
-            if (index === 0) {
-                void nextTick(() => {
-                    if (!isCurrent()) return;
-                    performance.clearMeasures(firstReplyMetric);
-                    performance.measure(firstReplyMetric, {start: startedAt, end: performance.now()});
-                });
+            if (streamedCount === 0 && index === 0) {
+                recordFirstReplyTiming(startedAt, isCurrent);
             }
-            if (index < data.response.length - 1) await waitForReplyDelay(Math.min(1000 + 100 * text.length, 5000));
+            if (index < remaining.length - 1) {
+                const delay = streamedCount > 0
+                    ? Math.min(350 + 25 * text.length, 1000)
+                    : Math.min(1000 + 100 * text.length, 5000);
+                await waitForReplyDelay(delay);
+            }
         }
         if (isCurrent() && !data.saved) options.showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
     }
@@ -220,7 +230,7 @@ export function useChat(options: ChatOptions) {
 
     async function runTurnRequest(
         turn: ChatTurn,
-        invoke: (control: ActiveTurnControl) => Promise<ChatResponse>,
+        invoke: (control: ActiveTurnControl, onBubble: (text: string) => void) => Promise<ChatResponse>,
         onAbortRestore: () => void,
         onErrorFallback: (error: unknown, isCurrent: () => boolean) => Promise<void> | void,
     ) {
@@ -253,16 +263,28 @@ export function useChat(options: ChatOptions) {
 
         // 请求与显示延时并行。延时结束仍未收到回复时，才显示正在输入。
         let responsePending = true;
+        let streamedCount = 0;
         const firstReplyDelay = waitForReplyDelay(firstReplyDelayMs).then(() => {
             if (!responsePending || control.cancelled || !isCurrent()) return;
             isTyping.value = true;
             options.scrollAfterRender(false);
         });
 
+        const handleStreamedBubble = (text: string) => {
+            if (!isCurrent() || control.cancelled || !text.trim()) return;
+            responsePending = false;
+            finishReplyDelay?.();
+            isTyping.value = false;
+            turn.replies.push(text);
+            streamedCount++;
+            options.scrollAfterRender(false);
+            if (streamedCount === 1) recordFirstReplyTiming(startedAt, isCurrent);
+        };
+
         try {
             let data: ChatResponse;
             try {
-                data = await Promise.race([invoke(control), cancelGate]).finally(() => {
+                data = await Promise.race([invoke(control, handleStreamedBubble), cancelGate]).finally(() => {
                     responsePending = false;
                     if (activeControl === control) cancellable.value = false;
                 });
@@ -282,7 +304,7 @@ export function useChat(options: ChatOptions) {
                 if (control.cancelled && isCurrent()) onAbortRestore();
                 return;
             }
-            await revealReplies(turn, data, firstReplyDelay, startedAt, isCurrent);
+            await revealReplies(turn, data, firstReplyDelay, startedAt, streamedCount, isCurrent);
         } finally {
             if (activeControl === control) {
                 activeControl = null;
@@ -299,8 +321,8 @@ export function useChat(options: ChatOptions) {
     async function submitMessage(turn: ChatTurn) {
         await runTurnRequest(
             turn,
-            control => typeof cancelChatAPI === 'function'
-                ? chatAPI(turn.user, {turnId: control.turnId, signal: control.controller?.signal})
+            (control, onBubble) => typeof cancelChatAPI === 'function'
+                ? chatAPI(turn.user, {turnId: control.turnId, signal: control.controller?.signal, onBubble})
                 : chatAPI(turn.user),
             () => {
                 entries.value = entries.value.filter(entry => entry !== turn);

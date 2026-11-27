@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_serializer
 
 from app.account_logging import logger
@@ -63,6 +66,10 @@ def _raise_not_started(error: ChatNotStarted):
     ) from None
 
 
+def _sse_event(event: str, payload: dict) -> str:
+    return f'event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n'
+
+
 @router.post('/chat', response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request):
     try:
@@ -81,6 +88,44 @@ async def chat(req: ChatRequest, request: Request):
         raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
 
     return _build_response(result)
+
+
+@router.post('/chat/stream')
+async def chat_stream(req: ChatRequest, request: Request):
+    try:
+        _validate_user_input(request, req.user_input)
+        queue = await request.app.state.chat.start_stream(
+            request.state.user, req.user_input, turn_id=req.turn_id,
+        )
+    except ChatCancelled:
+        raise HTTPException(499, detail={'code': 'CHAT_CANCELLED', 'message': '已停止本次回复'}) from None
+    except ChatNotStarted as error:
+        _raise_not_started(error)
+    except Exception as error:
+        logger.error('chat stream start failed: %s', type(error).__name__)
+        raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
+
+    async def events():
+        while True:
+            kind, payload = await queue.get()
+            if kind == 'bubble':
+                yield _sse_event('bubble', {'text': payload})
+            elif kind == 'done':
+                yield _sse_event('done', _build_response(payload).model_dump())
+                return
+            elif kind == 'cancelled':
+                yield _sse_event('cancelled', {'code': 'CHAT_CANCELLED', 'message': '已停止本次回复'})
+                return
+            elif kind == 'error':
+                logger.error('chat stream execution failed: %s', type(payload).__name__)
+                yield _sse_event('error', {'message': 'AI 处理失败，请稍后重试'})
+                return
+
+    return StreamingResponse(
+        events(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @router.post('/chat/cancel')

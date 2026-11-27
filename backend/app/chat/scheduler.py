@@ -17,6 +17,7 @@ from app.accounts.portrait import UserPortraitStore, format_portrait_for_prompt,
 from app.accounts.repository import User
 from app.chat.episodes import EpisodeMemoryStore
 from app.chat.memory import MemoryManager
+from app.chat.nodes import unpack_agents
 from app.chat.progress import ChatCancelled, chat_cancel_context
 from app.chat.state import AIChatState, create_initial_state
 from app.llm.configuration import AdminModelRuntime
@@ -132,7 +133,7 @@ class ChatSessions:
         logger.info('chat turn cancel_requested count=%d', len(targets))
         return True
 
-    async def send(self, user: User, text: str, *, turn_id: str | None = None):
+    async def _admit(self, user: User, *, turn_id: str | None = None):
         start = perf_counter()
         user_id = user.id
         if self._closing:
@@ -222,11 +223,9 @@ class ChatSessions:
         if handle is not None:
             handle.running = True
         logger.info('chat queue_ms=%.1f', (perf_counter() - start) * 1000)
-        work = asyncio.create_task(self._execute(entry, user, text, handle=handle))
-        entry.worker = work
-        work.add_done_callback(self._consume_error)
-        # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
-        result = await asyncio.shield(work)
+        return start, entry, handle
+
+    def _finish_turn(self, entry: AccountChat, user: User, text: str, result: Any, start: float) -> None:
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
         # 回复成功落库后异步触发后台印象学习与情景记忆归档，不阻塞本轮 HTTP 响应返回。
         if isinstance(result, dict) and result.get('saved') and not self._closing and not entry.maintenance:
@@ -238,7 +237,49 @@ class ChatSessions:
                     max_eligible = saved_round - self._episodes.config.recent_window_rounds
                     if max_eligible >= 0:
                         self._schedule_episode_extraction(entry, user, max_eligible)
+
+    async def send(self, user: User, text: str, *, turn_id: str | None = None):
+        start, entry, handle = await self._admit(user, turn_id=turn_id)
+        work = asyncio.create_task(self._execute(entry, user, text, handle=handle))
+        entry.worker = work
+        work.add_done_callback(self._consume_error)
+        # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
+        result = await asyncio.shield(work)
+        self._finish_turn(entry, user, text, result, start)
         return result
+
+    async def start_stream(self, user: User, text: str, *, turn_id: str | None = None):
+        """准入并启动流式对话，返回异步事件队列：('bubble', str) / ('done', dict) / ('cancelled', None) / ('error', Exception)。"""
+        start, entry, handle = await self._admit(user, turn_id=turn_id)
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+        def on_bubble(bubble: str) -> None:
+            if handle is not None and handle.cancel_event.is_set():
+                return
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(queue.put_nowait, ('bubble', bubble))
+
+        work = asyncio.create_task(self._execute(entry, user, text, handle=handle, on_bubble=on_bubble))
+        entry.worker = work
+
+        def on_done(task: asyncio.Task) -> None:
+            if task.cancelled():
+                queue.put_nowait(('cancelled', None))
+                return
+            error = task.exception()
+            if error is not None:
+                if isinstance(error, ChatCancelled):
+                    queue.put_nowait(('cancelled', None))
+                else:
+                    queue.put_nowait(('error', error))
+                return
+            result = task.result()
+            self._finish_turn(entry, user, text, result, start)
+            queue.put_nowait(('done', result))
+
+        work.add_done_callback(on_done)
+        return queue
 
     def _schedule_episode_extraction(self, entry: AccountChat, user: User, max_eligible_round: int) -> None:
         cancel_event = entry.bg_cancel
@@ -248,7 +289,7 @@ class ChatSessions:
                 if cancel_event.is_set():
                     return
                 agents = self._agents_for(user)
-                _, summary_agent, _ = agents
+                summary_agent, _ = unpack_agents(agents)
                 loop = asyncio.get_running_loop()
                 # 单次后台最多推进两批；关闭服务 drain 时跑完首批发起了的任务即可。
                 for batch_idx in range(2):
@@ -286,7 +327,7 @@ class ChatSessions:
                 if not current.auto_learn:
                     return
                 agents = self._agents_for(user)
-                _, summary_agent, _ = agents
+                summary_agent, _ = unpack_agents(agents)
                 loop = asyncio.get_running_loop()
                 with discard_logs_after(cancel_event):
                     learned = await loop.run_in_executor(
@@ -295,8 +336,11 @@ class ChatSessions:
                     )
                 if learned is not None and not cancel_event.is_set():
                     with discard_logs_after(cancel_event):
-                        self._portraits.update_learned(user.id, learned)
-                        log_event('portrait_learned', items=len(learned))
+                        updated = self._portraits.update_learned(
+                            user.id, learned, expected_previous=current.learned,
+                        )
+                        if updated is not None:
+                            log_event('portrait_learned', items=len(updated.learned))
             except asyncio.CancelledError:
                 return
             except Exception as error:
@@ -326,16 +370,19 @@ class ChatSessions:
             task.exception()
 
     async def _execute(self, entry: AccountChat, user: User, text: str, *,
-                       handle: TurnHandle | None = None):
+                       handle: TurnHandle | None = None, on_bubble=None):
         cancel_event = handle.cancel_event if handle is not None else None
+        run_call = partial(self._run, entry, user, text, on_bubble=on_bubble) if on_bubble is not None else partial(
+            self._run, entry, user, text
+        )
         try:
             loop = asyncio.get_running_loop()
             # 模型调用在线程池执行，复制上下文让线程日志和取消信号都归属当前账号与轮次。
             with chat_cancel_context(cancel_event):
                 if cancel_event is not None:
                     with discard_logs_after(cancel_event):
-                        return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
-                return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
+                        return await loop.run_in_executor(self._executor, copy_context().run, run_call)
+                return await loop.run_in_executor(self._executor, copy_context().run, run_call)
         finally:
             if handle is not None:
                 entry.turns.pop(handle.turn_id, None)
@@ -382,7 +429,7 @@ class ChatSessions:
             return '暂无'
         return format_portrait_for_prompt(self._portraits.get(user_id))
 
-    def _run(self, entry: AccountChat, user: User, text: str):
+    def _run(self, entry: AccountChat, user: User, text: str, *, on_bubble=None):
         agents = self._agents_for(user)
         if entry.runtime is None:
             entry.runtime = self._initialize(user.id)
@@ -391,6 +438,9 @@ class ChatSessions:
         state = deepcopy(runtime.state)
         state['user_input'] = text
         state['user_portrait'] = self._portrait_context(user.id)
-        result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})
+        configurable = {'agents': agents}
+        if on_bubble is not None:
+            configurable['on_bubble'] = on_bubble
+        result = runtime.graph.invoke(state, config={'configurable': configurable})
         runtime.state = result
         return result
