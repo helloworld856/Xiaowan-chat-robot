@@ -9,8 +9,6 @@ class AIChatState(TypedDict, total=False):
     user_portrait: str
     # 按需混合召回的情景事件记忆
     recalled_episodes: Optional[str]
-    # 重新生成指定轮次（仅最新一轮）
-    regenerate_round: Optional[int]
     # 分析结果
     analysis_result: Dict
     # 回复
@@ -38,7 +36,6 @@ def create_initial_state(next_round: int = 0) -> AIChatState:
         'user_input': '',
         'user_portrait': '暂无',
         'recalled_episodes': None,
-        'regenerate_round': None,
         'analysis_result': {},
         'ai_response': [],
         'saved': False,

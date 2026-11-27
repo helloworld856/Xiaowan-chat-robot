@@ -177,10 +177,6 @@
     cursor: not-allowed;
 }
 
-.bubble-action-danger:enabled:hover {
-    color: #b4232c;
-}
-
 /* ============================
    用户消息（右侧）
    ============================ */

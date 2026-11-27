@@ -87,15 +87,6 @@ export function chatAPI(userInput: string, options?: CancellableChatOptions): Pr
     }, '聊天请求失败', 'session', options?.signal);
 }
 
-export function regenerateChatAPI(conversationRound: number, options?: CancellableChatOptions): Promise<ChatResponse> {
-    const payload = options?.turnId
-        ? {conversation_round: conversationRound, turn_id: options.turnId}
-        : {conversation_round: conversationRound};
-    return requestJSON('/chat/regenerate', {
-        method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify(payload)
-    }, '重新生成失败，请稍后重试', 'session', options?.signal);
-}
-
 export function cancelChatAPI(turnId?: string) {
     return requestJSON<{ok: boolean; cancelled: boolean}>('/chat/cancel', {
         method: 'POST', signal: AbortSignal.timeout(10000),
@@ -111,12 +102,6 @@ export function historyAPI(num: number, front = true) {
 
 export function clearHistoryAPI() {
     return requestJSON<{ok: boolean}>('/history', {method: 'DELETE'}, '清空聊天记录失败，请稍后重试');
-}
-
-export function deleteHistoryRoundAPI(conversationRound: number) {
-    return requestJSON<{ok: boolean}>(`/history/${conversationRound}`, {
-        method: 'DELETE', signal: AbortSignal.timeout(15000)
-    }, '删除该轮对话失败，请稍后重试');
 }
 
 export function deleteAccountAPI(current_password: string) {

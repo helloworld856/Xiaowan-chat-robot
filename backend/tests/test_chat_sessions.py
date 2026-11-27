@@ -250,11 +250,10 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [' 😀晚 ', '晚'])
 
 
-    async def test_cancel_discards_in_flight_turn_without_saving_and_single_delete_is_scoped(self):
+    async def test_cancel_discards_in_flight_turn_without_saving(self):
         from fastapi import FastAPI
         from httpx import ASGITransport, AsyncClient
         from app.api.chat import router as chat_router
-        from app.api.history import router as history_router
         from app.chat.progress import check_cancelled
         from app.chat.scheduler import ChatSessions
         from app.system_config import SystemConfig
@@ -279,28 +278,17 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                 'saved': True,
             }
 
-        deleted = []
-
-        def fake_delete(_conn, uid, round_id):
-            deleted.append((uid, round_id))
-            return round_id == 3
-
         app = FastAPI()
         app.state.system_config = SystemConfig()
         app.state.chat = sessions
-        app.state.db = SimpleNamespace(connection=None)
         app.include_router(chat_router)
-        app.include_router(history_router)
 
         @app.middleware('http')
         async def authenticate(request, call_next):
             request.state.user = FIRST_USER
             return await call_next(request)
 
-        with (
-            patch.object(ChatSessions, '_run', run),
-            patch('app.api.history.delete_history_round', side_effect=fake_delete),
-        ):
+        with patch.object(ChatSessions, '_run', run):
             async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
                 completed = await client.post('/chat', json={'user_input': '查杭州天气', 'turn_id': 'turn_ok'})
                 self.assertEqual(completed.status_code, 200)
@@ -323,8 +311,3 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(cancelled_res.status_code, 499)
                 self.assertEqual(cancelled_res.json()['detail']['code'], 'CHAT_CANCELLED')
                 self.assertEqual(saved_rounds, ['查杭州天气'])
-
-                # 单轮删除路由验证
-                self.assertEqual((await client.delete('/history/3')).status_code, 200)
-                self.assertEqual((await client.delete('/history/99')).status_code, 404)
-                self.assertEqual(deleted, [(FIRST_USER.id, 3), (FIRST_USER.id, 99)])

@@ -1,8 +1,7 @@
 import {nextTick, reactive, ref} from 'vue';
 import {
     AuthRequiredError, CancelledRequestError, ChatNotStartedError, UserCancelledChatError,
-    cancelChatAPI, chatAPI, deleteHistoryRoundAPI, getRequestGeneration,
-    historyAPI, regenerateChatAPI
+    cancelChatAPI, chatAPI, getRequestGeneration, historyAPI
 } from '../ts/api.ts';
 import {composeQuotedMessage, parseQuotedMessage} from '../ts/chat_format.ts';
 import type {QuoteTarget as QuoteDraft} from '../ts/chat_format.ts';
@@ -366,60 +365,6 @@ export function useChat(options: ChatOptions) {
         await submitMessage(turn);
     }
 
-    async function regenerateTurn(turn: ChatTurn) {
-        if (busy.value || !options.canSend()) return;
-        if (entries.value[entries.value.length - 1] !== turn) {
-            options.showAlert('只能重新生成最新一轮对话');
-            return;
-        }
-        if (turn.round === null) {
-            turn.failure = undefined;
-            turn.replies = [];
-            await submitMessage(turn);
-            return;
-        }
-
-        const round = turn.round;
-        const previousReplies = [...turn.replies];
-        const previousCreatedAt = turn.createdAt;
-        turn.replies = [];
-
-        await runTurnRequest(
-            turn,
-            control => regenerateChatAPI(round, {turnId: control.turnId, signal: control.controller?.signal}),
-            () => {
-                turn.replies = previousReplies;
-                turn.createdAt = previousCreatedAt;
-            },
-            error => {
-                turn.replies = previousReplies;
-                turn.createdAt = previousCreatedAt;
-                options.showAlert(error instanceof Error ? error.message : '重新生成失败，请稍后重试');
-            },
-        );
-    }
-
-    async function deleteTurn(turn: ChatTurn) {
-        if (busy.value || !options.canSend() || !entries.value.includes(turn)) return false;
-        const isCurrent = currentOperation();
-        if (turn.round !== null) {
-            setBusy(true);
-            try {
-                await deleteHistoryRoundAPI(turn.round);
-            } catch (error) {
-                if (isCurrent() && !(error instanceof AuthRequiredError) && !(error instanceof CancelledRequestError)) {
-                    options.showAlert(error instanceof Error ? error.message : '删除该轮对话失败，请稍后重试');
-                }
-                return false;
-            } finally {
-                if (isCurrent()) setBusy(false);
-            }
-        }
-        if (!isCurrent()) return false;
-        entries.value = entries.value.filter(entry => entry !== turn);
-        return true;
-    }
-
     function clearHistory() {
         revision++;
         activeControl?.abort();
@@ -441,6 +386,6 @@ export function useChat(options: ChatOptions) {
     return {
         draft, quote, entries, busy, cancellable, isTyping,
         setQuote, clearQuote, loadHistory, sendMessage, cancelSend,
-        activateFailure, regenerateTurn, deleteTurn, clearHistory, reset,
+        activateFailure, clearHistory, reset,
     };
 }

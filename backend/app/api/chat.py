@@ -13,11 +13,6 @@ class ChatRequest(BaseModel):
     turn_id: str | None = Field(default=None, pattern=TURN_ID_PATTERN)
 
 
-class RegenerateRequest(BaseModel):
-    conversation_round: int = Field(ge=0)
-    turn_id: str | None = Field(default=None, pattern=TURN_ID_PATTERN)
-
-
 class CancelChatRequest(BaseModel):
     turn_id: str | None = Field(default=None, pattern=TURN_ID_PATTERN)
 
@@ -83,23 +78,6 @@ async def chat(req: ChatRequest, request: Request):
         _raise_not_started(error)
     except Exception as error:
         logger.error('chat execution failed: %s', type(error).__name__)
-        raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
-
-    return _build_response(result)
-
-
-@router.post('/chat/regenerate', response_model=ChatResponse)
-async def regenerate_chat(req: RegenerateRequest, request: Request):
-    try:
-        result = await request.app.state.chat.regenerate(
-            request.state.user, req.conversation_round, turn_id=req.turn_id,
-        )
-    except ChatCancelled:
-        raise HTTPException(499, detail={'code': 'CHAT_CANCELLED', 'message': '已停止本次回复'}) from None
-    except ChatNotStarted as error:
-        _raise_not_started(error)
-    except Exception as error:
-        logger.error('chat regenerate failed: %s', type(error).__name__)
         raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
 
     return _build_response(result)

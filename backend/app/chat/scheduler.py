@@ -133,12 +133,6 @@ class ChatSessions:
         return True
 
     async def send(self, user: User, text: str, *, turn_id: str | None = None):
-        return await self._schedule(user, text, regenerate_round=None, turn_id=turn_id)
-
-    async def regenerate(self, user: User, conversation_round: int, *, turn_id: str | None = None):
-        return await self._schedule(user, '', regenerate_round=conversation_round, turn_id=turn_id)
-
-    async def _schedule(self, user: User, text: str, *, regenerate_round: int | None, turn_id: str | None):
         start = perf_counter()
         user_id = user.id
         if self._closing:
@@ -228,15 +222,14 @@ class ChatSessions:
         if handle is not None:
             handle.running = True
         logger.info('chat queue_ms=%.1f', (perf_counter() - start) * 1000)
-        work = asyncio.create_task(self._execute(entry, user, text, regenerate_round=regenerate_round, handle=handle))
+        work = asyncio.create_task(self._execute(entry, user, text, handle=handle))
         entry.worker = work
         work.add_done_callback(self._consume_error)
         # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
         result = await asyncio.shield(work)
         logger.info('chat response_ready_ms=%.1f', (perf_counter() - start) * 1000)
         # 回复成功落库后异步触发后台印象学习与情景记忆归档，不阻塞本轮 HTTP 响应返回。
-        if (regenerate_round is None and isinstance(result, dict) and result.get('saved')
-                and not self._closing and not entry.maintenance):
+        if isinstance(result, dict) and result.get('saved') and not self._closing and not entry.maintenance:
             if self._portraits is not None and len(text.strip()) >= 5 and entry.learn_task is None:
                 self._schedule_portrait_learning(entry, user, text, list(result.get('ai_response') or ()))
             if self._episodes is not None and entry.episode_task is None:
@@ -333,19 +326,16 @@ class ChatSessions:
             task.exception()
 
     async def _execute(self, entry: AccountChat, user: User, text: str, *,
-                       regenerate_round: int | None = None,
                        handle: TurnHandle | None = None):
         cancel_event = handle.cancel_event if handle is not None else None
         try:
             loop = asyncio.get_running_loop()
-            runner = self._run if regenerate_round is None else partial(self._run_regenerate,
-                                                                        regenerate_round=regenerate_round)
             # 模型调用在线程池执行，复制上下文让线程日志和取消信号都归属当前账号与轮次。
             with chat_cancel_context(cancel_event):
                 if cancel_event is not None:
                     with discard_logs_after(cancel_event):
-                        return await loop.run_in_executor(self._executor, copy_context().run, runner, entry, user, text)
-                return await loop.run_in_executor(self._executor, copy_context().run, runner, entry, user, text)
+                        return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
+                return await loop.run_in_executor(self._executor, copy_context().run, self._run, entry, user, text)
         finally:
             if handle is not None:
                 entry.turns.pop(handle.turn_id, None)
@@ -401,20 +391,6 @@ class ChatSessions:
         state = deepcopy(runtime.state)
         state['user_input'] = text
         state['user_portrait'] = self._portrait_context(user.id)
-        state['regenerate_round'] = None
-        result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})
-        runtime.state = result
-        return result
-
-    def _run_regenerate(self, entry: AccountChat, user: User, _text: str, *, regenerate_round: int):
-        agents = self._agents_for(user)
-        if entry.runtime is None:
-            entry.runtime = self._initialize(user.id)
-        runtime = entry.runtime
-        state = deepcopy(runtime.state)
-        state['user_input'] = ''
-        state['user_portrait'] = self._portrait_context(user.id)
-        state['regenerate_round'] = regenerate_round
         result = runtime.graph.invoke(state, config={'configurable': {'agents': agents}})
         runtime.state = result
         return result

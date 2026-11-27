@@ -2,10 +2,8 @@
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import ChatComposer from './ChatComposer.vue';
 import {useChat} from '../composables/useChat.ts';
-import type {ChatTurn} from '../composables/useChat.ts';
 import type {ProfileInfo} from '../ts/api.ts';
 import {formatChatTimestamp, parseQuotedMessage, shouldShowTimeDivider} from '../ts/chat_format.ts';
-import type {ConfirmOptions} from '../ts/dialogs.ts';
 import type {PersonaInfo} from '../ts/global_config.ts';
 import type {Preferences} from '../ts/preferences.ts';
 
@@ -16,7 +14,6 @@ const props = defineProps<{
     persona: PersonaInfo | null;
     clearingHistory: boolean;
     showAlert: (message: string) => void;
-    confirmAction?: (options: ConfirmOptions) => Promise<string | null>;
 }>();
 const emit = defineEmits<{'busy-change': [busy: boolean]}>();
 
@@ -61,11 +58,6 @@ const query = computed(() => search.value.trim().toLocaleLowerCase());
 
 function userBubbleId(id: string) { return `chat-user-${id}`; }
 function replyBubbleId(id: string, index: number) { return `chat-reply-${id}-${index}`; }
-
-const latestTurnId = computed(() => {
-    const last = entries.value[entries.value.length - 1];
-    return last?.kind === 'turn' ? last.id : '';
-});
 
 const timeline = computed(() => {
     let previousAt: number | null | undefined;
@@ -226,26 +218,6 @@ function quoteBubble(speaker: string, text: string) {
     void nextTick(() => composer.value?.focus?.());
 }
 
-async function requestRegenerate(turn: ChatTurn) {
-    activeBubble.value = '';
-    await chatState.regenerateTurn?.(turn);
-}
-
-async function requestDeleteTurn(turn: ChatTurn) {
-    if (locked.value) return;
-    if (props.confirmAction) {
-        const confirmed = await props.confirmAction({
-            title: '确认删除这轮对话？',
-            description: '删除后这轮问答将从聊天记录中移除，且无法恢复。',
-            action: '删除对话',
-            destructive: true,
-        });
-        if (confirmed === null) return;
-    }
-    activeBubble.value = '';
-    await chatState.deleteTurn?.(turn);
-}
-
 function jumpToBubble(target: string) {
     closeReview();
     clearHighlight();
@@ -379,11 +351,6 @@ defineExpose({loadHistory, clearHistory, reset});
                                     </button>
                                     <button type="button" class="bubble-action-btn" :disabled="locked"
                                         @click.stop="quoteBubble(userName, parsedUser ? parsedUser.body : entry.user)">引用</button>
-                                    <button v-if="entry.id === latestTurnId && !entry.failure" type="button"
-                                        class="bubble-action-btn" :disabled="locked"
-                                        @click.stop="requestRegenerate(entry)">重生成</button>
-                                    <button type="button" class="bubble-action-btn bubble-action-danger" :disabled="locked"
-                                        @click.stop="requestDeleteTurn(entry)">删除</button>
                                 </div>
                             </div>
                             <div class="user_triangle"></div>
@@ -405,12 +372,6 @@ defineExpose({loadHistory, clearHistory, reset});
                                         </button>
                                         <button type="button" class="bubble-action-btn" :disabled="locked"
                                             @click.stop="quoteBubble(botName, reply)">引用</button>
-                                        <button v-if="entry.id === latestTurnId && index === entry.replies.length - 1"
-                                            type="button" class="bubble-action-btn" :disabled="locked"
-                                            @click.stop="requestRegenerate(entry)">重生成</button>
-                                        <button v-if="index === entry.replies.length - 1" type="button"
-                                            class="bubble-action-btn bubble-action-danger" :disabled="locked"
-                                            @click.stop="requestDeleteTurn(entry)">删除</button>
                                     </div>
                                 </div>
                             </div>

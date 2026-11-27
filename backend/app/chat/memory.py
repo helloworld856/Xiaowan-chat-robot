@@ -41,18 +41,6 @@ def load_history(connection, user_id: int, k: int, front: bool = True):
         return _read_history(cursor, user_id, k, front)
 
 
-def delete_history_round(connection, user_id: int, conversation_round: int) -> bool:
-    """Delete one uncompressed round owned by the authenticated account."""
-    with connection() as db:
-        with db.cursor() as cursor:
-            removed = cursor.execute(
-                'DELETE FROM history_messages WHERE user_id = %s AND conversation_round = %s',
-                (user_id, conversation_round),
-            )
-        db.commit()
-    return bool(removed)
-
-
 def _read_history(cursor, user_id: int, k: int, front: bool = True):
     ascending = front if k >= 0 else not front
     direction = 'ASC' if ascending else 'DESC'
@@ -138,32 +126,6 @@ class MemoryManager:
         if len(self.history_cache) > HISTORY_CACHE_LIMIT:
             del self.history_cache[0]
             self.has_older_history = True
-        return True
-
-    def replace_last_message(self, message) -> bool:
-        created_at = message.get('created_at')
-        round_id = message['conversation_round']
-        try:
-            with self._connection() as db:
-                with db.cursor() as cursor:
-                    updated = cursor.execute(
-                        'UPDATE history_messages SET assistant = %s, created_at = %s '
-                        'WHERE user_id = %s AND conversation_round = %s',
-                        (json.dumps(message['assistant'], ensure_ascii=False), created_at, self.user_id, round_id),
-                    )
-                    if updated != 1:
-                        self._stale = True
-                        return False
-                self._commit(db)
-        except Exception as error:
-            logger.warning('history replace failed: %s', type(error).__name__)
-            return False
-
-        item = self._cached_item(message)
-        if self.history_cache and self.history_cache[-1]['conversation_round'] == round_id:
-            self.history_cache[-1] = item
-        else:
-            self._stale = True
         return True
 
     def compress_history(self, summary_agent):

@@ -41,11 +41,9 @@ test('quote helpers compose, unwrap nested quotes, and parse cleanly', () => {
     assert.equal(nested, '【引用 你：明天要带伞吗？】\n我也觉得');
 });
 
-test('useChat cancels in-flight sends back to draft/quote, regenerates latest round, and deletes a round', async () => {
+test('useChat cancels in-flight sends back to draft/quote and records timestamps on saved turns', async () => {
     const canceledIds = [];
-    const deletedRounds = [];
     let chatHandler;
-    let regenerateHandler;
 
     class AuthRequiredError extends Error {}
     class CancelledRequestError extends Error {}
@@ -62,9 +60,7 @@ test('useChat cancels in-flight sends back to draft/quote, regenerates latest ro
             ChatNotStartedError,
             getRequestGeneration: () => 0,
             chatAPI: (text, options) => chatHandler(text, options),
-            regenerateChatAPI: (round, options) => regenerateHandler(round, options),
             cancelChatAPI: async turnId => { canceledIds.push(turnId); return {ok: true, cancelled: true}; },
-            deleteHistoryRoundAPI: async round => { deletedRounds.push(round); return {ok: true}; },
             historyAPI: async () => ({history_messages: []}),
         },
         '../ts/global_config.ts': {inputLimits: {max_message_chars: 8000}},
@@ -100,27 +96,18 @@ test('useChat cancels in-flight sends back to draft/quote, regenerates latest ro
     assert.deepEqual(state.quote.value, {speaker: '小晚', text: '今天18°C'});
     assert.deepEqual(canceledIds, [capturedOptions.turnId]);
 
-    // 2. Normal send succeeds, then regenerate replaces latest round, then delete removes it
-    chatHandler = async () => ({
-        response: ['第一版回复'], conversation_round: 4, saved: true, created_at: 1764150000000,
-    });
+    // 2. Normal send with quote succeeds and records round + createdAt
+    let sentText = '';
+    chatHandler = async text => {
+        sentText = text;
+        return {response: ['第一版回复'], conversation_round: 4, saved: true, created_at: 1764150000000};
+    };
     await state.sendMessage();
+    assert.equal(sentText, '【引用 小晚：今天18°C】\n明天呢？');
     assert.equal(state.entries.value.length, 1);
     assert.equal(state.entries.value[0].round, 4);
+    assert.equal(state.entries.value[0].createdAt, 1764150000000);
     assert.deepEqual(state.entries.value[0].replies, ['第一版回复']);
-
-    regenerateHandler = async round => {
-        assert.equal(round, 4);
-        return {response: ['重新生成的回复'], conversation_round: 4, saved: true, created_at: 1764150060000};
-    };
-    await state.regenerateTurn(state.entries.value[0]);
-    assert.deepEqual(state.entries.value[0].replies, ['重新生成的回复']);
-    assert.equal(state.entries.value[0].createdAt, 1764150060000);
-
-    const removed = await state.deleteTurn(state.entries.value[0]);
-    assert.equal(removed, true);
-    assert.deepEqual(deletedRounds, [4]);
-    assert.equal(state.entries.value.length, 0);
     assert.deepEqual(alerts, []);
 });
 

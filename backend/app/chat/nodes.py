@@ -36,16 +36,16 @@ def get_total_tokens(message) -> int:
     return 0
 
 
-# 截取送入提示词的短期原话滑动窗口；重新生成最新轮时先剔除待替换的末轮旧回复。
-def _slice_window(state: AIChatState, memorier: MemoryManager, recent_window_rounds: int | None = None) -> list[dict]:
-    rows = memorier.history_cache[:-1] if state.get('regenerate_round') is not None else memorier.history_cache
+# 截取送入提示词的短期原话滑动窗口。
+def _slice_window(memorier: MemoryManager, recent_window_rounds: int | None = None) -> list[dict]:
+    rows = memorier.history_cache
     if recent_window_rounds is not None and recent_window_rounds > 0:
         return rows[-recent_window_rounds:]
     return rows
 
 
-def _context_history(state: AIChatState, memorier: MemoryManager, recent_window_rounds: int | None = None) -> str:
-    return format_history_dialogue(_slice_window(state, memorier, recent_window_rounds), bot_name=persona.BOT_NAME)
+def _context_history(memorier: MemoryManager, recent_window_rounds: int | None = None) -> str:
+    return format_history_dialogue(_slice_window(memorier, recent_window_rounds), bot_name=persona.BOT_NAME)
 
 
 # 启用情景记忆库时优先注入按需混合召回的事件卡片，否则回退旧版摘要字段。
@@ -74,26 +74,14 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
         state['recalled_episodes'] = None
         memorier.refresh_if_needed()
 
-        regenerate_round = state.get('regenerate_round')
-        if regenerate_round is not None:
-            if not memorier.history_cache or memorier.history_cache[-1]['conversation_round'] != regenerate_round:
-                from app.chat.scheduler import ChatNotStarted
-                raise ChatNotStarted(409, '只能重新生成最新一轮对话')
-            state['user_input'] = memorier.history_cache[-1]['user']
-            state['message'] = {
-                'conversation_round': regenerate_round,
-                'user': state['user_input'],
-                'assistant': [],
-            }
-        else:
-            state['message'] = {
-                'conversation_round': memorier.next_round,
-                'user': '',
-                'assistant': [],
-            }
+        state['message'] = {
+            'conversation_round': memorier.next_round,
+            'user': '',
+            'assistant': [],
+        }
 
         if episodes is not None:
-            window = _slice_window(state, memorier, recent_window_rounds)
+            window = _slice_window(memorier, recent_window_rounds)
             window_start = window[0]['conversation_round'] if window else None
             query = (state.get('user_input') or '').strip()
             # 用户只回「那后来呢」「为什么」等短句时，拼上上一轮末尾输入补足检索语境。
@@ -102,7 +90,7 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
             state['recalled_episodes'] = episodes.recall(
                 memorier.user_id, query, exclude_from_round=window_start,
             )
-        elif regenerate_round is None:
+        else:
             # 兼容未启用情景事件库的旧测试路径。
             res = []
             o = 0
@@ -124,8 +112,6 @@ def start_node(state: AIChatState, memorier: MemoryManager, agents, *,
     except ChatCancelled:
         raise
     except Exception as error:
-        if type(error).__name__ == 'ChatNotStarted':
-            raise
         logger.error('start node failed: %s', type(error).__name__)
         raise
 
@@ -136,11 +122,7 @@ def end_node(state: AIChatState, memorier: MemoryManager, _agents) -> AIChatStat
     logger.info('执行结点"end_node"...')
 
     # 保存失败时仍返回回复，由接口明确告知前端。
-    if state.get('regenerate_round') is not None:
-        state['saved'] = memorier.replace_last_message(state['message'])
-        state['regenerate_round'] = None
-    else:
-        state['saved'] = memorier.record_message(state['message'])
+    state['saved'] = memorier.record_message(state['message'])
 
     logger.info('本轮对话 %d：回复 %d 条，分析与回复 Token %s，耗时 %.2f 秒，保存%s',
                 state['message']['conversation_round'] + 1, len(state['ai_response']),
@@ -163,7 +145,7 @@ def analysis(state: AIChatState, memorier: MemoryManager, agents, *,
         analysis_prompt = load_prompt(
             "analysis_prompt",
             user_portrait=state.get('user_portrait') or '暂无',
-            history=_context_history(state, memorier, recent_window_rounds),
+            history=_context_history(memorier, recent_window_rounds),
             abstract=_memory_context(state, memorier),
             user_input=user_input
         )
@@ -207,7 +189,7 @@ def generate(state: AIChatState, memorier: MemoryManager, agents, *,
         answer_prompt = load_prompt(
             "answer_prompt",
             user_portrait=state.get('user_portrait') or '暂无',
-            history=_context_history(state, memorier, recent_window_rounds),
+            history=_context_history(memorier, recent_window_rounds),
             abstract=_memory_context(state, memorier),
             user_input=user_input,
             intent=state['analysis_result'].get('intent', '一般对话'),

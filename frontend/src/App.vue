@@ -108,7 +108,7 @@ function resetAccount() {
         :hidden="!user || sessionHidden" :inert="!ready || sessionHidden || !user">
         <ChatWorkspace ref="chat" :ready="ready" :shortcut="preferences.send_shortcut" :profile="profile"
             :persona="persona" :clearing-history="clearingHistory" :show-alert="showAlert"
-            :confirm-action="confirmAction" @busy-change="chatBusy = $event" />
+            @busy-change="chatBusy = $event" />
         <AccountMenu ref="menu" :display-name="profile?.nickname ?? user?.username ?? ''" :logout-busy="sessionBusy" :logging-out="loggingOut"
             @profile="profileDialog?.open()" @settings="settings?.open()" @logout="session.logout()" />
         <ProfileDialog ref="profileDialog" :is-admin="isAdmin" :show-alert="showAlert" :confirm-action="confirmAction"
