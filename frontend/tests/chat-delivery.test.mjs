@@ -148,7 +148,7 @@ test('a retryable rejection resends the original, retains its key, and keeps the
     const [turn] = app.entries.value;
     assert.equal(turn.failure.message, message);
     assert.equal(turn.failure.retryable, true);
-    assert.deepEqual(app.alerts, [message]);
+    assert.deepEqual(app.alerts, []);
     assert.equal(app.isTyping.value, false);
     const retrying = app.activateFailure(turn);
     await app.nextReply();
@@ -164,35 +164,55 @@ test('a retryable rejection resends the original, retains its key, and keeps the
     assert.deepEqual(app.locks, [true, false, true, false]);
 });
 
-test('a permanent rejection shows its reason when activated and never resends', async () => {
+test('a permanent rejection marks the bubble without an immediate popup and shows its reason when activated', async () => {
     let calls = 0;
     const app = await harness({async chatAPI() {
         calls++;
         throw new ChatNotStartedError('消息过长', false);
     }});
     await app.sendMessage();
+    assert.deepEqual(app.alerts, []);
     await app.activateFailure(app.entries.value[0]);
     assert.equal(calls, 1);
-    assert.deepEqual(app.alerts, ['消息过长', '消息过长']);
+    assert.deepEqual(app.alerts, ['消息过长']);
 });
 
-test('an uncertain send refreshes history and retains the original only in a notice', async () => {
+test('a transport error silently adopts a newly saved round or marks the bubble with a retryable exclamation', async () => {
     let calls = 0;
     const item = saved(1, '原文', ['已保存的回复']);
-    const app = await harness({
+    const savedApp = await harness({
         async chatAPI() { calls++; throw new Error('transport closed'); },
         async historyAPI() { return {history_messages: [item]}; }
     });
-    await app.sendMessage();
-    const [turn, notice] = app.entries.value;
+    await savedApp.sendMessage();
     assert.equal(calls, 1);
-    assert.equal(turn.round, item.conversation_round);
-    assert.deepEqual(snapshot(turn.replies), item.assistant);
-    assert.equal(notice.kind, 'notice');
-    assert.equal(notice.user, '原文');
-    assert.match(notice.message, /已刷新聊天记录/);
-    assert.deepEqual(app.alerts, [notice.message]);
-    assert.equal(notice.failure, undefined);
+    assert.equal(savedApp.entries.value.length, 1);
+    assert.equal(savedApp.entries.value[0].round, 1);
+    assert.deepEqual(snapshot(savedApp.entries.value[0].replies), ['已保存的回复']);
+    assert.equal(savedApp.entries.value[0].failure, undefined);
+    assert.deepEqual(savedApp.alerts, []);
+
+    let retryCalls = 0;
+    const failedApp = await harness({
+        async chatAPI() {
+            retryCalls++;
+            if (retryCalls === 1) throw new Error('network down');
+            return {response: ['重发成功'], conversation_round: 0, saved: true};
+        },
+        async historyAPI() { throw new Error('offline'); }
+    });
+    await failedApp.sendMessage();
+    const [failedTurn] = failedApp.entries.value;
+    assert.equal(failedTurn.user, '原文');
+    assert.equal(failedTurn.failure.retryable, true);
+    assert.deepEqual(failedApp.alerts, []);
+
+    const retrying = failedApp.activateFailure(failedTurn);
+    await failedApp.nextReply();
+    await retrying;
+    assert.equal(failedTurn.failure, undefined);
+    assert.equal(failedTurn.round, 0);
+    assert.deepEqual(snapshot(failedTurn.replies), ['重发成功']);
 });
 
 test('reply delay is recalculated for each bubble and never waits after the last', async () => {
@@ -346,14 +366,14 @@ async function workspaceHarness(t, initialEntries = []) {
     return {entries, toggle, list, ...globals};
 }
 
-test('history search keeps keyboard focus when an optimistic result becomes uncertain', async t => {
+test('history search keeps keyboard focus when an unconfirmed turn is removed', async t => {
     const app = await workspaceHarness(t, [
         {kind: 'turn', id: 'round-0', round: 0, user: '旧消息', replies: ['旧回复']},
         {kind: 'turn', id: 'local-1', round: null, user: '新消息', replies: []}
     ]);
     const [optimistic, older] = app.list.querySelectorAll();
     optimistic.focus();
-    app.entries.value[1] = {kind: 'notice', id: 'local-1', user: '新消息', message: '待确认'};
+    app.entries.value.splice(1, 1);
     await nextTick();
     await nextTick();
     assert.ok(app.document.activeElement === older, 'focus should move to the remaining result');

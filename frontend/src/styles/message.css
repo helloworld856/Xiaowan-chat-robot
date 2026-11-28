@@ -405,41 +405,37 @@ html.theme0 .user_bubble { box-shadow: none; }
 .chat-typing-dots .typing-dot:nth-child(2) { animation-delay: 0.15s; }
 .chat-typing-dots .typing-dot:nth-child(3) { animation-delay: 0.3s; }
 
-/* 失败标记附在原消息上，方便用户找到可重试的内容。 */
+/* 发送失败标记直接附在原消息气泡左侧，点击即可重新发送 */
 .chat-send-failed {
-    display: grid;
-    place-items: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     align-self: center;
     flex: 0 0 1.35rem;
+    width: 1.35rem;
     height: 1.35rem;
-    margin: 0.5rem 0.5rem 0 0;
+    margin: 0.125rem 0.45rem 0 0;
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: #c52639;
+    background: #fa5151;
     color: #fff;
-    font: 700 0.9rem/1 sans-serif;
     cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.12s ease;
 }
 
-.chat-send-failed:hover { background: #a51d2e; }
+.chat-send-failed:hover {
+    background: #e04343;
+}
+
+.chat-send-failed:active {
+    transform: scale(0.93);
+}
 
 .chat-send-failed:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: -4px;
+    outline: 2px solid #fa5151;
+    outline-offset: 2px;
 }
-
-.chat-delivery-action {
-    padding: 0.45rem 0.65rem;
-    border: 1px solid var(--input-border);
-    border-radius: 0.5rem;
-    background: transparent;
-    color: var(--menu-text);
-    font: inherit;
-    cursor: pointer;
-}
-
-.chat-delivery-action:hover { background: var(--menu-hover); }
 
 @keyframes chatTyping {
     0%, 60%, 100% { opacity: 0.4; transform: translateY(0); }

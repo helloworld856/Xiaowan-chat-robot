@@ -372,8 +372,13 @@ defineExpose({loadHistory, clearHistory, reset});
                         </div>
                         <div class="user_message" :data-conversation-round="entry.round">
                             <button v-if="entry.failure" class="chat-send-failed" type="button"
-                                :aria-label="entry.failure.retryable ? '发送失败，重试发送' : '发送失败，查看原因'"
-                                @click="activateFailure(entry)">!</button>
+                                :title="entry.failure.retryable ? '发送失败，点击重新发送' : entry.failure.message"
+                                :aria-label="entry.failure.retryable ? '发送失败，点击重新发送' : '发送失败，查看原因'"
+                                @click="activateFailure(entry)">
+                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                                    <path fill="currentColor" d="M8 3.2a.9.9 0 0 1 .9.9l-.22 4.6a.68.68 0 0 1-1.36 0L7.1 4.1a.9.9 0 0 1 .9-.9zm0 7.7a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9z"/>
+                                </svg>
+                            </button>
                             <div class="bubble-wrap user-bubble-wrap"
                                 :class="{'actions-visible': activeBubble === userBubbleId(entry.id)}">
                                 <div :id="userBubbleId(entry.id)" class="user_bubble"
@@ -440,10 +445,6 @@ defineExpose({loadHistory, clearHistory, reset});
                             </div>
                         </div>
                     </template>
-                    <div v-else class="user_message">
-                        <button type="button" class="chat-delivery-action"
-                            @click="showAlert(`${entry.message}\n\n原消息：\n${entry.user}`)">查看发送结果</button>
-                    </div>
                 </template>
                 <div v-if="isTyping" id="chat-typing" class="assistant_message" role="status" aria-label="对方正在输入">
                     <div class="assistant_bag">

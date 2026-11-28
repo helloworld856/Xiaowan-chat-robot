@@ -22,15 +22,6 @@ export interface ChatTurn {
     failure?: ChatNotStartedError;
 }
 
-interface DeliveryNotice {
-    kind: 'notice';
-    id: string;
-    user: string;
-    message: string;
-}
-
-type ChatEntry = ChatTurn | DeliveryNotice;
-
 interface ChatOptions {
     canSend: () => boolean;
     visionReady?: () => boolean;
@@ -143,7 +134,7 @@ export function useChat(options: ChatOptions) {
     const attachments = ref<ChatAttachment[]>([]);
     const uploadingCount = ref(0);
     const uploading = computed(() => uploadingCount.value > 0);
-    const entries = ref<ChatEntry[]>([]);
+    const entries = ref<ChatTurn[]>([]);
     const busy = ref(false);
     const cancellable = ref(false);
     const isTyping = ref(false);
@@ -272,10 +263,10 @@ export function useChat(options: ChatOptions) {
         }
         if (!missing.length) return;
 
-        const merged: ChatEntry[] = [];
+        const merged: ChatTurn[] = [];
         let next = 0;
         for (const entry of entries.value) {
-            if (entry.kind === 'turn' && entry.round !== null) {
+            if (entry.round !== null) {
                 while (next < missing.length && missing[next].round < entry.round) merged.push(missing[next++]);
             }
             merged.push(entry);
@@ -291,20 +282,30 @@ export function useChat(options: ChatOptions) {
         options.scrollAfterRender(true);
     }
 
-    async function reconcileDelivery(turn: ChatTurn, isCurrent: () => boolean) {
-        entries.value = entries.value.filter(entry => entry.id !== turn.id);
-        let message = '已刷新聊天记录，此消息的发送结果仍需确认。请核对后再发送。';
+    async function markOrReconcileFailure(turn: ChatTurn, maxRoundBefore: number, isCurrent: () => boolean) {
+        turn.replies.splice(0, turn.replies.length);
         try {
             const history = await historyAPI(0);
-            if (isCurrent()) mergeHistory(history.history_messages);
+            if (!isCurrent()) return;
+            const savedMatch = history.history_messages.find(
+                item => item.conversation_round > maxRoundBefore && item.user === turn.user,
+            );
+            if (savedMatch) {
+                if (typeof savedMatch.created_at === 'number') turn.createdAt = savedMatch.created_at;
+                if (savedMatch.attachments?.length) turn.attachments = savedMatch.attachments;
+                confirmRound(turn, savedMatch.conversation_round);
+                turn.replies.push(...savedMatch.assistant);
+                mergeHistory(history.history_messages);
+                options.scrollAfterRender(false);
+                return;
+            }
+            mergeHistory(history.history_messages);
         } catch {
-            message = '暂时无法核对这条消息，请查看聊天记录后再发送。';
+            // 网络暂不可达时静默跳过历史同步，直接保留原气泡并标红色感叹号。
         }
         if (!isCurrent()) return;
-        const summary = [summarizeAttachments(turn.attachments), turn.user].filter(Boolean).join('\n');
-        entries.value.push({kind: 'notice', id: turn.id, user: summary || '[附件消息]', message});
-        options.scrollAfterRender(true);
-        options.showAlert(message);
+        turn.failure = new ChatNotStartedError('消息发送失败，点击感叹号可重新发送', true);
+        options.scrollAfterRender(false);
     }
 
     function waitForReplyDelay(milliseconds: number) {
@@ -567,6 +568,10 @@ export function useChat(options: ChatOptions) {
     async function submitMessage(turn: ChatTurn, hadQuoteImage = false) {
         const attachmentIds = turn.attachments?.map(item => item.id);
         const quotedAttachmentIds = turn.quotedAttachmentIds;
+        const maxRoundBefore = entries.value.reduce(
+            (max, item) => item.round !== null && item.round > max ? item.round : max,
+            -1,
+        );
         await runTurnRequest(
             turn,
             (control, onBubble) => typeof cancelChatAPI === 'function'
@@ -586,9 +591,9 @@ export function useChat(options: ChatOptions) {
                 if (error instanceof ChatNotStartedError) {
                     turn.replies.splice(0, turn.replies.length);
                     turn.failure = error;
-                    options.showAlert(error.message);
+                    options.scrollAfterRender(false);
                 } else {
-                    await reconcileDelivery(turn, isCurrent);
+                    await markOrReconcileFailure(turn, maxRoundBefore, isCurrent);
                 }
             },
         );

@@ -247,7 +247,8 @@ test('useChat supports image/document uploads, friendly non-vision model guard, 
     await state.sendMessage();
     assert.deepEqual(chatCalls.at(-1).options.quotedAttachmentIds, ['att_0000000000000002']);
 
-    // 3. 流式未落库错误（ChatNotStartedError）直接清理半截气泡并标记可重试，不触发“此消息的发送结果仍需确认”对账弹窗
+    // 3. 流式未落库错误直接清理半截气泡并在气泡旁标红色感叹号可重发，不弹弹窗
+    const alertsBeforeFail = alerts.length;
     pendingChatResolve = 'stream_unsaved_error';
     state.draft.value = '帮我查今天天气';
     await state.sendMessage();
@@ -255,7 +256,7 @@ test('useChat supports image/document uploads, friendly non-vision model guard, 
     assert.equal(reconcileHistoryCalls, 0);
     assert.deepEqual(failedTurn.replies, []);
     assert.equal(failedTurn.failure?.retryable, true);
-    assert.equal(alerts.at(-1), 'AI 处理失败，请稍后重试');
+    assert.equal(alerts.length, alertsBeforeFail);
 });
 
 test('ChatComposer switches between send and stop, and displays/clears quote bar', async () => {
