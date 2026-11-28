@@ -110,7 +110,7 @@ test('useChat cancels in-flight sends back to draft/quote and records timestamps
     assert.deepEqual(state.entries.value[0].replies, ['第一版回复']);
     assert.deepEqual(alerts, []);
 
-    // 3. Streamed bubbles appear immediately via onBubble before the turn resolves
+    // 3. Streamed bubbles pace naturally one by one instead of dumping simultaneously, then unlock cleanly
     let finishStream;
     let streamOnBubble;
     chatHandler = (_text, options) => {
@@ -121,20 +121,31 @@ test('useChat cancels in-flight sends back to draft/quote and records timestamps
     const streamingSend = state.sendMessage();
     await flushAsync();
     assert.equal(typeof streamOnBubble, 'function');
-    streamOnBubble('第一条流式气泡');
-    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡']);
-    assert.equal(state.isTyping.value, false);
-    streamOnBubble('第二条流式气泡');
-    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡', '第二条流式气泡']);
+    streamOnBubble('第一条');
+    streamOnBubble('第二条');
+    // 两条流式气泡即使同一毫秒到达，也不会瞬间同时蹦出，而是先等首条节奏再间隔显示第二条
+    assert.deepEqual(state.entries.value[1].replies, []);
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.deepEqual(state.entries.value[1].replies, ['第一条']);
+    assert.equal(state.isTyping.value, true);
     finishStream({
-        response: ['第一条流式气泡', '第二条流式气泡'],
+        response: ['第一条', '第二条'],
         conversation_round: 5,
         saved: true,
         created_at: 1764150005000,
     });
     await streamingSend;
     assert.equal(state.entries.value[1].round, 5);
-    assert.deepEqual(state.entries.value[1].replies, ['第一条流式气泡', '第二条流式气泡']);
+    assert.deepEqual(state.entries.value[1].replies, ['第一条', '第二条']);
+    assert.equal(state.isTyping.value, false);
+    assert.equal(state.busy.value, false);
+
+    // 4. Subsequent message after a multi-bubble streamed turn sends cleanly without getting stuck
+    chatHandler = async () => ({response: ['下一轮回复'], conversation_round: 6, saved: true});
+    state.draft.value = '继续发第二句';
+    await state.sendMessage();
+    assert.equal(state.entries.value.length, 3);
+    assert.deepEqual(state.entries.value[2].replies, ['下一轮回复']);
     assert.equal(state.busy.value, false);
 });
 

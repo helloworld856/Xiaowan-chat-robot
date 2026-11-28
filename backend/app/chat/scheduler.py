@@ -354,8 +354,12 @@ class ChatSessions:
                     queue.put_nowait(('error', error))
                 return
             result = task.result()
-            self._finish_turn(entry, user, text, result, start)
-            queue.put_nowait(('done', result))
+            try:
+                self._finish_turn(entry, user, text, result, start)
+            except Exception as finish_err:
+                logger.warning('chat post-turn hook failed: %s', type(finish_err).__name__)
+            finally:
+                queue.put_nowait(('done', result))
 
         work.add_done_callback(on_done)
         return queue

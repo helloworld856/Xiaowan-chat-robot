@@ -219,3 +219,25 @@ test('settings are loaded/saved through backend and save failures are reported',
     globalThis.fetch = async () => new Response('{}', {status: 500});
     await assert.rejects(api.settingsAPI(preferences), /设置保存失败/);
 });
+
+test('chatAPI stream resolves immediately upon event: done even if reverse proxy keeps connection open', async t => {
+    const encoder = new TextEncoder();
+    const bubbles = [];
+    t.mock.method(globalThis, 'fetch', async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode(
+                    'event: bubble\ndata: {"text":"哈喽呀"}\n\n'
+                    + 'event: bubble\ndata: {"text":"刚忙完吗"}\n\n'
+                    + 'event: done\ndata: {"response":["哈喽呀","刚忙完吗"],"conversation_round":0,"saved":true}\n\n'
+                ));
+                // 模拟反向代理在收到 done 事件后未立即发送 TCP EOF（不调用 controller.close()）
+            },
+        });
+        return new Response(stream, {status: 200, headers: {'content-type': 'text/event-stream'}});
+    });
+    const res = await api.chatAPI('hello', {onBubble: text => bubbles.push(text)});
+    assert.deepEqual(bubbles, ['哈喽呀', '刚忙完吗']);
+    assert.equal(res.conversation_round, 0);
+    assert.equal(res.saved, true);
+});

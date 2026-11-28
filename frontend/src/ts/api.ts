@@ -114,7 +114,8 @@ async function requestChatStream(payload: ChatRequestPayload,
                                  options: CancellableChatOptions): Promise<ChatResponse> {
     const path = '/chat/stream';
     const generation = requestGeneration;
-    const signals: AbortSignal[] = [AbortSignal.timeout(180000), sessionRequests.signal];
+    const streamDoneController = new AbortController();
+    const signals: AbortSignal[] = [AbortSignal.timeout(180000), sessionRequests.signal, streamDoneController.signal];
     if (options.signal) signals.push(options.signal);
     let response: Response;
     try {
@@ -187,8 +188,10 @@ async function requestChatStream(payload: ChatRequestPayload,
                 const block = buffer.slice(0, sep).trim();
                 buffer = buffer.slice(sep + 2);
                 if (block) processBlock(block);
+                if (finalResponse !== null) break;
                 sep = buffer.indexOf('\n\n');
             }
+            if (finalResponse !== null) break;
             if (done) {
                 const trailing = buffer.trim();
                 if (trailing) processBlock(trailing);
@@ -198,9 +201,16 @@ async function requestChatStream(payload: ChatRequestPayload,
     } catch (error) {
         if (generation !== requestGeneration) throw new CancelledRequestError();
         if (options.signal?.aborted) throw new UserCancelledChatError();
-        throw error;
+        if (finalResponse === null) throw error;
     } finally {
-        reader.releaseLock();
+        try {
+            reader.releaseLock();
+        } catch {
+            // 忽略流已关闭时的释放异常
+        }
+        if (finalResponse !== null) {
+            streamDoneController.abort();
+        }
     }
 
     if (generation !== requestGeneration) throw new CancelledRequestError();

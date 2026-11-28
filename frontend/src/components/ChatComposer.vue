@@ -207,7 +207,8 @@ defineExpose({focus});
             <textarea id="userInput" ref="input" v-model="draft" autocomplete="off" rows="1"
                 aria-label="聊天消息" placeholder="说点什么吧~" @keydown="onInputKey" @paste="onPaste"
                 @compositionstart="composing = true" @compositionend="composing = false"
-                @change="composing = false" @input="composing && measureOverflow()"></textarea>
+                @blur="composing = false" @change="composing = false"
+                @input="composing && measureOverflow()"></textarea>
             <button id="chat-input-toggle" type="button" :aria-label="toggleLabel" aria-controls="userInput"
                 :aria-expanded="expanded" :title="toggleLabel" :hidden="!expanded && !overflow"
                 @pointerdown="preserveInputFocus" @click="setExpanded(!expanded)"></button>

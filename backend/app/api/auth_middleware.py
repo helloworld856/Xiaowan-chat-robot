@@ -82,8 +82,9 @@ class AuthenticationMiddleware:
                         headers['Content-Security-Policy'] = PAGE_CONTENT_SECURITY_POLICY
                         headers['X-Frame-Options'] = 'DENY'
                 else:
-                    # 登录状态和账号数据不会写入 HTTP 缓存。
-                    headers['Cache-Control'] = 'no-store'
+                    # 登录状态和账号数据不会写入 HTTP 缓存；SSE 流附加 no-transform 防止反向代理压缩缓冲。
+                    is_sse = headers.get('Content-Type', '').partition(';')[0] == 'text/event-stream'
+                    headers['Cache-Control'] = 'no-store, no-transform' if is_sse else 'no-store'
                 status = message['status']
                 logger.info('请求 %s %s 返回 %d duration_ms=%.1f', log_method, route_label(), status,
                             (perf_counter() - start) * 1000)
