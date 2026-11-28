@@ -724,3 +724,57 @@ class SearxngWebSearchToolTests(unittest.TestCase):
         self.assertIn('event=searxng_ready', joined)
         self.assertIn('region=global', joined)
         self.assertIn('autostarted=True', joined)
+
+    def test_outbound_rate_limiter_enforces_user_and_global_rpm_while_exempting_cache_hits(self):
+        import httpx
+        from app.chat.tool_context import ChatToolContext, chat_tool_context
+        from app.system_config import SearchConfig
+        from tools_config.search_tool import searxng as searx_mod
+
+        real_client = httpx.Client
+        outbound_calls = {'count': 0}
+
+        def fake_client(*args, **kwargs):
+            def handler(request: httpx.Request):
+                if 'generate_204' in str(request.url):
+                    return httpx.Response(204)
+                outbound_calls['count'] += 1
+                q = dict(request.url.params).get('q', '')
+                return httpx.Response(200, json={
+                    'results': [{'title': f'Hit {q}', 'url': f'https://example.com/{q}', 'content': 'snippet'}],
+                    'unresponsive_engines': [],
+                })
+
+            return real_client(transport=httpx.MockTransport(handler))
+
+        cfg = SearchConfig(
+            urls=['http://127.0.0.1:8080'],
+            region='global',
+            cache_ttl_seconds=600,
+            global_rpm_limit=3,
+            user_rpm_limit=2,
+        )
+        with patch.object(searx_mod.httpx, 'Client', side_effect=fake_client):
+            # 账号 1 连续发 2 个不同搜索正常放行，第 3 个不同搜索触发单账号每分钟上限
+            for idx in (1, 2):
+                with chat_tool_context(ChatToolContext(user_id=1, search_config=cfg)):
+                    res = self.tool.invoke({'query': f'topic-{idx}'})
+                    self.assertIn(f'Hit topic-{idx}', res)
+            with chat_tool_context(ChatToolContext(user_id=1, search_config=cfg)):
+                blocked_user = self.tool.invoke({'query': 'topic-3'})
+            self.assertIn('触发限流', blocked_user)
+
+            # 账号 1 重复查已缓存词条不受限流影响，也不额外消耗出站次数
+            with chat_tool_context(ChatToolContext(user_id=1, search_config=cfg)):
+                cached_res = self.tool.invoke({'query': 'topic-1'})
+            self.assertIn('Hit topic-1', cached_res)
+            self.assertEqual(outbound_calls['count'], 2)
+
+            # 账号 2 第 1 次真实搜索消耗全站第 3 个名额后，全站第 4 次真实搜索被全局 RPM 拦住
+            with chat_tool_context(ChatToolContext(user_id=2, search_config=cfg)):
+                ok_u2 = self.tool.invoke({'query': 'topic-u2-a'})
+            self.assertIn('Hit topic-u2-a', ok_u2)
+            with chat_tool_context(ChatToolContext(user_id=2, search_config=cfg)):
+                blocked_global = self.tool.invoke({'query': 'topic-u2-b'})
+            self.assertIn('触发限流', blocked_global)
+            self.assertEqual(outbound_calls['count'], 3)

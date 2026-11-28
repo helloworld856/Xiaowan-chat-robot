@@ -1,6 +1,6 @@
 """SearXNG web search client with automatic domestic/overseas region detection, multi-node latency routing, and failover."""
 
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import html
@@ -33,6 +33,8 @@ MAX_QUERY_CHARS = 200
 MAX_SNIPPET_CHARS = 220
 MAX_OUTPUT_CHARS = 2200
 MAX_CACHE_ENTRIES = 128
+RATE_WINDOW_SECONDS = 60.0
+MAX_USER_RATE_BUCKETS = 1024
 VALID_TIME_RANGES = frozenset(('', 'day', 'week', 'month', 'year'))
 
 _CJK_RE = re.compile(r'[\u4e00-\u9fff]')
@@ -104,6 +106,8 @@ class SearxngSearchRouter:
         self._host_region_at: float = 0.0
         self._nodes: dict[str, _NodeStatus] = {}
         self._cache: OrderedDict[tuple[str, str, str], tuple[float, str]] = OrderedDict()
+        self._global_hits: deque[float] = deque()
+        self._user_hits: OrderedDict[int, deque[float]] = OrderedDict()
         self._default_config: SearchConfig | None = None
         self._stop_event = Event()
         self._startup_thread: Thread | None = None
@@ -134,6 +138,8 @@ class SearxngSearchRouter:
             self._host_region_at = 0.0
             self._nodes.clear()
             self._cache.clear()
+            self._global_hits.clear()
+            self._user_hits.clear()
 
     def _probe_json_search(self, base_url: str, node_region: RegionTag, config: SearchConfig) -> tuple[bool, str, float]:
         first_engine = (
@@ -517,6 +523,42 @@ class SearxngSearchRouter:
             while len(self._cache) > MAX_CACHE_ENTRIES:
                 self._cache.popitem(last=False)
 
+    def _acquire_outbound_quota(self, user_id: int | None, config: SearchConfig) -> str | None:
+        if config.global_rpm_limit <= 0 and config.user_rpm_limit <= 0:
+            return None
+        now = monotonic()
+        cutoff = now - RATE_WINDOW_SECONDS
+        with self._lock:
+            while self._global_hits and self._global_hits[0] <= cutoff:
+                self._global_hits.popleft()
+            if config.global_rpm_limit > 0 and len(self._global_hits) >= config.global_rpm_limit:
+                return 'global_rate_limit'
+
+            user_bucket: deque[float] | None = None
+            if user_id is not None and config.user_rpm_limit > 0:
+                user_bucket = self._user_hits.get(user_id)
+                if user_bucket is not None:
+                    while user_bucket and user_bucket[0] <= cutoff:
+                        user_bucket.popleft()
+                    if not user_bucket:
+                        self._user_hits.pop(user_id, None)
+                        user_bucket = None
+                    elif len(user_bucket) >= config.user_rpm_limit:
+                        return 'user_rate_limit'
+
+            if config.global_rpm_limit > 0:
+                self._global_hits.append(now)
+            if user_id is not None and config.user_rpm_limit > 0:
+                if user_bucket is None:
+                    user_bucket = deque()
+                    self._user_hits[user_id] = user_bucket
+                else:
+                    self._user_hits.move_to_end(user_id)
+                user_bucket.append(now)
+                while len(self._user_hits) > MAX_USER_RATE_BUCKETS:
+                    self._user_hits.popitem(last=False)
+        return None
+
     def search(self, query: str, time_range: str = '') -> str:
         config = self._active_config()
         if not config.enabled:
@@ -548,6 +590,11 @@ class SearxngSearchRouter:
         if cached is not None:
             logger.info('联网搜索命中内存缓存 region=%s', cache_region)
             return cached
+
+        limit_reason = self._acquire_outbound_quota(ctx.user_id if ctx is not None else None, config)
+        if limit_reason is not None:
+            log_event('tool_blocked', level=WARNING, tool='web_search', reason=limit_reason)
+            return '[工具提示：短时间内联网搜索请求较密集，为保护搜索通道已触发限流，请自然跟对方说刚查得太密歇十几秒再搜，或先凭已知信息接话]'
 
         language = 'zh-CN' if _CJK_RE.search(cleaned_query) else 'auto'
         last_reason = 'unreachable'

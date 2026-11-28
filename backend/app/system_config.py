@@ -194,6 +194,14 @@ class SearchConfig(_ConfigSection):
         default=600, ge=0, le=86400,
         description='相同搜索词在内存中的缓存秒数，设为 0 关闭缓存。',
     )
+    global_rpm_limit: int = Field(
+        default=30, ge=0, le=1000,
+        description='全站每分钟向 SearXNG 发起真实搜索的最大次数，保护服务器 IP，命中缓存不计入，设为 0 不限制。',
+    )
+    user_rpm_limit: int = Field(
+        default=10, ge=0, le=500,
+        description='单个账号每分钟向 SearXNG 发起真实搜索的最大次数，命中缓存不计入，设为 0 不限制。',
+    )
 
 
 class PasswordConfig(_ConfigSection):
