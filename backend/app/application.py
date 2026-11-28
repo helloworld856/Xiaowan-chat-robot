@@ -29,6 +29,7 @@ from app.llm.configuration import AdminModelRuntime, ModelConfigurationService
 from app.llm.embeddings import LocalEmbeddingModel
 from app.llm.model_catalog import ModelCatalog
 from app.system_config import ChatConfig, SystemConfig, legacy_environment
+from tools_config.search_tool.searxng import searxng_router
 
 
 INITIAL_ADMIN_PASSWORD_MIN_LENGTH = 6
@@ -154,6 +155,9 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         ))
         if should_prepare_embedding:
             embedding_model.prepare_on_startup()
+            searxng_router.prepare_on_startup(config.search, project_root=config_root.parent)
+        else:
+            searxng_router.configure(config.search)
 
     @asynccontextmanager
     async def lifespan(_):
@@ -162,6 +166,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
             yield
         finally:
             embedding_model.close()
+            searxng_router.close()
             try:
                 # 先等已接收的聊天落库，再关闭它们依赖的数据库和日志。
                 await application.state.chat.drain()

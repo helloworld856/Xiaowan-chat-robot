@@ -83,7 +83,7 @@ npm --prefix frontend run build
 
 `auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度和启动清理，`memory` 管理短期原话窗口、情景事件异步提炼、混合召回权重、本地向量模型参数以及重启清空事件记忆开关，`search` 管理自建 SearXNG 联网搜索实例地址、国内外网络自动识别与搜索引擎列表。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
 
-如需启用联网搜索，可在服务器或本机进入 `deploy/searxng` 执行 `docker compose up -d` 启动自建 SearXNG 容器（默认监听 `127.0.0.1:8080` 并已开启 `json` 输出格式），或在 `backend/system_config.json` 的 `search.urls`（以及可选的 `search.cn_urls` / `search.global_urls`）填写已有的 SearXNG 实例地址。`search.region` 默认为 `"auto"`，会自动探测所处网络与远程节点属性：国内节点自动使用 `search.cn_engines`（如 `bing,bing news,360search,sogou`）跳过墙外超时源，海外节点自动使用 `search.global_engines`（如 `google,bing,duckduckgo,wikipedia`），配置多个节点时自动按连通性与延迟择优并在故障时无缝切换；未启动 SearXNG 或设 `search.enabled: false` 时不影响正常对话。
+如需启用联网搜索，可在服务器或本机安装 Docker（当前运行用户拥有 Docker 权限时，后端启动若检测到本机 `127.0.0.1:8080` 未运行会自动后台拉起 `deploy/searxng` 容器，也可手动进入 `deploy/searxng` 执行 `docker compose up -d`），或在 `backend/system_config.json` 的 `search.urls`（以及可选的 `search.cn_urls` / `search.global_urls`）填写已有的 SearXNG 实例地址。后端每次启动都会在后台自检 SearXNG 连通性与 `json` 格式权限，并向 `backend/log_config/app.log` 写入 `event=searxng_ready`（或明确的告警原因）。`search.region` 默认为 `"auto"`，会自动探测所处网络与远程节点属性：国内节点自动使用 `search.cn_engines`（如 `bing,bing news,360search,sogou`）跳过墙外超时源，海外节点自动使用 `search.global_engines`（如 `google,bing,duckduckgo,wikipedia`），配置多个节点时自动按连通性与延迟择优并在故障时无缝切换；未启动 SearXNG 或设 `search.enabled: false` 时不影响正常对话。
 
 后端启动时会自动检测 `backend/models/multilingual-e5-small` 下是否存在本地多语向量模型，若不存在则在后台自动下载量化版 `multilingual-e5-small`（官方源不可达时自动切换 `https://hf-mirror.com` 镜像源，也可在 `memory.embedding.hf_endpoint` 指定镜像或手动运行 `python backend/scripts/download_embedding_model.py` 预下载）。模型下载完成前或关闭 `memory.embedding.enabled` 时，系统会自动使用中英双语关键词与时间衰减混合召回，不阻塞服务启动与对话。
 

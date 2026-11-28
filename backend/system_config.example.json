@@ -85,6 +85,8 @@
   "search": {
     // 设为 true 时启用 SearXNG 联网搜索工具；实例未就绪时自动优雅降级不影响聊天。
     "enabled": true,
+    // 设为 true 时，若配置的本机 127.0.0.1:8080 实例未运行且装有 Docker，后端启动时自动后台拉起 deploy/searxng 容器。
+    "auto_start_docker": true,
     // 可用的 SearXNG 实例基础地址列表，支持多个节点自动探活测速与故障切换。
     "urls": ["http://127.0.0.1:8080"],
     // 搜索区域策略：auto 自动区分国内与海外网络选择节点和引擎，cn 固定国内源，global 固定海外源。

@@ -149,6 +149,10 @@ class SearchConfig(_ConfigSection):
         default=True,
         description='设为 true 时启用 SearXNG 联网搜索工具；实例未就绪时自动优雅降级不影响聊天。',
     )
+    auto_start_docker: bool = Field(
+        default=True,
+        description='设为 true 时，若配置的本机 127.0.0.1:8080 实例未运行且装有 Docker，后端启动时自动后台拉起 deploy/searxng 容器。',
+    )
     urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
         default_factory=lambda: ['http://127.0.0.1:8080'],
         min_length=1,

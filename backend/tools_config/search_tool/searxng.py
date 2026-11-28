@@ -6,15 +6,18 @@ from dataclasses import dataclass
 import html
 import ipaddress
 from logging import WARNING
+from pathlib import Path
 import re
-from threading import Lock
+import shutil
+import subprocess
+from threading import Event, Lock, Thread
 from time import monotonic, perf_counter
 from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
 
-from app.account_logging import log_event, logger
+from app.account_logging import discard_logs_after, log_event, logger
 from app.chat.tool_context import current_tool_context
 from app.system_config import SearchConfig
 
@@ -36,6 +39,7 @@ _CJK_RE = re.compile(r'[\u4e00-\u9fff]')
 _INLINE_TAG_RE = re.compile(r'</?(?:b|strong|i|em|mark|span|u|font)\b[^>]*>', re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 _WS_RE = re.compile(r'\s+')
+_DEFAULT_LOCAL_URLS = frozenset(('http://127.0.0.1:8080', 'http://localhost:8080'))
 
 
 @dataclass
@@ -101,6 +105,16 @@ class SearxngSearchRouter:
         self._nodes: dict[str, _NodeStatus] = {}
         self._cache: OrderedDict[tuple[str, str, str], tuple[float, str]] = OrderedDict()
         self._default_config: SearchConfig | None = None
+        self._stop_event = Event()
+        self._startup_thread: Thread | None = None
+
+    def configure(self, config: SearchConfig) -> None:
+        with self._lock:
+            self._default_config = config
+            self._stop_event = Event()
+
+    def close(self) -> None:
+        self._stop_event.set()
 
     def _active_config(self) -> SearchConfig:
         ctx = current_tool_context()
@@ -113,10 +127,193 @@ class SearxngSearchRouter:
 
     def reset_state(self) -> None:
         with self._lock:
+            self._stop_event.set()
+            self._stop_event = Event()
+            self._startup_thread = None
             self._host_region = None
             self._host_region_at = 0.0
             self._nodes.clear()
             self._cache.clear()
+
+    def _probe_json_search(self, base_url: str, node_region: RegionTag, config: SearchConfig) -> tuple[bool, str, float]:
+        first_engine = (
+            (config.cn_engines if node_region == 'cn' else config.global_engines).split(',')[0].strip()
+            or 'bing'
+        )
+        start = perf_counter()
+        try:
+            with httpx.Client(
+                timeout=min(float(config.timeout_seconds), 3.5),
+                follow_redirects=False,
+                headers={'Accept': 'application/json'},
+            ) as client:
+                resp = client.get(
+                    f'{base_url}/search',
+                    params={'q': 'ok', 'format': 'json', 'engines': first_engine},
+                )
+            elapsed_ms = (perf_counter() - start) * 1000.0
+        except Exception as error:
+            return False, type(error).__name__, 0.0
+
+        if resp.status_code == 403:
+            return False, 'json_format_disabled_403', elapsed_ms
+        if resp.status_code != 200:
+            return False, f'status_{resp.status_code}', elapsed_ms
+        try:
+            payload = resp.json()
+        except ValueError:
+            return False, 'invalid_json', elapsed_ms
+        if not isinstance(payload, dict) or not isinstance(payload.get('results'), list):
+            return False, 'invalid_payload', elapsed_ms
+        return True, 'ok', elapsed_ms
+
+    def _try_auto_start_docker(self, compose_file: Path) -> tuple[bool, str]:
+        docker_bin = shutil.which('docker')
+        compose_bin = shutil.which('docker-compose')
+        commands: list[list[str]] = []
+        if docker_bin:
+            commands.append([docker_bin, 'compose', '-f', str(compose_file), 'up', '-d'])
+        if compose_bin:
+            commands.append([compose_bin, '-f', str(compose_file), 'up', '-d'])
+        if not commands:
+            return False, 'docker_not_found'
+
+        last_err = 'docker_compose_failed'
+        for cmd in commands:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(compose_file.parent),
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                    check=False,
+                )
+            except Exception as error:
+                last_err = type(error).__name__
+                continue
+            if proc.returncode == 0:
+                return True, 'ok'
+            stderr_lower = (proc.stderr or '').lower()
+            if 'permission denied' in stderr_lower:
+                return False, 'docker_permission_denied'
+            if 'cannot connect to the docker daemon' in stderr_lower or 'daemon is not running' in stderr_lower:
+                return False, 'docker_daemon_stopped'
+        return False, last_err
+
+    def prepare_on_startup(
+        self,
+        config: SearchConfig,
+        *,
+        project_root: Path | None = None,
+        blocking: bool = False,
+        poll_interval: float = 1.0,
+    ) -> None:
+        """后端启动时后台自检 SearXNG 连通性与 JSON 格式权限；本机容器未运行时按需自动拉起并写入系统日志。"""
+        self.configure(config)
+        stop_event = self._stop_event
+        if not config.enabled:
+            log_event('searxng_disabled', system=True)
+            logger.info('联网搜索已关闭（search.enabled=false）')
+            return
+
+        with self._lock:
+            if self._startup_thread is not None and self._startup_thread.is_alive():
+                return
+
+            def _worker():
+                with discard_logs_after(stop_event):
+                    if stop_event.is_set():
+                        return
+                    candidates = self.rank_candidates(config)
+                    if not candidates:
+                        log_event('searxng_unavailable', level=WARNING, system=True, reason='no_urls_configured')
+                        return
+
+                    last_reason = 'unreachable'
+                    last_url = candidates[0][0]
+                    for base_url, node_region in candidates:
+                        if stop_event.is_set():
+                            return
+                        ok, reason, elapsed_ms = self._probe_json_search(base_url, node_region, config)
+                        if ok:
+                            self._mark_success(base_url, elapsed_ms)
+                            log_event(
+                                'searxng_ready',
+                                system=True,
+                                region=node_region,
+                                url=base_url,
+                                duration_ms=round(elapsed_ms, 1),
+                            )
+                            logger.info('SearXNG 联网搜索已就绪（区域=%s，节点=%s）', node_region, base_url)
+                            return
+                        last_reason = reason
+                        last_url = base_url
+
+                    # 若配置包含默认本机 127.0.0.1:8080 且未检测到运行实例，自动尝试后台拉起 deploy/searxng 容器
+                    compose_file = (project_root / 'deploy' / 'searxng' / 'docker-compose.yml') if project_root else None
+                    has_default_local = any(url in _DEFAULT_LOCAL_URLS for url, _ in candidates)
+                    if (
+                        config.auto_start_docker
+                        and has_default_local
+                        and last_reason != 'json_format_disabled_403'
+                        and compose_file is not None
+                        and compose_file.is_file()
+                    ):
+                        log_event('searxng_autostart_triggered', system=True)
+                        logger.info('未检测到运行中的本机 SearXNG，尝试自动启动 deploy/searxng 容器...')
+                        started, docker_reason = self._try_auto_start_docker(compose_file)
+                        if started:
+                            local_url, local_region = next(
+                                ((u, r) for u, r in candidates if u in _DEFAULT_LOCAL_URLS),
+                                candidates[0],
+                            )
+                            for _ in range(15):
+                                if poll_interval > 0 and stop_event.wait(poll_interval):
+                                    return
+                                if stop_event.is_set():
+                                    return
+                                ok, reason, elapsed_ms = self._probe_json_search(local_url, local_region, config)
+                                if ok:
+                                    self._mark_success(local_url, elapsed_ms)
+                                    log_event(
+                                        'searxng_ready',
+                                        system=True,
+                                        region=local_region,
+                                        url=local_url,
+                                        autostarted=True,
+                                        duration_ms=round(elapsed_ms, 1),
+                                    )
+                                    logger.info('SearXNG 容器已自动启动并就绪（区域=%s，节点=%s）', local_region, local_url)
+                                    return
+                                last_reason = reason
+                        else:
+                            last_reason = docker_reason
+
+                    log_event('searxng_unavailable', level=WARNING, system=True, reason=last_reason, url=last_url)
+                    if last_reason == 'json_format_disabled_403':
+                        logger.warning(
+                            'SearXNG 节点（%s）拒绝了 JSON 请求（HTTP 403），请在其 settings.yml 的 search.formats 中添加 json',
+                            last_url,
+                        )
+                    elif last_reason == 'docker_permission_denied':
+                        logger.warning(
+                            'SearXNG 未运行且当前服务账号无 Docker 权限，请执行一次 sudo docker compose -f deploy/searxng/docker-compose.yml up -d（或将运行用户加入 docker 组）',
+                        )
+                    else:
+                        logger.warning(
+                            '未检测到可用的 SearXNG 实例（%s，原因=%s），联网搜索暂不可用，不影响普通对话',
+                            last_url,
+                            last_reason,
+                        )
+
+            if not blocking:
+                thread = Thread(target=_worker, name='xiaowan-searxng-init', daemon=True)
+                self._startup_thread = thread
+                thread.start()
+                return
+
+        _worker()
 
     def detect_host_region(self) -> RegionTag:
         now = monotonic()

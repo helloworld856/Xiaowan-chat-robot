@@ -683,3 +683,44 @@ class SearxngWebSearchToolTests(unittest.TestCase):
         with patch.object(searx_mod.httpx, 'Client', side_effect=broken_client), chat_tool_context(offline_ctx):
             offline_msg = self.tool.invoke({'query': '今日新闻'})
         self.assertIn('暂不可用', offline_msg)
+
+    def test_startup_probe_autostarts_docker_when_local_searxng_offline_and_logs_system_status(self):
+        import subprocess
+        import httpx
+        from app.account_logging import logger
+        from app.system_config import SearchConfig
+        from tools_config.search_tool import searxng as searx_mod
+
+        real_client = httpx.Client
+        state = {'container_up': False}
+
+        def fake_client(*args, **kwargs):
+            def handler(request: httpx.Request):
+                if 'generate_204' in str(request.url):
+                    return httpx.Response(204)
+                if not state['container_up']:
+                    raise httpx.ConnectError('not running yet')
+                return httpx.Response(200, json={'results': [], 'unresponsive_engines': []})
+
+            return real_client(transport=httpx.MockTransport(handler))
+
+        def fake_run(cmd, **kwargs):
+            state['container_up'] = True
+            return subprocess.CompletedProcess(cmd, 0, stdout='Started', stderr='')
+
+        project_root = _imports.BACKEND_ROOT.parent
+        cfg = SearchConfig(enabled=True, auto_start_docker=True, urls=['http://127.0.0.1:8080'])
+        with (
+            patch.object(searx_mod.httpx, 'Client', side_effect=fake_client),
+            patch.object(searx_mod.shutil, 'which', side_effect=lambda name: '/usr/bin/docker' if name == 'docker' else None),
+            patch.object(searx_mod.subprocess, 'run', side_effect=fake_run) as run_mock,
+            self.assertLogs(logger, level='INFO') as sys_logs,
+        ):
+            self.router.prepare_on_startup(cfg, project_root=project_root, blocking=True, poll_interval=0.0)
+
+        run_mock.assert_called_once()
+        joined = '\n'.join(sys_logs.output)
+        self.assertIn('event=searxng_autostart_triggered', joined)
+        self.assertIn('event=searxng_ready', joined)
+        self.assertIn('region=global', joined)
+        self.assertIn('autostarted=True', joined)
