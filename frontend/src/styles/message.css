@@ -109,6 +109,148 @@
     font-weight: 600;
 }
 
+.user_bubble.is-media-only {
+    width: fit-content;
+    padding: 0.25rem;
+}
+
+.user_bubble.is-media-only .bubble-image-btn,
+.user_bubble.is-media-only .bubble-image {
+    border-radius: 12px 5px 12px 12px;
+}
+
+/* 气泡内图片与轻量文档卡片 */
+.bubble-attachments {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+}
+
+.bubble-attachments:has(+ span) {
+    margin-bottom: 0.4rem;
+}
+
+.bubble-image-btn {
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    cursor: zoom-in;
+    overflow: hidden;
+    display: block;
+    max-width: 100%;
+}
+
+.bubble-image {
+    display: block;
+    max-width: 100%;
+    max-height: 15rem;
+    height: auto;
+    border-radius: 10px;
+    object-fit: cover;
+}
+
+.bubble-image:not([width]) {
+    max-width: 15rem;
+    width: auto;
+}
+
+.bubble-doc-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
+    padding: 0.38rem 0.6rem;
+    border-radius: 8px;
+    background: color-mix(in srgb, currentColor 11%, transparent);
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.85em;
+    line-height: 1.35;
+}
+
+.bubble-doc-card:hover {
+    background: color-mix(in srgb, currentColor 17%, transparent);
+}
+
+.bubble-doc-card svg {
+    flex: none;
+    opacity: 0.85;
+}
+
+.bubble-doc-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.bubble-doc-size {
+    flex: none;
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+/* 图片大图预览弹层 */
+#image-lightbox-dialog {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 1.5rem;
+    border: 0;
+    background: rgba(12, 14, 20, 0.82);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 1200;
+}
+
+#image-lightbox-dialog:not([open]) {
+    display: none;
+}
+
+#image-lightbox-dialog[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#image-lightbox-dialog::backdrop {
+    background: transparent;
+}
+
+.lightbox-img {
+    max-width: min(92vw, 1100px);
+    max-height: 86dvh;
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    object-fit: contain;
+}
+
+.lightbox-close {
+    position: fixed;
+    top: 1.1rem;
+    right: 1.25rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    font-size: 1.35rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.lightbox-close:hover {
+    background: rgba(255, 255, 255, 0.28);
+}
+
 /* 气泡快捷操作栏（悬浮不撑高消息流，::before 桥接气泡与工具栏间隙避免移入时丢悬停） */
 .bubble-actions {
     position: absolute;

@@ -170,3 +170,121 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(streamed, ['我也最爱下雨天宅着', '没啥事就别出去了呗'])
         self.assertEqual(result['ai_response'], streamed)
         self.assertEqual(result['total_tokens'], 19)
+
+    def test_generate_streams_smoothly_across_tool_call_boundary(self):
+        from app.chat.state import create_initial_state
+
+        state = create_initial_state()
+        state['user_input'] = '上次说的日料店叫啥'
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=0,
+                                 refresh_if_needed=lambda: None)
+
+        class ToolStreamingAgent:
+            def stream(self, payload, config=None, stream_mode=None):
+                yield (SimpleNamespace(type='AIMessageChunk', content='{"reply":["等我翻翻哈"]}'), {})
+                yield (SimpleNamespace(type='ToolMessage', content='找到以下早期对话片段：山葵屋'), {})
+                yield (SimpleNamespace(type='AIMessageChunk', content='{"reply":["找到啦，叫山葵屋",'), {})
+                yield (SimpleNamespace(
+                    type='AIMessageChunk', content='"他家鳗鱼饭超绝那家"]}',
+                    usage_metadata={'total_tokens': 32},
+                    response_metadata={'finish_reason': 'stop'},
+                ), {})
+
+        streamed = []
+        result = nodes.generate(
+            nodes.start_node(state, memory, ()),
+            memory,
+            (None, ToolStreamingAgent()),
+            on_bubble=streamed.append,
+        )
+        self.assertEqual(streamed, ['等我翻翻哈', '找到啦，叫山葵屋', '他家鳗鱼饭超绝那家'])
+        self.assertEqual(result['ai_response'], streamed)
+        self.assertEqual(result['total_tokens'], 32)
+
+    def test_generate_recovers_when_json_mode_returns_empty_text_after_tool_call(self):
+        from app.chat.state import create_initial_state
+
+        state = create_initial_state()
+        state['user_input'] = 'https://news.example.com/1'
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=0,
+                                 refresh_if_needed=lambda: None)
+
+        class FlakyPostToolAgent:
+            def __init__(self):
+                self.calls = 0
+
+            def stream(self, payload, config=None, stream_mode=None):
+                self.calls += 1
+                if self.calls == 1:
+                    yield ('messages', (SimpleNamespace(type='ToolMessage', content='链接正文...'), {}))
+                    yield ('messages', (SimpleNamespace(
+                        type='AIMessageChunk', content='',
+                        usage_metadata={'total_tokens': 2945},
+                        response_metadata={'finish_reason': 'stop'},
+                    ), {}))
+                    yield ('values', {'messages': payload['messages'] + [
+                        SimpleNamespace(type='tool', content='链接正文...'),
+                    ]})
+                else:
+                    yield ('messages', (SimpleNamespace(
+                        type='AIMessageChunk', content='{"reply":["这篇讲的是大额存单门槛下调的事"]}',
+                        usage_metadata={'total_tokens': 2990},
+                        response_metadata={'finish_reason': 'stop'},
+                    ), {}))
+
+        streamed = []
+        agent = FlakyPostToolAgent()
+        result = nodes.generate(
+            nodes.start_node(state, memory, ()),
+            memory,
+            (None, agent),
+            on_bubble=streamed.append,
+        )
+        self.assertEqual(agent.calls, 2)
+        self.assertEqual(streamed, ['这篇讲的是大额存单门槛下调的事'])
+        self.assertEqual(result['ai_response'], streamed)
+
+    def test_generate_recovers_when_vision_json_mode_returns_empty_text_without_tools(self):
+        from app.chat.state import create_initial_state
+
+        state = create_initial_state()
+        state['user_input'] = ''
+        state['turn_images'] = ['data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=']
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=0,
+                                 refresh_if_needed=lambda: None)
+
+        class FlakyVisionAgent:
+            def __init__(self):
+                self.payloads = []
+
+            def stream(self, payload, config=None, stream_mode=None):
+                self.payloads.append(payload)
+                if len(self.payloads) == 1:
+                    # 模拟推理模型消耗推理 Token 后直接产出空正文并 stop
+                    yield ('messages', (SimpleNamespace(
+                        type='AIMessageChunk', content='',
+                        usage_metadata={'total_tokens': 3224},
+                        response_metadata={'finish_reason': 'stop'},
+                    ), {}))
+                else:
+                    yield ('messages', (SimpleNamespace(
+                        type='AIMessageChunk', content='{"reply":["这个圆环把塔正好框在中间，构图太绝了"]}',
+                        usage_metadata={'total_tokens': 3480},
+                        response_metadata={'finish_reason': 'stop'},
+                    ), {}))
+
+        streamed = []
+        agent = FlakyVisionAgent()
+        result = nodes.generate(
+            nodes.start_node(state, memory, ()),
+            memory,
+            (None, agent),
+            on_bubble=streamed.append,
+        )
+        self.assertEqual(len(agent.payloads), 2)
+        retry_content = agent.payloads[1]['messages'][0]['content']
+        self.assertEqual(retry_content[0]['type'], 'image_url')
+        self.assertIn('不要返回空内容', retry_content[1]['text'])
+        self.assertEqual(streamed, ['这个圆环把塔正好框在中间，构图太绝了'])
+        self.assertEqual(result['ai_response'], streamed)
+        self.assertEqual(result['total_tokens'], 3224 + 3480)

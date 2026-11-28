@@ -48,7 +48,7 @@ class SQLitePool:
             db.executescript('''
                 CREATE TABLE history_messages (
                     user_id INTEGER, conversation_round INTEGER, user TEXT, assistant TEXT,
-                    created_at INTEGER,
+                    created_at INTEGER, attachments TEXT NULL,
                     PRIMARY KEY (user_id, conversation_round)
                 );
                 CREATE TABLE abstract_messages (user_id INTEGER PRIMARY KEY, abstract TEXT);

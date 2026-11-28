@@ -1,0 +1,50 @@
+# 小晚配套 SearXNG 配置（同时保留国内外常用引擎，由小晚后端按节点所处网络动态传入 engines= 选择）
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "xiaowan-searxng"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  # 必须开启 json 格式供小晚后端 API 调用
+  formats:
+    - html
+    - json
+
+server:
+  # 部署到生产环境时建议改为任意随机长字符串
+  secret_key: "xiaowan-local-searxng-change-me-in-prod"
+  limiter: false
+  image_proxy: false
+  method: "GET"
+
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 5.0
+  pool_connections: 64
+  pool_maxsize: 16
+  enable_http2: true
+
+engines:
+  # 海外与通用引擎（国内直连节点会被小晚后端自动跳过，不会触发等待超时）
+  - name: google
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: wikipedia
+    disabled: false
+
+  # 国内与双栖直连可用引擎
+  - name: bing
+    disabled: false
+  - name: bing news
+    disabled: false
+  - name: 360search
+    engine: 360search
+    disabled: false
+  - name: sogou
+    engine: sogou
+    disabled: false

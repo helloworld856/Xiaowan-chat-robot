@@ -100,3 +100,18 @@ class ModelSettingsTests(unittest.TestCase):
             self.assertEqual(agent['model']['model'], 'Custom-V2')
             self.assertFalse(agent['model']['http_client'].follow_redirects)
             self.assertFalse(agent['model']['http_async_client'].follow_redirects)
+
+    def test_dashscope_404_preserves_status_code_for_model_not_found_classification(self):
+        from dashscope.api_entities.dashscope_response import DashScopeAPIResponse
+        from app.llm.configuration import _connection_failure
+
+        factory._patch_tongyi_check_response()
+        from langchain_community.chat_models import tongyi as chat_tongyi_mod
+
+        fake_resp = DashScopeAPIResponse(status_code=404, request_id='req-1', code='InvalidParameter',
+                                         message='Model not exist.')
+        with self.assertRaises(Exception) as raised:
+            chat_tongyi_mod.check_response(fake_resp)
+        failure = _connection_failure(raised.exception)
+        self.assertFalse(failure.status)
+        self.assertEqual(failure.info, '模型不存在')

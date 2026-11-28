@@ -1,4 +1,4 @@
-import type {ModelInfo, ChatResponse, InputLimits} from './global_config.ts';
+import type {ModelInfo, ChatAttachment, ChatResponse, InputLimits} from './global_config.ts';
 import type {Preferences} from './preferences.ts';
 
 const base_url = window.location.origin;
@@ -25,6 +25,8 @@ export interface CancellableChatOptions {
     turnId?: string;
     signal?: AbortSignal;
     onBubble?: (text: string) => void;
+    attachmentIds?: string[];
+    quotedAttachmentIds?: string[];
 }
 
 async function requestJSON<T>(path: string, options: RequestInit, fallback: string,
@@ -101,7 +103,14 @@ function handleChatErrorResponse(path: string, response: Response, body: any, fa
     throw new Error(typeof body?.detail === 'string' ? body.detail : fallback);
 }
 
-async function requestChatStream(payload: {user_input: string; turn_id?: string},
+type ChatRequestPayload = {
+    user_input: string;
+    turn_id?: string;
+    attachment_ids?: string[];
+    quoted_attachment_ids?: string[];
+};
+
+async function requestChatStream(payload: ChatRequestPayload,
                                  options: CancellableChatOptions): Promise<ChatResponse> {
     const path = '/chat/stream';
     const generation = requestGeneration;
@@ -201,15 +210,29 @@ async function requestChatStream(payload: {user_input: string; turn_id?: string}
 }
 
 export function chatAPI(userInput: string, options?: CancellableChatOptions): Promise<ChatResponse> {
-    const payload = options?.turnId
-        ? {user_input: userInput, turn_id: options.turnId}
-        : {user_input: userInput};
+    const payload: ChatRequestPayload = {
+        user_input: userInput,
+        ...(options?.turnId ? {turn_id: options.turnId} : {}),
+        ...(options?.attachmentIds?.length ? {attachment_ids: options.attachmentIds} : {}),
+        ...(options?.quotedAttachmentIds?.length ? {quoted_attachment_ids: options.quotedAttachmentIds} : {}),
+    };
     if (options?.onBubble) {
         return requestChatStream(payload, options);
     }
     return requestJSON('/chat', {
         method: 'POST', signal: AbortSignal.timeout(180000), body: JSON.stringify(payload)
     }, '聊天请求失败', 'session', options?.signal);
+}
+
+export function uploadAttachmentAPI(
+    payload: {filename: string; mime_type: string; data_base64: string},
+    signal?: AbortSignal,
+): Promise<ChatAttachment> {
+    return requestJSON<ChatAttachment>('/attachments', {
+        method: 'POST',
+        signal: AbortSignal.timeout(60000),
+        body: JSON.stringify(payload),
+    }, '附件上传失败，请稍后重试', 'session', signal);
 }
 
 export function cancelChatAPI(turnId?: string) {
@@ -287,6 +310,7 @@ export interface ModelOptions {
         default_model: string;
         default_address: string;
         names: string[];
+        vision_models?: string[];
         saved_model: string | null;
         saved_address: string | null;
         has_saved_key: boolean;
@@ -295,6 +319,7 @@ export interface ModelOptions {
 export interface SavedSettings {
     model: ModelInfo | null;
     model_ready: boolean;
+    vision_ready?: boolean;
     preferences: Preferences;
     model_options?: ModelOptions;
 }

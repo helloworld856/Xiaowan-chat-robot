@@ -23,7 +23,7 @@ from app.system_config import ModelRuntimeConfig
 VALIDATION_TIMEOUT_SECONDS = 20
 MODEL_SWITCH_TIMEOUT_SECONDS = 25
 
-AgentSet = tuple[Runnable, Runnable, Runnable]
+AgentSet = tuple[Runnable, Runnable]
 
 
 class ModelConfigResponse(BaseModel):

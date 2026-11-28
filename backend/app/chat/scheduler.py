@@ -15,12 +15,15 @@ from typing import Any
 from app.account_logging import discard_logs_after, log_event, logger
 from app.accounts.portrait import UserPortraitStore, format_portrait_for_prompt, learn_portrait_from_turn
 from app.accounts.repository import User
+from app.chat.attachments import MAX_ATTACHMENTS_PER_TURN, AttachmentStore
 from app.chat.episodes import EpisodeMemoryStore
 from app.chat.memory import MemoryManager
 from app.chat.nodes import unpack_agents
 from app.chat.progress import ChatCancelled, chat_cancel_context
 from app.chat.state import AIChatState, create_initial_state
+from app.chat.tool_context import ChatToolContext, DEFAULT_CONFIRMATIONS, chat_tool_context
 from app.llm.configuration import AdminModelRuntime
+from app.llm.model_catalog import default_model_catalog
 from app.llm.personal_models import PersonalModelStore
 
 
@@ -64,7 +67,9 @@ class ChatSessions:
     def __init__(self, connection, *, personal_models: PersonalModelStore | None = None,
                  admin_model: AdminModelRuntime | None = None,
                  portraits: UserPortraitStore | None = None,
+                 attachments: AttachmentStore | None = None,
                  episodes: EpisodeMemoryStore | None = None,
+                 search_config=None,
                  graph_factory=None, max_running=4, max_waiting=8, wait_timeout=2.0):
         if max_running < 1 or max_waiting < 0 or not wait_timeout > 0:
             raise ValueError('invalid chat capacity')
@@ -72,7 +77,9 @@ class ChatSessions:
         self._personal_models = personal_models
         self._admin_model = admin_model
         self._portraits = portraits
+        self._attachments = attachments
         self._episodes = episodes
+        self._search_config = search_config
         self._graph_factory = graph_factory
         self._users: dict[int, AccountChat] = {}
         self._slots = asyncio.BoundedSemaphore(max_running)
@@ -105,6 +112,7 @@ class ChatSessions:
         try:
             yield
         finally:
+            DEFAULT_CONFIRMATIONS.clear_user(user_id)
             # 丢弃缓存的历史和摘要，下一轮从数据库重新读取。
             self._users.pop(user_id, None)
 
@@ -238,9 +246,77 @@ class ChatSessions:
                     if max_eligible >= 0:
                         self._schedule_episode_extraction(entry, user, max_eligible)
 
-    async def send(self, user: User, text: str, *, turn_id: str | None = None):
+    def _supports_vision_for(self, user: User) -> bool:
+        catalog = self._personal_models.catalog if self._personal_models is not None else default_model_catalog()
+        if user.role == 'admin':
+            snapshot = self._admin_model.snapshot() if self._admin_model is not None else None
+            if snapshot is None:
+                return False
+            model = snapshot[0]
+            if model.model_merchant not in catalog.providers:
+                return False
+            default_ep = catalog.endpoint(model.model_merchant)
+            effective_adapter = 'openai' if (model.base_url and model.base_url != default_ep.base_url) else default_ep.adapter
+            return catalog.supports_vision(model.model_merchant, model.model_name, adapter=effective_adapter)
+        if self._personal_models is None:
+            return False
+        personal = self._personal_models.get(user.id)
+        if personal is None:
+            return False
+        return catalog.supports_vision(personal.model_merchant, personal.model_name, adapter=personal.adapter)
+
+    def _prepare_turn_attachments(
+        self,
+        user: User,
+        attachment_ids: list[str] | None,
+        quoted_attachment_ids: list[str] | None,
+    ) -> tuple[list[dict], list[str], list[dict]] | None:
+        own_ids = list(dict.fromkeys(attachment_ids or ()))
+        quoted_ids = [aid for aid in dict.fromkeys(quoted_attachment_ids or ()) if aid not in own_ids]
+        if not own_ids and not quoted_ids:
+            return None
+        if len(own_ids) > MAX_ATTACHMENTS_PER_TURN or len(quoted_ids) > MAX_ATTACHMENTS_PER_TURN:
+            raise ChatNotStarted(422, f'单条消息最多添加 {MAX_ATTACHMENTS_PER_TURN} 个附件')
+        if self._attachments is None:
+            raise ChatNotStarted(503, '附件服务尚未就绪，请稍后重试')
+
+        public_items: list[dict] = []
+        image_urls: list[str] = []
+        documents: list[dict] = []
+
+        for is_quoted, group in ((False, own_ids), (True, quoted_ids)):
+            for att_id in group:
+                meta = self._attachments.get(user.id, att_id)
+                if meta is None:
+                    raise ChatNotStarted(422, '部分附件不存在或已过期，请重新选择后再发送')
+                if not is_quoted:
+                    public_items.append(meta.to_public().model_dump(exclude_none=True))
+                if meta.kind == 'image':
+                    data_url = self._attachments.image_data_url(user.id, att_id)
+                    if not data_url:
+                        raise ChatNotStarted(422, '图片附件读取失败，请重新选择图片')
+                    image_urls.append(data_url)
+                elif meta.extracted_text:
+                    documents.append({
+                        'name': meta.name,
+                        'text': meta.extracted_text,
+                        'truncated': meta.truncated,
+                        'quoted': is_quoted,
+                    })
+
+        if image_urls and not self._supports_vision_for(user):
+            raise ChatNotStarted(
+                422,
+                '当前所选模型暂不支持图片识别，请切换到支持视觉的模型（如 deepseek-v4-flash），或仅发送文字与文档',
+            )
+        return public_items, image_urls, documents
+
+    async def send(self, user: User, text: str, *, turn_id: str | None = None,
+                   attachment_ids: list[str] | None = None,
+                   quoted_attachment_ids: list[str] | None = None):
+        media = self._prepare_turn_attachments(user, attachment_ids, quoted_attachment_ids)
         start, entry, handle = await self._admit(user, turn_id=turn_id)
-        work = asyncio.create_task(self._execute(entry, user, text, handle=handle))
+        work = asyncio.create_task(self._execute(entry, user, text, handle=handle, media=media))
         entry.worker = work
         work.add_done_callback(self._consume_error)
         # HTTP 请求断开后，后台任务仍持有账号锁和执行位，直到本轮处理或取消收尾结束。
@@ -248,8 +324,11 @@ class ChatSessions:
         self._finish_turn(entry, user, text, result, start)
         return result
 
-    async def start_stream(self, user: User, text: str, *, turn_id: str | None = None):
+    async def start_stream(self, user: User, text: str, *, turn_id: str | None = None,
+                           attachment_ids: list[str] | None = None,
+                           quoted_attachment_ids: list[str] | None = None):
         """准入并启动流式对话，返回异步事件队列：('bubble', str) / ('done', dict) / ('cancelled', None) / ('error', Exception)。"""
+        media = self._prepare_turn_attachments(user, attachment_ids, quoted_attachment_ids)
         start, entry, handle = await self._admit(user, turn_id=turn_id)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
@@ -260,7 +339,7 @@ class ChatSessions:
             if not loop.is_closed():
                 loop.call_soon_threadsafe(queue.put_nowait, ('bubble', bubble))
 
-        work = asyncio.create_task(self._execute(entry, user, text, handle=handle, on_bubble=on_bubble))
+        work = asyncio.create_task(self._execute(entry, user, text, handle=handle, on_bubble=on_bubble, media=media))
         entry.worker = work
 
         def on_done(task: asyncio.Task) -> None:
@@ -370,9 +449,14 @@ class ChatSessions:
             task.exception()
 
     async def _execute(self, entry: AccountChat, user: User, text: str, *,
-                       handle: TurnHandle | None = None, on_bubble=None):
+                       handle: TurnHandle | None = None, on_bubble=None, media=None):
         cancel_event = handle.cancel_event if handle is not None else None
-        run_call = partial(self._run, entry, user, text, on_bubble=on_bubble) if on_bubble is not None else partial(
+        extra_kwargs: dict[str, Any] = {}
+        if on_bubble is not None:
+            extra_kwargs['on_bubble'] = on_bubble
+        if media is not None:
+            extra_kwargs['media'] = media
+        run_call = partial(self._run, entry, user, text, **extra_kwargs) if extra_kwargs else partial(
             self._run, entry, user, text
         )
         try:
@@ -429,7 +513,7 @@ class ChatSessions:
             return '暂无'
         return format_portrait_for_prompt(self._portraits.get(user_id))
 
-    def _run(self, entry: AccountChat, user: User, text: str, *, on_bubble=None):
+    def _run(self, entry: AccountChat, user: User, text: str, *, on_bubble=None, media=None):
         agents = self._agents_for(user)
         if entry.runtime is None:
             entry.runtime = self._initialize(user.id)
@@ -438,9 +522,24 @@ class ChatSessions:
         state = deepcopy(runtime.state)
         state['user_input'] = text
         state['user_portrait'] = self._portrait_context(user.id)
+        if media is not None:
+            public_items, image_urls, documents = media
+            state['attachments'] = public_items
+            state['turn_images'] = image_urls
+            state['turn_documents'] = documents
+        else:
+            state['attachments'] = []
+            state['turn_images'] = []
+            state['turn_documents'] = []
         configurable = {'agents': agents}
         if on_bubble is not None:
             configurable['on_bubble'] = on_bubble
-        result = runtime.graph.invoke(state, config={'configurable': configurable})
+        tool_ctx = ChatToolContext(
+            user_id=user.id,
+            connection=self._connection,
+            search_config=self._search_config,
+        )
+        with chat_tool_context(tool_ctx):
+            result = runtime.graph.invoke(state, config={'configurable': configurable})
         runtime.state = result
         return result

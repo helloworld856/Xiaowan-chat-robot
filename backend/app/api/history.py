@@ -53,6 +53,9 @@ async def clear_history(request: Request):
     try:
         async with request.app.state.chat.maintenance(user_id):
             await run_in_threadpool(reset_chat_history, request.app.state.db, user_id)
+            att_store = getattr(request.app.state, 'attachments', None)
+            if att_store is not None:
+                await run_in_threadpool(att_store.clear_user, user_id)
     except ChatNotStarted as error:
         raise HTTPException(error.status_code, str(error)) from None
     except Exception as error:

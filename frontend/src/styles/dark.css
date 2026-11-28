@@ -127,8 +127,9 @@ html.theme4 :is(#profile-dialog button, .avatar-choice, .confirm-actions button,
     outline-color: #9aa3b2;
 }
 
-/* --- 引用条、时间分隔与气泡操作栏 --- */
-html.theme4 #chat-quote-bar { box-shadow: 0 2px 10px rgb(0 0 0 / 32%); }
+/* --- 引用条、附件条、时间分隔与气泡操作栏 --- */
+html.theme4 :is(#chat-quote-bar, #chat-attachments-bar) { box-shadow: 0 2px 10px rgb(0 0 0 / 32%); }
+html.theme4 .composer-attachment-remove { background: rgba(255, 255, 255, 0.14); }
 html.theme4 .bubble-quote { background: rgba(255, 255, 255, 0.1); }
 html.theme4 .bubble-actions { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
 html.theme4 .sendbtn.is-stop {

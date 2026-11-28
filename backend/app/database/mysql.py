@@ -70,6 +70,7 @@ def initialize_schema(pool):
                 user MEDIUMTEXT,
                 assistant MEDIUMTEXT,
                 created_at BIGINT NULL,
+                attachments TEXT NULL,
                 PRIMARY KEY (user_id, conversation_round)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ''')
@@ -86,6 +87,12 @@ def initialize_schema(pool):
         cursor.execute("SHOW COLUMNS FROM history_messages LIKE 'created_at'")
         if cursor.fetchone() is None:
             cursor.execute('ALTER TABLE history_messages ADD COLUMN created_at BIGINT NULL')
+        cursor.execute("SHOW COLUMNS FROM history_messages LIKE 'attachments'")
+        if cursor.fetchone() is None:
+            cursor.execute('ALTER TABLE history_messages ADD COLUMN attachments TEXT NULL')
+        cursor.execute("SHOW INDEX FROM history_messages WHERE Key_name = 'idx_history_messages_user_created'")
+        if cursor.fetchone() is None:
+            cursor.execute('ALTER TABLE history_messages ADD INDEX idx_history_messages_user_created (user_id, created_at)')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS abstract_messages (
                 user_id BIGINT UNSIGNED PRIMARY KEY,

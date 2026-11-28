@@ -9,6 +9,12 @@ class AIChatState(TypedDict, total=False):
     user_portrait: str
     # 按需混合召回的情景事件记忆
     recalled_episodes: Optional[str]
+    # 本轮用户消息附带的公开附件元数据（随消息落库）
+    attachments: List[Dict]
+    # 本轮送入视觉模型的图片 Data URL 列表（含本轮新图或引用的旧图）
+    turn_images: List[str]
+    # 本轮提取的轻量文档正文列表
+    turn_documents: List[Dict]
     # 回复
     ai_response: List[str]
     # 本轮对话是否已保存到数据库
@@ -34,6 +40,9 @@ def create_initial_state(next_round: int = 0) -> AIChatState:
         'user_input': '',
         'user_portrait': '暂无',
         'recalled_episodes': None,
+        'attachments': [],
+        'turn_images': [],
+        'turn_documents': [],
         'ai_response': [],
         'saved': False,
         'ai_monologue': '',

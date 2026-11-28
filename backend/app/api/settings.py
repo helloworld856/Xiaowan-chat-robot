@@ -16,6 +16,7 @@ class ProviderOptions(BaseModel):
     default_model: str
     default_address: str
     names: list[str]
+    vision_models: list[str] = []
     saved_model: str | None = None
     saved_address: str | None = None
     has_saved_key: bool = False
@@ -28,6 +29,7 @@ class ModelOptions(BaseModel):
 
 class UserSettings(AppSettings):
     model_ready: bool
+    vision_ready: bool = False
     model_options: ModelOptions
 
 
@@ -55,7 +57,8 @@ def model_options_for(request: Request) -> ModelOptions:
     return ModelOptions(default_provider=catalog.default_provider, providers={
         merchant: ProviderOptions(default_model=provider.default_model,
                                   default_address=provider.base_url,
-                                  names=provider.models, saved_model=saved_models.get(merchant),
+                                  names=provider.models, vision_models=provider.vision_models,
+                                  saved_model=saved_models.get(merchant),
                                   saved_address=addresses.get(merchant), has_saved_key=merchant in saved_keys)
         for merchant, provider in catalog.providers.items()
     })
@@ -63,6 +66,7 @@ def model_options_for(request: Request) -> ModelOptions:
 
 def settings_for(request: Request, preferences: Preferences) -> UserSettings:
     user = request.state.user
+    catalog = request.app.state.personal_models.catalog
     options = model_options_for(request)
     if user.role != 'admin':
         try:
@@ -70,11 +74,21 @@ def settings_for(request: Request, preferences: Preferences) -> UserSettings:
         except (OSError, ValueError) as error:
             log_event('personal_model_read_failed', level=WARNING, error=type(error).__name__)
             personal = None
+        vision_ready = bool(
+            personal and catalog.supports_vision(personal.model_merchant, personal.model_name, adapter=personal.adapter)
+        )
         # 个人模型只返回公开字段，API Key 留在服务端。
         return UserSettings(model=personal.public_model() if personal else None,
-                            preferences=preferences, model_ready=personal is not None, model_options=options)
+                            preferences=preferences, model_ready=personal is not None,
+                            vision_ready=vision_ready, model_options=options)
     model, ready = request.app.state.model_configuration.admin_status()
-    return UserSettings(model=model, preferences=preferences, model_ready=ready, model_options=options)
+    vision_ready = False
+    if ready and model is not None and model.model_merchant in catalog.providers:
+        default_ep = catalog.endpoint(model.model_merchant)
+        effective_adapter = 'openai' if (model.base_url and model.base_url != default_ep.base_url) else default_ep.adapter
+        vision_ready = catalog.supports_vision(model.model_merchant, model.model_name, adapter=effective_adapter)
+    return UserSettings(model=model, preferences=preferences, model_ready=ready,
+                        vision_ready=vision_ready, model_options=options)
 
 
 @router.get('/settings', response_model=UserSettings)

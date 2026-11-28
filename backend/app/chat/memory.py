@@ -12,7 +12,27 @@ def _row_to_item(row) -> dict:
     item = {'conversation_round': row[0], 'user': row[1], 'assistant': json.loads(row[2])}
     if len(row) > 3 and row[3] is not None:
         item['created_at'] = int(row[3])
+    if len(row) > 4 and row[4]:
+        try:
+            attachments = json.loads(row[4])
+            if isinstance(attachments, list) and attachments:
+                item['attachments'] = attachments
+        except ValueError:
+            pass
     return item
+
+
+def _format_attachment_tag(attachments: list[dict] | None) -> str:
+    if not attachments:
+        return ''
+    parts = []
+    for att in attachments:
+        if not isinstance(att, dict):
+            continue
+        label = '图片' if att.get('kind') == 'image' else '文档'
+        name = str(att.get('name') or '').strip()
+        parts.append(f'[发送了{label}：{name}]' if name else f'[发送了{label}]')
+    return ' '.join(parts)
 
 
 def prompt_history(rows: list[dict]) -> list[dict]:
@@ -29,7 +49,10 @@ def format_history_dialogue(rows: list[dict], *, bot_name: str = '小晚') -> st
         return '无'
     blocks = []
     for row in rows:
-        lines = [f"对方：{row['user']}"]
+        tag = _format_attachment_tag(row.get('attachments'))
+        user_text = (row.get('user') or '').strip()
+        combined_user = f'{tag} {user_text}'.strip() if tag else user_text
+        lines = [f"对方：{combined_user}"]
         lines.extend(f"{bot_name}：{part}" for part in row['assistant'])
         blocks.append('\n'.join(lines))
     return '\n\n'.join(blocks)
@@ -45,7 +68,7 @@ def _read_history(cursor, user_id: int, k: int, front: bool = True):
     ascending = front if k >= 0 else not front
     direction = 'ASC' if ascending else 'DESC'
     sql = (
-        'SELECT conversation_round, user, assistant, created_at FROM history_messages '
+        'SELECT conversation_round, user, assistant, created_at, attachments FROM history_messages '
         f'WHERE user_id = %s ORDER BY conversation_round {direction}'
     )
     params = (user_id,)
@@ -103,18 +126,22 @@ class MemoryManager:
         }
         if message.get('created_at') is not None:
             item['created_at'] = int(message['created_at'])
+        if message.get('attachments'):
+            item['attachments'] = [dict(att) for att in message['attachments']]
         return item
 
     def record_message(self, message) -> bool:
         created_at = message.get('created_at')
+        attachments = message.get('attachments')
+        attachments_json = json.dumps(attachments, ensure_ascii=False) if attachments else None
         try:
             with self._connection() as db:
                 with db.cursor() as cursor:
                     cursor.execute(
-                        'INSERT INTO history_messages (user_id, conversation_round, user, assistant, created_at) '
-                        'VALUES (%s, %s, %s, %s, %s)',
+                        'INSERT INTO history_messages (user_id, conversation_round, user, assistant, created_at, attachments) '
+                        'VALUES (%s, %s, %s, %s, %s, %s)',
                         (self.user_id, message['conversation_round'], message['user'],
-                         json.dumps(message['assistant'], ensure_ascii=False), created_at),
+                         json.dumps(message['assistant'], ensure_ascii=False), created_at, attachments_json),
                     )
                 self._commit(db)
         except Exception as error:

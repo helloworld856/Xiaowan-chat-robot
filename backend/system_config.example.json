@@ -81,6 +81,29 @@
       "recency_weight": 0.15
     }
   },
+  // SearXNG 联网搜索、国内外区域自动识别与多节点切换设置。
+  "search": {
+    // 设为 true 时启用 SearXNG 联网搜索工具；实例未就绪时自动优雅降级不影响聊天。
+    "enabled": true,
+    // 可用的 SearXNG 实例基础地址列表，支持多个节点自动探活测速与故障切换。
+    "urls": ["http://127.0.0.1:8080"],
+    // 搜索区域策略：auto 自动区分国内与海外网络选择节点和引擎，cn 固定国内源，global 固定海外源。
+    "region": "auto",
+    // 可选：部署在国内网络的 SearXNG 实例地址列表；留空时从 urls 中自动识别。
+    "cn_urls": [],
+    // 可选：部署在海外网络的 SearXNG 实例地址列表；留空时从 urls 中自动识别。
+    "global_urls": [],
+    // 使用国内节点时向 SearXNG 请求的搜索引擎列表，用英文逗号分隔。
+    "cn_engines": "bing,bing news,360search,sogou",
+    // 使用海外节点时向 SearXNG 请求的搜索引擎列表，用英文逗号分隔。
+    "global_engines": "google,bing,duckduckgo,wikipedia",
+    // 单次 SearXNG 搜索请求的超时秒数。
+    "timeout_seconds": 6,
+    // 单次搜索返回给模型的最大结果条数。
+    "max_results": 5,
+    // 相同搜索词在内存中的缓存秒数，设为 0 关闭缓存。
+    "cache_ttl_seconds": 600
+  },
   // 厂商默认地址、协议和可选模型。
   "models": {
     // 默认厂商，须在 providers 中出现。
@@ -97,6 +120,8 @@
         "default_model": "deepseek-v4-flash",
         // 网页允许选择的模型名列表。
         "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        // 支持原生图片输入的模型名列表。
+        "vision_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
         // 管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。
         "admin_allowed_base_urls": []
       },
@@ -109,7 +134,9 @@
         // 默认模型名，须包含在 models 中。
         "default_model": "qwen3-max",
         // 网页允许选择的模型名列表。
-        "models": ["qwen3-max", "qwen-plus", "qwen-turbo", "qwen-flash"],
+        "models": ["qwen3-max", "qwen-max", "qwen-plus", "qwen-turbo", "qwen-flash"],
+        // 支持原生图片输入的模型名列表。
+        "vision_models": [],
         // 管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。
         "admin_allowed_base_urls": []
       }

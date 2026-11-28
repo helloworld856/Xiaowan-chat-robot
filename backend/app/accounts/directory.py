@@ -13,6 +13,7 @@ from app.llm.model_catalog import ModelCatalog
 from app.accounts.profile import ProfileStore
 from app.accounts.portrait import UserPortraitStore
 from app.accounts.preferences import FilePreferencesStore, Preferences, UserPreferencesStore
+from app.chat.attachments import AttachmentStore
 from app.system_config import DefaultsConfig
 
 
@@ -23,6 +24,7 @@ class UserDirectoryStore:
         self.paths = profiles.paths
         self.models = PersonalModelStore(self.paths, catalog)
         self.portraits = UserPortraitStore(self.paths)
+        self.attachments = AttachmentStore(self.paths)
         initial = defaults or DefaultsConfig()
         self.preferences = FilePreferencesStore(
             self.paths, legacy_preferences,

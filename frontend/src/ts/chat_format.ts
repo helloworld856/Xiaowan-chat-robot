@@ -1,11 +1,13 @@
 export interface QuoteTarget {
     speaker: string;
     text: string;
+    attachmentIds?: string[];
+    hasImage?: boolean;
 }
 
 export const TIME_DIVIDER_GAP_MS = 5 * 60 * 1000;
 const MAX_QUOTE_SNIPPET_CHARS = 240;
-const QUOTE_HEADER_PATTERN = /^【引用 ([^：\r\n]{1,40})：([\s\S]+?)】\r?\n([\s\S]+)$/;
+const QUOTE_HEADER_PATTERN = /^【引用 ([^：\r\n]{1,40})：([\s\S]+?)】\r?\n([\s\S]*)$/;
 
 function pad2(value: number): string {
     return String(value).padStart(2, '0');
@@ -63,4 +65,11 @@ export function composeQuotedMessage(body: string, quote: QuoteTarget | null): s
     const snippet = normalizeQuoteSnippet(quote.text).replace(/】/g, '﹞');
     if (!snippet) return body;
     return `【引用 ${speaker}：${snippet}】\n${body}`;
+}
+
+export function formatFileSize(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

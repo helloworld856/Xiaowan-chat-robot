@@ -5,7 +5,7 @@ import os
 from collections import ChainMap
 from io import StringIO
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -14,7 +14,7 @@ from app.accounts.files import protect_file, read_text
 from app.config import BACKEND_ROOT
 from app.json_files import (atomic_write_text, backup_provider_migration, dotenv_assignment,
                             remove_json_section_field, strip_json_line_comments)
-from app.llm.model_catalog import ModelCatalog, default_model_catalog
+from app.llm.model_catalog import BaseURL, ModelCatalog, default_model_catalog
 
 MAX_PASSWORD_INPUT_LENGTH = 256
 
@@ -144,6 +144,54 @@ class MemoryConfig(_ConfigSection):
     )
 
 
+class SearchConfig(_ConfigSection):
+    enabled: bool = Field(
+        default=True,
+        description='设为 true 时启用 SearXNG 联网搜索工具；实例未就绪时自动优雅降级不影响聊天。',
+    )
+    urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
+        default_factory=lambda: ['http://127.0.0.1:8080'],
+        min_length=1,
+        description='可用的 SearXNG 实例基础地址列表，支持多个节点自动探活测速与故障切换。',
+    )
+    region: Literal['auto', 'cn', 'global'] = Field(
+        default='auto',
+        description='搜索区域策略：auto 自动区分国内与海外网络选择节点和引擎，cn 固定国内源，global 固定海外源。',
+    )
+    cn_urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
+        default_factory=list,
+        description='可选：部署在国内网络的 SearXNG 实例地址列表；留空时从 urls 中自动识别。',
+    )
+    global_urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
+        default_factory=list,
+        description='可选：部署在海外网络的 SearXNG 实例地址列表；留空时从 urls 中自动识别。',
+    )
+    cn_engines: str = Field(
+        default='bing,bing news,360search,sogou',
+        min_length=1,
+        max_length=500,
+        description='使用国内节点时向 SearXNG 请求的搜索引擎列表，用英文逗号分隔。',
+    )
+    global_engines: str = Field(
+        default='google,bing,duckduckgo,wikipedia',
+        min_length=1,
+        max_length=500,
+        description='使用海外节点时向 SearXNG 请求的搜索引擎列表，用英文逗号分隔。',
+    )
+    timeout_seconds: int = Field(
+        default=6, ge=1, le=30,
+        description='单次 SearXNG 搜索请求的超时秒数。',
+    )
+    max_results: int = Field(
+        default=5, ge=1, le=10,
+        description='单次搜索返回给模型的最大结果条数。',
+    )
+    cache_ttl_seconds: int = Field(
+        default=600, ge=0, le=86400,
+        description='相同搜索词在内存中的缓存秒数，设为 0 关闭缓存。',
+    )
+
+
 class PasswordConfig(_ConfigSection):
     min_length: int = Field(default=6, ge=1, le=MAX_PASSWORD_INPUT_LENGTH, description='注册或改密时，新密码的最少字符数。')
     max_length: int = Field(default=15, ge=1, le=MAX_PASSWORD_INPUT_LENGTH, description='注册或改密时，新密码的最多字符数，上限为 256。')
@@ -203,6 +251,7 @@ class SystemConfig(_ConfigSection):
     server: ServerConfig = Field(default_factory=ServerConfig, description='小晚后端监听设置。')
     chat: ChatConfig = Field(default_factory=ChatConfig, description='聊天队列、输入与历史设置。')
     memory: MemoryConfig = Field(default_factory=MemoryConfig, description='长期情景事件记忆、召回策略与本地向量模型设置。')
+    search: SearchConfig = Field(default_factory=SearchConfig, description='SearXNG 联网搜索、国内外区域自动识别与多节点切换设置。')
     models: ModelCatalog = Field(default_factory=default_model_catalog, description='厂商默认地址、协议和可选模型。')
     auth: AuthConfig = Field(default_factory=AuthConfig, description='登录会话、密码规则与认证限流。')
     profile: ProfileConfig = Field(default_factory=ProfileConfig, description='个人资料的校验规则。')

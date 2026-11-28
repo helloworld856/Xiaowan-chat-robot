@@ -138,6 +138,97 @@ test('useChat cancels in-flight sends back to draft/quote and records timestamps
     assert.equal(state.busy.value, false);
 });
 
+test('useChat supports image/document uploads, friendly non-vision model guard, cancel restore, and quote re-attach', async () => {
+    let visionSupported = false;
+    let chatCalls = [];
+    let uploadedPayloads = [];
+    let pendingChatResolve;
+
+    class AuthRequiredError extends Error {}
+    class CancelledRequestError extends Error {}
+    class UserCancelledChatError extends Error {}
+    class ChatNotStartedError extends Error {
+        constructor(message, retryable = true) { super(message); this.retryable = retryable; }
+    }
+
+    let uploadSeq = 0;
+    const useChatModule = compileModule(fs.readFileSync(new URL('../src/composables/useChat.ts', import.meta.url), 'utf8'), {
+        '../ts/api.ts': {
+            AuthRequiredError,
+            CancelledRequestError,
+            UserCancelledChatError,
+            ChatNotStartedError,
+            getRequestGeneration: () => 0,
+            uploadAttachmentAPI: async payload => {
+                uploadedPayloads.push(payload);
+                const id = `att_${String(++uploadSeq).padStart(16, '0')}`;
+                const kind = payload.mime_type.startsWith('image/') ? 'image' : 'document';
+                return {id, kind, name: payload.filename, mime_type: payload.mime_type || 'text/plain', size: 128, url: `/attachments/${id}`};
+            },
+            chatAPI: (text, options) => {
+                chatCalls.push({text, options});
+                if (pendingChatResolve === 'hang') return new Promise(() => {});
+                return Promise.resolve({response: ['收到啦'], conversation_round: chatCalls.length, saved: true});
+            },
+            cancelChatAPI: async () => ({ok: true, cancelled: true}),
+            historyAPI: async () => ({history_messages: []}),
+        },
+        '../ts/global_config.ts': {inputLimits: {max_message_chars: 8000}},
+        '../ts/chat_format.ts': chatFormat,
+    });
+
+    const alerts = [];
+    const state = useChatModule.useChat({
+        canSend: () => true,
+        visionReady: () => visionSupported,
+        showAlert: msg => alerts.push(msg),
+        onBusyChange() {},
+        scrollAfterRender() {},
+    });
+
+    const fakeFile = (name, type, content = 'hello') => ({
+        name,
+        type,
+        size: content.length,
+        arrayBuffer: async () => new TextEncoder().encode(content).buffer,
+    });
+
+    // 1. 当前模型不支持视觉时：添加图片给出友好提示且不上传；添加文档正常上传并发送
+    await state.addFiles([fakeFile('photo.png', 'image/png', 'pngbytes')]);
+    assert.equal(uploadedPayloads.length, 0);
+    assert.match(alerts.at(-1), /暂不支持图片识别/);
+
+    await state.addFiles([fakeFile('notes.md', 'text/markdown', '# 笔记')]);
+    assert.equal(state.attachments.value.length, 1);
+    assert.equal(state.attachments.value[0].kind, 'document');
+    await state.sendMessage();
+    assert.equal(chatCalls.length, 1);
+    assert.deepEqual(chatCalls[0].options.attachmentIds, ['att_0000000000000001']);
+    assert.equal(state.attachments.value.length, 0);
+
+    // 2. 切换为支持视觉的模型后：纯发图片（无文字）可发送，中途停止时附件回填到待发送栏
+    visionSupported = true;
+    await state.addFiles([fakeFile('cat.png', 'image/png', 'pngbytes')]);
+    assert.equal(state.attachments.value.length, 1);
+    pendingChatResolve = 'hang';
+    const hanging = state.sendMessage();
+    await flushAsync();
+    assert.equal(state.attachments.value.length, 0);
+    state.cancelSend();
+    await hanging;
+    assert.equal(state.attachments.value.length, 1);
+    assert.equal(state.attachments.value[0].name, 'cat.png');
+
+    // 重新正常发出图片，随后引用该图片气泡追问时携带 quotedAttachmentIds
+    pendingChatResolve = null;
+    await state.sendMessage();
+    const imgTurn = state.entries.value.at(-1);
+    state.setQuote('你', imgTurn.user, imgTurn.attachments);
+    state.draft.value = '放大看看胡须';
+    await state.sendMessage();
+    assert.deepEqual(chatCalls.at(-1).options.quotedAttachmentIds, ['att_0000000000000002']);
+});
+
 test('ChatComposer switches between send and stop, and displays/clears quote bar', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class { observe() {} disconnect() {} };

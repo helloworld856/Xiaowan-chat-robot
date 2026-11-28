@@ -25,7 +25,7 @@ def model_text(content: object) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+            elif isinstance(block, dict) and block.get('type') in ('text', 'output_text') and isinstance(block.get('text'), str):
                 parts.append(block['text'])
         text = ''.join(parts)
     else:
@@ -122,7 +122,7 @@ def chunk_visible_text(content: object) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+            elif isinstance(block, dict) and block.get('type') in ('text', 'output_text') and isinstance(block.get('text'), str):
                 parts.append(block['text'])
         return ''.join(parts)
     return ''
@@ -144,6 +144,18 @@ class ReplyBubbleStreamParser:
         self._str_start = 0
         self._escaped = False
         self.emitted: list[str] = []
+        self.prior_turn_bubbles: list[str] = []
+
+    def advance_after_tool(self) -> None:
+        """工具返回后开启新一轮流式提取，保留已推送给前端的前置气泡并重置当前 JSON 缓冲。"""
+        if self.emitted:
+            self.prior_turn_bubbles.extend(self.emitted)
+        self._buffer = ''
+        self._pos = 0
+        self._state = 'find_reply'
+        self._str_start = 0
+        self._escaped = False
+        self.emitted = []
 
     @property
     def raw_text(self) -> str:

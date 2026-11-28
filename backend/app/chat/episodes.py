@@ -231,7 +231,7 @@ class EpisodeMemoryStore:
             return []
         with self._connection() as db, db.cursor() as cursor:
             cursor.execute(
-                'SELECT conversation_round, user, assistant, created_at FROM history_messages '
+                'SELECT conversation_round, user, assistant, created_at, attachments FROM history_messages '
                 'WHERE user_id = %s AND conversation_round > %s AND conversation_round <= %s '
                 'ORDER BY conversation_round ASC LIMIT %s',
                 (user_id, watermark, max_eligible_round, self.config.extract_batch_rounds),
@@ -239,15 +239,23 @@ class EpisodeMemoryStore:
             rows = cursor.fetchall()
         if len(rows) < self.config.extract_batch_rounds:
             return []
-        return [
-            {
+        result = []
+        for row in rows:
+            item = {
                 'conversation_round': int(row[0]),
                 'user': row[1],
                 'assistant': json.loads(row[2]),
                 **({'created_at': int(row[3])} if row[3] is not None else {}),
             }
-            for row in rows
-        ]
+            if len(row) > 4 and row[4]:
+                try:
+                    parsed_att = json.loads(row[4])
+                    if isinstance(parsed_att, list) and parsed_att:
+                        item['attachments'] = parsed_att
+                except ValueError:
+                    pass
+            result.append(item)
+        return result
 
     def extract_and_save_batch(self, user_id: int, summary_agent, max_eligible_round: int, *,
                                cancel_event: Event | None = None) -> bool:

@@ -1,12 +1,12 @@
-import {nextTick, reactive, ref} from 'vue';
+import {computed, nextTick, reactive, ref} from 'vue';
 import {
     AuthRequiredError, CancelledRequestError, ChatNotStartedError, UserCancelledChatError,
-    cancelChatAPI, chatAPI, getRequestGeneration, historyAPI
+    cancelChatAPI, chatAPI, getRequestGeneration, historyAPI, uploadAttachmentAPI
 } from '../ts/api.ts';
 import {composeQuotedMessage, parseQuotedMessage} from '../ts/chat_format.ts';
 import type {QuoteTarget as QuoteDraft} from '../ts/chat_format.ts';
 import {inputLimits} from '../ts/global_config.ts';
-import type {ChatResponse, ConversationItem} from '../ts/global_config.ts';
+import type {ChatAttachment, ChatResponse, ConversationItem} from '../ts/global_config.ts';
 
 export type {QuoteDraft};
 
@@ -17,6 +17,8 @@ export interface ChatTurn {
     user: string;
     replies: string[];
     createdAt?: number | null;
+    attachments?: ChatAttachment[];
+    quotedAttachmentIds?: string[];
     failure?: ChatNotStartedError;
 }
 
@@ -31,6 +33,7 @@ type ChatEntry = ChatTurn | DeliveryNotice;
 
 interface ChatOptions {
     canSend: () => boolean;
+    visionReady?: () => boolean;
     showAlert: (message: string) => void;
     onBusyChange: (busy: boolean) => void;
     scrollAfterRender: (forceBottom: boolean) => void;
@@ -45,10 +48,101 @@ interface ActiveTurnControl {
 
 const firstReplyMetric = 'xiaowan.chat.first-reply';
 const firstReplyDelayMs = 700;
+const maxAttachmentsPerTurn = 4;
+const maxImageDimension = 1280;
+const compressThresholdBytes = 350 * 1024;
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+const visionUnsupportedMessage = '当前所选模型暂不支持图片识别，请切换到支持视觉的模型（如 deepseek-v4-flash），或仅发送文字与文档。';
+
+function bytesToBase64(bytes: Uint8Array): string {
+    let out = '';
+    const len = bytes.length;
+    for (let i = 0; i < len; i += 3) {
+        const b0 = bytes[i];
+        const b1 = i + 1 < len ? bytes[i + 1] : 0;
+        const b2 = i + 2 < len ? bytes[i + 2] : 0;
+        out += BASE64_CHARS[b0 >> 2];
+        out += BASE64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+        out += i + 1 < len ? BASE64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+        out += i + 2 < len ? BASE64_CHARS[b2 & 63] : '=';
+    }
+    return out;
+}
+
+function isLikelyImageFile(file: {name?: string; type?: string}): boolean {
+    const mime = (file.type || '').toLowerCase();
+    if (mime.startsWith('image/')) return true;
+    const lower = (file.name || '').toLowerCase();
+    return /\.(png|jpe?g|webp|gif|bmp|svg)$/.test(lower);
+}
+
+async function prepareUploadPayload(file: File): Promise<{filename: string; mime_type: string; data_base64: string}> {
+    const mime = (file.type || '').toLowerCase();
+    const canCompress = (mime === 'image/jpeg' || mime === 'image/png' || mime === 'image/webp')
+        && typeof createImageBitmap === 'function'
+        && typeof document !== 'undefined'
+        && typeof document.createElement === 'function';
+
+    if (canCompress) {
+        try {
+            const bitmap = await createImageBitmap(file);
+            try {
+                const {width, height} = bitmap;
+                const scale = Math.min(1, maxImageDimension / Math.max(width, height));
+                if (scale < 1 || file.size > compressThresholdBytes) {
+                    const targetW = Math.max(1, Math.round(width * scale));
+                    const targetH = Math.max(1, Math.round(height * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = targetW;
+                    canvas.height = targetH;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+                        const dataUrl = canvas.toDataURL('image/webp', 0.84);
+                        const finalUrl = dataUrl.startsWith('data:image/webp')
+                            ? dataUrl
+                            : canvas.toDataURL('image/jpeg', 0.85);
+                        const comma = finalUrl.indexOf(',');
+                        if (comma > 0) {
+                            const outMime = finalUrl.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+                            const ext = outMime === 'image/webp' ? '.webp' : '.jpg';
+                            const baseName = (file.name || 'image').replace(/\.[^.]+$/, '');
+                            return {
+                                filename: `${baseName}${ext}`,
+                                mime_type: outMime,
+                                data_base64: finalUrl.slice(comma + 1),
+                            };
+                        }
+                    }
+                }
+            } finally {
+                bitmap.close?.();
+            }
+        } catch {
+            // 浏览器解码失败时回退原文件直传，由服务端魔数校验把关。
+        }
+    }
+
+    const buffer = await file.arrayBuffer();
+    return {
+        filename: file.name || (isLikelyImageFile(file) ? 'image.png' : 'document.txt'),
+        mime_type: file.type || '',
+        data_base64: bytesToBase64(new Uint8Array(buffer)),
+    };
+}
+
+function summarizeAttachments(items?: ChatAttachment[]): string {
+    if (!items?.length) return '';
+    return items.map(att => att.kind === 'image' ? '[图片]' : `[文档：${att.name}]`).join(' ');
+}
 
 export function useChat(options: ChatOptions) {
     const draft = ref('');
     const quote = ref<QuoteDraft | null>(null);
+    const attachments = ref<ChatAttachment[]>([]);
+    const uploadingCount = ref(0);
+    const uploading = computed(() => uploadingCount.value > 0);
     const entries = ref<ChatEntry[]>([]);
     const busy = ref(false);
     const cancellable = ref(false);
@@ -62,6 +156,10 @@ export function useChat(options: ChatOptions) {
         const startedRevision = revision;
         const generation = getRequestGeneration();
         return () => startedRevision === revision && generation === getRequestGeneration();
+    }
+
+    function isVisionSupported(): boolean {
+        return options.visionReady ? options.visionReady() : true;
     }
 
     function setBusy(value: boolean) {
@@ -78,14 +176,65 @@ export function useChat(options: ChatOptions) {
         return `turn_${++nextId}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    function setQuote(speaker: string, text: string) {
+    function setQuote(speaker: string, text: string, turnAttachments?: ChatAttachment[]) {
         const cleaned = parseQuotedMessage(text).body.trim();
-        if (!cleaned) return;
-        quote.value = {speaker, text: cleaned};
+        const mediaSummary = summarizeAttachments(turnAttachments);
+        const display = [mediaSummary, cleaned].filter(Boolean).join(' ');
+        if (!display) return;
+        const attachmentIds = turnAttachments?.map(item => item.id).filter(Boolean);
+        const hasImage = Boolean(turnAttachments?.some(item => item.kind === 'image'));
+        quote.value = {
+            speaker,
+            text: display,
+            ...(attachmentIds?.length ? {attachmentIds, hasImage} : {}),
+        };
     }
 
     function clearQuote() {
         quote.value = null;
+    }
+
+    function removeAttachment(id: string) {
+        attachments.value = attachments.value.filter(item => item.id !== id);
+    }
+
+    async function addFiles(files: File[] | FileList) {
+        if (busy.value || !options.canSend() || typeof uploadAttachmentAPI !== 'function') return;
+        const list = Array.from(files);
+        if (!list.length) return;
+        const isCurrent = currentOperation();
+
+        for (const file of list) {
+            if (!isCurrent()) return;
+            if (attachments.value.length >= maxAttachmentsPerTurn) {
+                options.showAlert(`单条消息最多添加 ${maxAttachmentsPerTurn} 个附件`);
+                return;
+            }
+            if (isLikelyImageFile(file) && !isVisionSupported()) {
+                options.showAlert(visionUnsupportedMessage);
+                continue;
+            }
+            uploadingCount.value++;
+            try {
+                const payload = await prepareUploadPayload(file);
+                if (!isCurrent()) return;
+                const saved = await uploadAttachmentAPI(payload);
+                if (!isCurrent()) return;
+                if (saved.kind === 'image' && !isVisionSupported()) {
+                    options.showAlert(visionUnsupportedMessage);
+                    continue;
+                }
+                if (attachments.value.length < maxAttachmentsPerTurn) {
+                    attachments.value.push(saved);
+                    options.scrollAfterRender(false);
+                }
+            } catch (error) {
+                if (!isCurrent() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
+                options.showAlert(error instanceof Error ? error.message : '附件上传失败，请稍后重试');
+            } finally {
+                if (uploadingCount.value > 0) uploadingCount.value--;
+            }
+        }
     }
 
     function mergeHistory(history: ConversationItem[]) {
@@ -97,8 +246,13 @@ export function useChat(options: ChatOptions) {
             if (entry.kind !== 'turn' || entry.round === null) continue;
             displayed.add(entry.round);
             const savedItem = byRound.get(entry.round);
-            if (savedItem && entry.createdAt == null && typeof savedItem.created_at === 'number') {
-                entry.createdAt = savedItem.created_at;
+            if (savedItem) {
+                if (entry.createdAt == null && typeof savedItem.created_at === 'number') {
+                    entry.createdAt = savedItem.created_at;
+                }
+                if (!entry.attachments?.length && savedItem.attachments?.length) {
+                    entry.attachments = savedItem.attachments;
+                }
             }
         }
 
@@ -113,6 +267,7 @@ export function useChat(options: ChatOptions) {
                 user: item.user,
                 replies: item.assistant,
                 ...(typeof item.created_at === 'number' ? {createdAt: item.created_at} : {}),
+                ...(item.attachments?.length ? {attachments: item.attachments} : {}),
             });
         }
         if (!missing.length) return;
@@ -146,7 +301,8 @@ export function useChat(options: ChatOptions) {
             message = '暂时无法核对这条消息，请查看聊天记录后再发送。';
         }
         if (!isCurrent()) return;
-        entries.value.push({kind: 'notice', id: turn.id, user: turn.user, message});
+        const summary = [summarizeAttachments(turn.attachments), turn.user].filter(Boolean).join('\n');
+        entries.value.push({kind: 'notice', id: turn.id, user: summary || '[附件消息]', message});
         options.scrollAfterRender(true);
         options.showAlert(message);
     }
@@ -198,6 +354,7 @@ export function useChat(options: ChatOptions) {
     async function revealReplies(turn: ChatTurn, data: ChatResponse, firstReplyDelay: Promise<void>,
                                  startedAt: number, streamedCount: number, isCurrent: () => boolean) {
         if (typeof data.created_at === 'number') turn.createdAt = data.created_at;
+        if (data.attachments?.length) turn.attachments = data.attachments;
         if (data.saved && data.conversation_round !== null) confirmRound(turn, data.conversation_round);
         if (streamedCount === 0 && data.response.length) await firstReplyDelay;
         if (!isCurrent()) return;
@@ -220,12 +377,22 @@ export function useChat(options: ChatOptions) {
         if (isCurrent() && !data.saved) options.showAlert('本轮对话未保存。回复仍可查看，请检查数据库连接。');
     }
 
-    // 用户主动停止发送时，拆回原引用条与输入草稿，不保留半截气泡。
-    function restoreCancelledDraft(rawUserText: string) {
-        const parsed = parseQuotedMessage(rawUserText);
-        if (parsed.quote && !quote.value) quote.value = parsed.quote;
+    // 用户主动停止发送时，拆回原引用条、附件与输入草稿，不保留半截气泡。
+    function restoreCancelledTurn(turn: ChatTurn, hadQuoteImage?: boolean) {
+        const parsed = parseQuotedMessage(turn.user);
+        if (parsed.quote && !quote.value) {
+            quote.value = {
+                ...parsed.quote,
+                ...(turn.quotedAttachmentIds?.length ? {attachmentIds: [...turn.quotedAttachmentIds], hasImage: hadQuoteImage} : {}),
+            };
+        }
+        if (turn.attachments?.length) {
+            const existingIds = new Set(attachments.value.map(item => item.id));
+            const restored = turn.attachments.filter(item => !existingIds.has(item.id));
+            attachments.value = [...restored, ...attachments.value].slice(0, maxAttachmentsPerTurn);
+        }
         if (!draft.value.trim()) draft.value = parsed.body;
-        else if (draft.value !== parsed.body) draft.value = `${parsed.body}\n${draft.value}`;
+        else if (parsed.body && draft.value !== parsed.body) draft.value = `${parsed.body}\n${draft.value}`;
     }
 
     async function runTurnRequest(
@@ -318,15 +485,23 @@ export function useChat(options: ChatOptions) {
         }
     }
 
-    async function submitMessage(turn: ChatTurn) {
+    async function submitMessage(turn: ChatTurn, hadQuoteImage = false) {
+        const attachmentIds = turn.attachments?.map(item => item.id);
+        const quotedAttachmentIds = turn.quotedAttachmentIds;
         await runTurnRequest(
             turn,
             (control, onBubble) => typeof cancelChatAPI === 'function'
-                ? chatAPI(turn.user, {turnId: control.turnId, signal: control.controller?.signal, onBubble})
+                ? chatAPI(turn.user, {
+                    turnId: control.turnId,
+                    signal: control.controller?.signal,
+                    onBubble,
+                    ...(attachmentIds?.length ? {attachmentIds} : {}),
+                    ...(quotedAttachmentIds?.length ? {quotedAttachmentIds} : {}),
+                })
                 : chatAPI(turn.user),
             () => {
                 entries.value = entries.value.filter(entry => entry !== turn);
-                restoreCancelledDraft(turn.user);
+                restoreCancelledTurn(turn, hadQuoteImage);
             },
             async (error, isCurrent) => {
                 if (error instanceof ChatNotStartedError) {
@@ -340,9 +515,18 @@ export function useChat(options: ChatOptions) {
     }
 
     async function sendMessage() {
-        if (busy.value || !options.canSend()) return;
+        if (busy.value || uploadingCount.value > 0 || !options.canSend()) return;
         const body = draft.value.trim();
-        if (!body) return;
+        const staged = [...attachments.value];
+        if (!body && !staged.length) return;
+
+        const hasOwnImage = staged.some(item => item.kind === 'image');
+        const hasQuoteImage = Boolean(quote.value?.hasImage);
+        if ((hasOwnImage || hasQuoteImage) && !isVisionSupported()) {
+            options.showAlert(visionUnsupportedMessage);
+            return;
+        }
+
         const composed = composeQuotedMessage(body, quote.value);
         const limit = inputLimits.max_message_chars;
         if (composed.length > limit && [...composed].length > limit) {
@@ -350,18 +534,22 @@ export function useChat(options: ChatOptions) {
             return;
         }
 
+        const quotedIds = quote.value?.attachmentIds?.length ? [...quote.value.attachmentIds] : undefined;
         draft.value = '';
         quote.value = null;
+        attachments.value = [];
         const turn = reactive<ChatTurn>({
             kind: 'turn',
             id: `local-${++nextId}`,
             round: null,
             user: composed,
             replies: [],
+            ...(staged.length ? {attachments: staged} : {}),
+            ...(quotedIds ? {quotedAttachmentIds: quotedIds} : {}),
             ...(typeof cancelChatAPI === 'function' ? {createdAt: Date.now()} : {}),
         });
         entries.value.push(turn);
-        await submitMessage(turn);
+        await submitMessage(turn, hasQuoteImage);
     }
 
     function cancelSend() {
@@ -379,7 +567,11 @@ export function useChat(options: ChatOptions) {
             options.showAlert(turn.failure.message);
             return;
         }
-        if (busy.value || !options.canSend()) return;
+        if (busy.value || uploadingCount.value > 0 || !options.canSend()) return;
+        if (turn.attachments?.some(item => item.kind === 'image') && !isVisionSupported()) {
+            options.showAlert(visionUnsupportedMessage);
+            return;
+        }
 
         turn.failure = undefined;
         entries.value = entries.value.filter(entry => entry !== turn);
@@ -402,12 +594,14 @@ export function useChat(options: ChatOptions) {
         clearHistory();
         draft.value = '';
         quote.value = null;
+        attachments.value = [];
+        uploadingCount.value = 0;
         performance.clearMeasures(firstReplyMetric);
     }
 
     return {
-        draft, quote, entries, busy, cancellable, isTyping,
-        setQuote, clearQuote, loadHistory, sendMessage, cancelSend,
+        draft, quote, attachments, uploading, entries, busy, cancellable, isTyping,
+        setQuote, clearQuote, addFiles, removeAttachment, loadHistory, sendMessage, cancelSend,
         activateFailure, clearHistory, reset,
     };
 }

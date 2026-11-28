@@ -3,18 +3,21 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import ChatComposer from './ChatComposer.vue';
 import {useChat} from '../composables/useChat.ts';
 import type {ProfileInfo} from '../ts/api.ts';
-import {formatChatTimestamp, parseQuotedMessage, shouldShowTimeDivider} from '../ts/chat_format.ts';
-import type {PersonaInfo} from '../ts/global_config.ts';
+import {formatChatTimestamp, formatFileSize, parseQuotedMessage, shouldShowTimeDivider} from '../ts/chat_format.ts';
+import type {ChatAttachment, PersonaInfo} from '../ts/global_config.ts';
 import type {Preferences} from '../ts/preferences.ts';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     ready: boolean;
+    visionReady?: boolean;
     shortcut: Preferences['send_shortcut'];
     profile: ProfileInfo | null;
     persona: PersonaInfo | null;
     clearingHistory: boolean;
     showAlert: (message: string) => void;
-}>();
+}>(), {
+    visionReady: true,
+});
 const emit = defineEmits<{'busy-change': [busy: boolean]}>();
 
 const chatBox = ref<HTMLDivElement | null>(null);
@@ -23,6 +26,8 @@ const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
 const reviewToggle = ref<HTMLButtonElement | null>(null);
 const reviewSearch = ref<HTMLInputElement | null>(null);
 const reviewList = ref<HTMLDivElement | null>(null);
+const lightboxDialog = ref<HTMLDialogElement | null>(null);
+const lightboxImage = ref<{url: string; name: string} | null>(null);
 const reviewOpen = ref(false);
 const search = ref('');
 const selectedBubble = ref('');
@@ -38,6 +43,7 @@ let scrollingToBottom = false;
 
 const chatState = useChat({
     canSend: () => props.ready && !props.clearingHistory,
+    visionReady: () => props.visionReady,
     showAlert: message => props.showAlert(message),
     onBusyChange: value => emit('busy-change', value),
     scrollAfterRender,
@@ -47,6 +53,8 @@ const {
     clearHistory: clearEntries, reset: resetChat,
 } = chatState;
 const quote = chatState.quote ?? ref(null);
+const attachments = chatState.attachments ?? ref<ChatAttachment[]>([]);
+const uploading = chatState.uploading ?? ref(false);
 const cancellable = chatState.cancellable ?? ref(false);
 
 const locked = computed(() => busy.value || !props.ready || props.clearingHistory);
@@ -58,6 +66,23 @@ const query = computed(() => search.value.trim().toLocaleLowerCase());
 
 function userBubbleId(id: string) { return `chat-user-${id}`; }
 function replyBubbleId(id: string, index: number) { return `chat-reply-${id}-${index}`; }
+
+function attachmentLabel(items?: ChatAttachment[]): string {
+    if (!items?.length) return '';
+    return items.map(att => att.kind === 'image' ? `[图片：${att.name}]` : `[文档：${att.name}]`).join(' ');
+}
+
+function imageDisplaySize(att: ChatAttachment): {width: number; height: number} | undefined {
+    const w = att.width;
+    const h = att.height;
+    if (!w || !h || w <= 0 || h <= 0) return undefined;
+    const maxSide = 240;
+    const scale = Math.min(1, maxSide / w, maxSide / h);
+    return {
+        width: Math.max(1, Math.round(w * scale)),
+        height: Math.max(1, Math.round(h * scale)),
+    };
+}
 
 const timeline = computed(() => {
     let previousAt: number | null | undefined;
@@ -87,12 +112,14 @@ const matches = computed(() => {
         const entry = entries.value[index];
         if (entry.kind !== 'turn') continue;
         const userBody = parseQuotedMessage(entry.user).body;
-        const userMatches = userBody.toLocaleLowerCase().includes(needle) || entry.user.toLocaleLowerCase().includes(needle);
+        const mediaText = attachmentLabel(entry.attachments);
+        const displayUser = [mediaText, userBody].filter(Boolean).join(' ');
+        const userMatches = displayUser.toLocaleLowerCase().includes(needle) || entry.user.toLocaleLowerCase().includes(needle);
         const replyIndex = needle ? entry.replies.findIndex(reply => reply.toLocaleLowerCase().includes(needle)) : -1;
         if (!userMatches && replyIndex < 0) continue;
         results.push({
             id: entry.id,
-            user: userBody,
+            user: displayUser,
             reply: entry.replies[replyIndex < 0 ? 0 : replyIndex],
             target: userMatches ? userBubbleId(entry.id) : replyBubbleId(entry.id, replyIndex)
         });
@@ -150,6 +177,16 @@ function scrollAfterRender(forceBottom: boolean) {
     });
 }
 
+function openLightbox(att: ChatAttachment) {
+    lightboxImage.value = {url: att.url, name: att.name};
+    void nextTick(() => lightboxDialog.value?.showModal?.());
+}
+
+function closeLightbox() {
+    lightboxDialog.value?.close?.();
+    lightboxImage.value = null;
+}
+
 function closeReview() {
     reviewOpen.value = false;
     reviewToggle.value?.focus({preventScroll: true});
@@ -178,11 +215,13 @@ function onChatBackgroundClick(event: MouseEvent) {
     activeBubble.value = '';
 }
 
-async function copyBubbleText(bubbleId: string, text: string) {
+async function copyBubbleText(bubbleId: string, text: string, turnAttachments?: ChatAttachment[]) {
+    const copyContent = text.trim() || attachmentLabel(turnAttachments);
+    if (!copyContent) return;
     let copied = false;
     try {
         if (globalThis.navigator?.clipboard?.writeText) {
-            await globalThis.navigator.clipboard.writeText(text);
+            await globalThis.navigator.clipboard.writeText(copyContent);
             copied = true;
         }
     } catch {
@@ -191,7 +230,7 @@ async function copyBubbleText(bubbleId: string, text: string) {
     if (!copied && typeof document !== 'undefined' && typeof document.createElement === 'function') {
         try {
             const area = document.createElement('textarea');
-            area.value = text;
+            area.value = copyContent;
             area.setAttribute('readonly', '');
             area.style.position = 'fixed';
             area.style.opacity = '0';
@@ -212,8 +251,8 @@ async function copyBubbleText(bubbleId: string, text: string) {
     copiedTimer = setTimeout(clearCopiedState, 1400);
 }
 
-function quoteBubble(speaker: string, text: string) {
-    chatState.setQuote?.(speaker, text);
+function quoteBubble(speaker: string, text: string, turnAttachments?: ChatAttachment[]) {
+    chatState.setQuote?.(speaker, text, turnAttachments);
     activeBubble.value = '';
     void nextTick(() => composer.value?.focus?.());
 }
@@ -246,6 +285,7 @@ function resetReview() {
     viewRevision.value++;
     search.value = '';
     activeBubble.value = '';
+    closeLightbox();
     clearHighlight();
     clearCopiedState();
     stopAutoScroll();
@@ -337,20 +377,43 @@ defineExpose({loadHistory, clearHistory, reset});
                             <div class="bubble-wrap user-bubble-wrap"
                                 :class="{'actions-visible': activeBubble === userBubbleId(entry.id)}">
                                 <div :id="userBubbleId(entry.id)" class="user_bubble"
-                                    :class="{'review-selected': selectedBubble === userBubbleId(entry.id)}"
+                                    :class="{
+                                        'review-selected': selectedBubble === userBubbleId(entry.id),
+                                        'is-media-only': Boolean(entry.attachments?.every(att => att.kind === 'image') && !parsedUser?.quote && !(parsedUser ? parsedUser.body : entry.user).trim()),
+                                    }"
                                     @click="toggleBubbleActions(userBubbleId(entry.id))">
                                     <div v-if="parsedUser?.quote" class="bubble-quote">
                                         <span class="bubble-quote-speaker">{{ parsedUser.quote.speaker }}：</span>{{ parsedUser.quote.text }}
                                     </div>
-                                    <span>{{ parsedUser ? parsedUser.body : entry.user }}</span>
+                                    <div v-if="entry.attachments?.length" class="bubble-attachments">
+                                        <template v-for="att in entry.attachments" :key="att.id">
+                                            <button v-if="att.kind === 'image'" type="button" class="bubble-image-btn"
+                                                :aria-label="`查看图片 ${att.name}`" @click.stop="openLightbox(att)">
+                                                <img :src="att.url" :alt="att.name"
+                                                    :width="imageDisplaySize(att)?.width"
+                                                    :height="imageDisplaySize(att)?.height"
+                                                    class="bubble-image" decoding="async"
+                                                    @load="scrollAfterRender(false)">
+                                            </button>
+                                            <a v-else :href="att.url" :download="att.name" class="bubble-doc-card"
+                                                @click.stop>
+                                                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                                                    <path fill="currentColor" d="M5 2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.4L11.6 2H5zm6 1.5L15.5 8H11V3.5z"/>
+                                                </svg>
+                                                <span class="bubble-doc-name">{{ att.name }}</span>
+                                                <span class="bubble-doc-size">{{ formatFileSize(att.size) }}</span>
+                                            </a>
+                                        </template>
+                                    </div>
+                                    <span v-if="(parsedUser ? parsedUser.body : entry.user).trim()">{{ parsedUser ? parsedUser.body : entry.user }}</span>
                                 </div>
                                 <div class="bubble-actions user-bubble-actions" role="toolbar" aria-label="消息操作">
                                     <button type="button" class="bubble-action-btn"
-                                        @click.stop="copyBubbleText(userBubbleId(entry.id), parsedUser ? parsedUser.body : entry.user)">
+                                        @click.stop="copyBubbleText(userBubbleId(entry.id), parsedUser ? parsedUser.body : entry.user, entry.attachments)">
                                         {{ copiedBubble === userBubbleId(entry.id) ? '已复制' : '复制' }}
                                     </button>
                                     <button type="button" class="bubble-action-btn" :disabled="locked"
-                                        @click.stop="quoteBubble(userName, parsedUser ? parsedUser.body : entry.user)">引用</button>
+                                        @click.stop="quoteBubble(userName, parsedUser ? parsedUser.body : entry.user, entry.attachments)">引用</button>
                                 </div>
                             </div>
                             <div class="user_triangle"></div>
@@ -400,9 +463,17 @@ defineExpose({loadHistory, clearHistory, reset});
                     <img src="/ico/arrow.png" alt="">
                 </button>
                 <ChatComposer :key="composerRevision" ref="composer" v-model="draft" :shortcut="shortcut"
-                    :locked="locked" :cancellable="cancellable" :quote="quote"
-                    @send="sendMessage" @cancel="chatState.cancelSend?.()" @clear-quote="chatState.clearQuote?.()" />
+                    :locked="locked" :cancellable="cancellable" :uploading="uploading"
+                    :attachments="attachments" :quote="quote"
+                    @send="sendMessage" @cancel="chatState.cancelSend?.()" @clear-quote="chatState.clearQuote?.()"
+                    @add-files="chatState.addFiles?.($event)" @remove-attachment="chatState.removeAttachment?.($event)" />
             </div>
         </div>
     </main>
+
+    <dialog id="image-lightbox-dialog" ref="lightboxDialog" aria-label="图片预览" @click="closeLightbox"
+        @cancel.prevent="closeLightbox">
+        <img v-if="lightboxImage" :src="lightboxImage.url" :alt="lightboxImage.name" class="lightbox-img" @click.stop>
+        <button type="button" class="lightbox-close" aria-label="关闭预览" @click="closeLightbox">×</button>
+    </dialog>
 </template>

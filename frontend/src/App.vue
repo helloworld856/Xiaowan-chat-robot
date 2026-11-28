@@ -24,6 +24,7 @@ const preferences = ref<Preferences>({...defaultPreferences});
 const profile = ref<ProfileInfo | null>(null);
 const persona = ref<PersonaInfo | null>(null);
 const ready = ref(false);
+const visionReady = ref(true);
 const chatBusy = ref(false);
 const clearingHistory = ref(false);
 
@@ -83,6 +84,7 @@ async function initialize() {
 
 function resetAccount() {
     ready.value = false;
+    visionReady.value = true;
     chatBusy.value = false;
     clearingHistory.value = false;
     dialogs.value?.reset();
@@ -106,7 +108,7 @@ function resetAccount() {
     <AuthScreen v-if="!starting && !user && !sessionHidden" ref="authScreen" :session="session" />
     <div id="app-shell" :data-chat-font-size="preferences.chat_font_size"
         :hidden="!user || sessionHidden" :inert="!ready || sessionHidden || !user">
-        <ChatWorkspace ref="chat" :ready="ready" :shortcut="preferences.send_shortcut" :profile="profile"
+        <ChatWorkspace ref="chat" :ready="ready" :vision-ready="visionReady" :shortcut="preferences.send_shortcut" :profile="profile"
             :persona="persona" :clearing-history="clearingHistory" :show-alert="showAlert"
             @busy-change="chatBusy = $event" />
         <AccountMenu ref="menu" :display-name="profile?.nickname ?? user?.username ?? ''" :logout-busy="sessionBusy" :logging-out="loggingOut"
@@ -115,6 +117,7 @@ function resetAccount() {
             @profile-change="profile = $event" @close="user && menu?.focus()" />
         <SettingsDialog ref="settings" :is-admin="isAdmin" :preferences="preferences" :chat-busy="chatBusy"
             :show-alert="showAlert" :confirm-action="confirmAction" @preferences-change="applyPreferences"
+            @vision-change="visionReady = $event"
             @clearing-history="clearingHistory = $event" @history-cleared="chat?.clearHistory()" />
     </div>
     <div :hidden="sessionHidden">

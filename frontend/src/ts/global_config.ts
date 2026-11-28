@@ -12,12 +12,24 @@ export interface PersonaInfo {
     USER_AVATAR: string;
 }
 
+export interface ChatAttachment {
+    id: string;
+    kind: 'image' | 'document';
+    name: string;
+    mime_type: string;
+    size: number;
+    width?: number | null;
+    height?: number | null;
+    url: string;
+}
+
 // 回复列表对应逐条显示的气泡，轮次与保存状态用于历史对账。
 export interface ChatResponse {
     response: string[];
     conversation_round: number | null;
     saved: boolean;
     created_at?: number | null;
+    attachments?: ChatAttachment[];
 }
 
 export interface InputLimits {
@@ -41,4 +53,5 @@ export interface ConversationItem {
     user: string;
     assistant: string[];  // 多条助手回复
     created_at?: number | null;
+    attachments?: ChatAttachment[];
 }

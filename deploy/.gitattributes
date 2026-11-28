@@ -1,2 +1,3 @@
 /xiaowan-update text eol=lf
 /xiaowan.service text eol=lf
+/searxng/*.yml text eol=lf

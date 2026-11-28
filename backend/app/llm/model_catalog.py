@@ -1,6 +1,7 @@
 """Default model choices and endpoints configured by the server operator."""
 
 import json
+import re
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -43,9 +44,16 @@ class ModelEndpoint(_CatalogEntry):
     adapter: ModelAdapter = Field(description='默认接口协议。可选 openai 或 dashscope。')
 
 
+_VISION_NAME_RE = re.compile(
+    r'(?:deepseek-v4|(?:^|[-_/])(?:vl|vision|omni|pixtral|llava)(?:$|[-_/.0-9])|gpt-4o|gpt-4\.1|gpt-5|gemini-|claude-[34])',
+    re.IGNORECASE,
+)
+
+
 class ProviderCatalog(ModelEndpoint):
     default_model: str = Field(min_length=1, max_length=200, description='默认模型名，须包含在 models 中。')
     models: list[str] = Field(description='网页允许选择的模型名列表。')
+    vision_models: list[str] = Field(default_factory=list, description='支持原生图片输入的模型名列表。')
     admin_allowed_base_urls: list[Annotated[BaseURL, Field(min_length=1)]] = Field(
         default_factory=list, description='管理员额外可用的 API 基础地址，按完整地址匹配。默认地址自动获准。',
     )
@@ -63,6 +71,8 @@ class ProviderCatalog(ModelEndpoint):
             raise ValueError('系统默认模型列表包含无效模型名')
         if len(set(self.models)) != len(self.models):
             raise ValueError('系统模型列表包含重复模型名')
+        if any(not name or name != name.strip() or len(name) > 200 for name in self.vision_models):
+            raise ValueError('视觉模型列表包含无效模型名')
         return self
 
 
@@ -85,6 +95,21 @@ class ModelCatalog(_CatalogEntry):
         if provider is None:
             raise ValueError('全局配置缺少该厂商地址')
         return ModelEndpoint(base_url=provider.base_url, adapter=provider.adapter)
+
+    def supports_vision(self, merchant: ModelMerchant, name: str, *, adapter: ModelAdapter | None = None) -> bool:
+        provider = self.providers.get(merchant)
+        effective_adapter = adapter or (provider.adapter if provider is not None else 'openai')
+        # ChatTongyi 走 DashScope 文本 Generation 接口，不支持 image_url 多模态消息块。
+        if effective_adapter != 'openai':
+            return False
+        if provider is not None and 'vision_models' in provider.model_fields_set:
+            if name in provider.vision_models:
+                return True
+            # 若使用的是自定义 OpenAI 兼容端点且模型名符合常见视觉命名，也允许直传图片。
+            if adapter == 'openai' and provider.adapter != 'openai':
+                return bool(_VISION_NAME_RE.search(name))
+            return False
+        return bool(_VISION_NAME_RE.search(name))
 
 
 def default_model_catalog() -> ModelCatalog:

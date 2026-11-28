@@ -16,6 +16,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
     'preferences-change': [preferences: Preferences];
+    'vision-change': [visionReady: boolean];
     'history-cleared': [];
     'clearing-history': [busy: boolean];
 }>();
@@ -115,6 +116,20 @@ function showAddressHelp() {
     props.showAlert(`${rule}\n清空接口地址可恢复厂商默认地址。更换或恢复地址时，请重新填写 API Key。`);
 }
 
+const VISION_MODEL_PATTERN = /(?:deepseek-v4|(?:^|[-_/])(?:vl|vision|omni|pixtral|llava)(?:$|[-_/.0-9])|gpt-4o|gpt-4\.1|gpt-5|gemini-|claude-[34])/i;
+
+function computeVisionSupport(merchantName: string, model: string, customAddress: boolean, options?: ModelOptions): boolean {
+    const prov = options?.providers[merchantName];
+    const isDashscopeDefault = merchantName === 'tongyi' && !customAddress;
+    if (isDashscopeDefault) return false;
+    if (prov && Array.isArray(prov.vision_models)) {
+        if (prov.vision_models.includes(model)) return true;
+        if (customAddress && merchantName === 'tongyi') return VISION_MODEL_PATTERN.test(model);
+        return false;
+    }
+    return VISION_MODEL_PATTERN.test(model);
+}
+
 function applySettings(saved: SavedSettings, requestedModelRevision: number) {
     preferenceDraft.value = {...saved.preferences};
     emit('preferences-change', {...saved.preferences});
@@ -123,6 +138,15 @@ function applySettings(saved: SavedSettings, requestedModelRevision: number) {
         modelOptions.value = saved.model_options;
         activeModel.value = saved.model;
         modelReady.value = saved.model_ready;
+        const nextVision = saved.vision_ready !== undefined
+            ? Boolean(saved.vision_ready)
+            : Boolean(saved.model_ready && saved.model && computeVisionSupport(
+                saved.model.model_merchant,
+                saved.model.model_name,
+                Boolean(saved.model.base_url && saved.model.base_url !== saved.model_options?.providers[saved.model.model_merchant]?.default_address),
+                saved.model_options,
+            ));
+        emit('vision-change', nextVision);
     }
 }
 
@@ -335,6 +359,8 @@ async function configureModel(testOnly: boolean) {
             }
             activeModel.value = {...model, base_url: effectiveAddress};
             modelReady.value = true;
+            const customAddress = Boolean(effectiveAddress && effectiveAddress !== savedProvider?.default_address);
+            emit('vision-change', computeVisionSupport(model.model_merchant, model.model_name, customAddress, modelOptions.value));
             resetApiKey();
             if (modelDialog.value) await closeDialog(modelDialog.value);
         }
@@ -398,6 +424,7 @@ function reset() {
     activeModel.value = null;
     modelOptions.value = undefined;
     modelReady.value = false;
+    emit('vision-change', false);
     modelOperation.value = null;
     merchant.value = 'deepseek';
     setProvider();

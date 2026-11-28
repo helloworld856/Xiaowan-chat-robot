@@ -324,6 +324,8 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(sessions.drain)
 
         def run(self_, entry, user, text, *, on_bubble=None):
+            import time as _time
+            _time.sleep(0.08)
             if on_bubble is not None:
                 on_bubble('第一条气泡')
                 on_bubble('第二条气泡')
@@ -348,7 +350,10 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
             request.state.user = FIRST_USER
             return await call_next(request)
 
-        with patch.object(ChatSessions, '_run', run):
+        with (
+            patch.object(ChatSessions, '_run', run),
+            patch('app.api.chat.STREAM_HEARTBEAT_SECONDS', 0.03),
+        ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
                 bad = await client.post('/chat/stream', json={'user_input': '   '})
                 self.assertEqual(bad.status_code, 422)
@@ -357,8 +362,11 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                 res = await client.post('/chat/stream', json={'user_input': '你好呀', 'turn_id': 'turn_stream_1'})
                 self.assertEqual(res.status_code, 200)
                 self.assertIn('text/event-stream', res.headers['content-type'])
+                self.assertIn(': ping', res.text)
                 events = []
                 for block in res.text.strip().split('\n\n'):
+                    if block.strip().startswith(':'):
+                        continue
                     ev, data = None, None
                     for line in block.splitlines():
                         if line.startswith('event:'):

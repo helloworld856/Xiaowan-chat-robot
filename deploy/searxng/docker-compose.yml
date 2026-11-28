@@ -1,0 +1,19 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: xiaowan-searxng
+    restart: unless-stopped
+    # 默认仅监听本机回环地址供小晚后端调用，不直接暴露公网端口。
+    # 若需跨服务器调用，请配合反向代理鉴权或防火墙白名单限制来源 IP。
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8080/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID

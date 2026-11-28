@@ -4,12 +4,14 @@
 
 ## 主要功能
 
-- 根据用户意图和情绪生成角色化回复
+- 支持 SSE 逐条气泡流式生成自然口语化的角色回复，工具调用期间平滑衔接与保活
 - 管理员和普通账号可分别配置自己的 DeepSeek 或通义模型
+- 支持图片与轻量文档多模态输入（点击选择、剪贴板粘贴、拖拽上传；视觉模型原生直传图片并支持点击放大预览，非视觉模型自动友好提示；PDF 与常见文本/代码文档服务端提取正文，全模型可用，引用带附件消息时自动重挂载）
+- 内置自建 SearXNG 联网搜索（自动区分国内/海外网络与节点地址，动态匹配搜索引擎与多节点故障切换）、公网网页链接阅读、天气查询、时间换算与早期对话原话精确检索工具，具备超时控制、调用次数上限、外部网页内容污点隔离及写操作防误触确认护栏
 - 保存完整对话历史，后台异步提炼情景事件记忆并按语义、中英关键词和时间混合召回
 - 支持默认白、三套彩色主题和晚风夜色深色主题，人设通过 `backend/persona_config/persona.json` 修改
-- 支持消息时间分隔条、气泡复制与引用回复，以及发送中途停止并回填草稿
-- 支持账号独立的「用户画像」（手动填写资料 + 随聊天后台自动记录并可随时删改的长期印象），清空聊天记录不丢失
+- 支持消息时间分隔条、气泡复制与引用回复，以及发送中途停止并回填草稿与附件
+- 支持账号独立的「用户画像」（手动填写资料 + 小晚印象自动记录开关与一键清空印象），清空聊天记录不丢失
 - 加载失败或超时会显示提示；对话保存失败时仍显示回复并告知未保存
 
 ## 项目结构
@@ -24,10 +26,11 @@
 │   │   ├── system_config.py         # 全局配置校验和迁移
 │   │   ├── static_assets.py         # 前端静态资源缓存策略
 │   │   ├── api/                    # HTTP 路由与认证中间件
-│   │   ├── accounts/               # 账号、会话、个人资料与偏好
-│   │   ├── chat/                   # 聊天调度、LangGraph 工作流和情景长期记忆
+│   │   ├── accounts/               # 账号、会话、个人资料、用户画像与偏好
+│   │   ├── chat/                   # 聊天调度、附件解析、LangGraph 工作流和情景长期记忆
 │   │   ├── database/               # MySQL 连接池和表结构初始化
 │   │   └── llm/                    # 厂商目录、模型配置、本地 ONNX 向量和模型客户端
+│   ├── tools_config/               # 工具注册表、安全护栏与内置工具（天气、时间、联网搜索、历史原话检索、网页阅读）
 │   ├── scripts/                    # 运维辅助脚本（如拉取本地多语向量模型）
 │   ├── persona_config/             # 小晚的人设配置
 │   ├── utils/deepseek_tokenizer/    # 本地 Token 计数资源
@@ -44,7 +47,7 @@
 │   ├── public/                     # 头像、网站图标等静态资源
 │   ├── tests/                      # 前端测试
 │   └── vite.config.mts             # Vite 构建和开发代理配置
-├── deploy/                        # 更新脚本与 systemd 服务模板
+├── deploy/                        # 更新脚本、systemd 服务模板与 SearXNG 容器配置
 ├── requirements.in                # Python 直接依赖
 └── requirements.txt               # Python 依赖锁，供本地、CI 和部署安装
 ```
@@ -78,7 +81,9 @@ npm --prefix frontend run build
 
 如果服务器已有自定义的 `backend/settings.json`，更新前请保留一份本地副本供迁移。这个文件由 Git 忽略，启动时仍可读取。旧管理员模型会迁入 `.env` 的 `ADMIN_PROVIDERS`，新安装从全局配置读取默认模型。
 
-`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度和启动清理，`memory` 管理短期原话窗口、情景事件异步提炼、混合召回权重、本地向量模型参数以及重启清空事件记忆开关。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
+`auth` 管理会话有效期、密码长度和认证限流，`profile` 管理昵称长度，`defaults` 设定新账号的初始主题、聊天字号、快捷键和头像。`chat` 管理并发、消息长度和启动清理，`memory` 管理短期原话窗口、情景事件异步提炼、混合召回权重、本地向量模型参数以及重启清空事件记忆开关，`search` 管理自建 SearXNG 联网搜索实例地址、国内外网络自动识别与搜索引擎列表。`model_runtime` 管理模型连接验证并发，`logging` 管理日志轮转和启动清理。
+
+如需启用联网搜索，可在服务器或本机进入 `deploy/searxng` 执行 `docker compose up -d` 启动自建 SearXNG 容器（默认监听 `127.0.0.1:8080` 并已开启 `json` 输出格式），或在 `backend/system_config.json` 的 `search.urls`（以及可选的 `search.cn_urls` / `search.global_urls`）填写已有的 SearXNG 实例地址。`search.region` 默认为 `"auto"`，会自动探测所处网络与远程节点属性：国内节点自动使用 `search.cn_engines`（如 `bing,bing news,360search,sogou`）跳过墙外超时源，海外节点自动使用 `search.global_engines`（如 `google,bing,duckduckgo,wikipedia`），配置多个节点时自动按连通性与延迟择优并在故障时无缝切换；未启动 SearXNG 或设 `search.enabled: false` 时不影响正常对话。
 
 后端启动时会自动检测 `backend/models/multilingual-e5-small` 下是否存在本地多语向量模型，若不存在则在后台自动下载量化版 `multilingual-e5-small`（官方源不可达时自动切换 `https://hf-mirror.com` 镜像源，也可在 `memory.embedding.hf_endpoint` 指定镜像或手动运行 `python backend/scripts/download_embedding_model.py` 预下载）。模型下载完成前或关闭 `memory.embedding.enabled` 时，系统会自动使用中英双语关键词与时间衰减混合召回，不阻塞服务启动与对话。
 
@@ -88,21 +93,23 @@ npm --prefix frontend run build
 
 管理员可以使用厂商默认地址，以及服务器在 `models.providers.<厂商>.admin_allowed_base_urls` 中批准的完整地址。修改批准列表后重启后端。已有管理员自定义地址也须先经批准，才能在启动时加载。管理员更换地址时须为目标地址填写 API Key。
 
-“测试连接”只验证连接，不保存或切换；“保存并切换”验证成功后保存配置，并更新聊天、分析、摘要三个代理。验证或保存失败时保留当前模型。
+“测试连接”只验证连接，不保存或切换；“保存并切换”验证成功后保存配置，并更新摘要和聊天两个代理。验证或保存失败时保留当前模型。
+
+`models.providers.<厂商>.vision_models` 配置该厂商支持原生图片输入的模型列表（默认包含 `deepseek-v4-flash` 与 `deepseek-v4-pro`）。当前模型支持视觉时，可通过输入框左侧附件按钮、剪贴板粘贴或拖拽发送 `PNG / JPEG / WEBP / GIF` 图片（前端自动将大图等比压缩至最长边 `1280px` 内，服务端校验文件头魔数，单张上限 5 MB），气泡内支持点击放大预览；若当前模型不支持视觉，添加或发送图片会给出友好提示。轻量文档支持 `PDF`（上限 8 MB，提取前 25 页文字）及 `.txt`、`.md`、`.csv`、`.tsv`、`.json`、`.yaml`、`.log` 和常见代码文件（上限 2 MB），由服务端提取纯文本注入本轮上下文，所有模型均可直接使用。单条消息最多添加 4 个附件，可仅发附件不填文字；附件按账号隔离存储在 `backend/user_data/<账号目录名>/attachments/`，在后续多轮窗口中仅保留紧凑标记不重复携带大图数据，引用带附件的历史消息追问时会自动重新挂载对应图片或文档，清空聊天记录或注销账号时同步清理物理文件。
 
 输入习惯支持多行输入与 Enter / Ctrl+Enter 发送；Shift+Enter 始终换行，中文输入法确认文字不会触发发送。每条消息最多 8000 个字符。
 
 管理员在 `backend/.env` 的 `ADMIN_PROVIDERS` 中按厂商各保存一条 `base_url`、`model_name` 和 `api_key`。普通用户的 `backend/user_data/<账号目录名>/model.json` 也按厂商保存这三个字段。同厂商在同一地址切换模型时，可以沿用已保存的密钥。更换接口地址时需重新填写该地址的 API Key。旧普通用户文件在首次读取时迁移。真实配置文件由 Git 忽略。
 
-在“设置 → 偏好”中修改主题、聊天字号或发送快捷键后，点击“保存偏好”使修改生效。主题支持默认白、海阔天空、夏日海岸、樱雨绵绵和晚风夜色（深色）。聊天字号有小、标准、大三档，对历史消息和新消息都生效。偏好保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`，刷新、换浏览器和重启后都能恢复。旧偏好文件缺少主题字段时使用默认白，缺少字号字段时使用标准字号。
+在“设置 → 偏好”中修改主题、聊天字号或发送快捷键后，点击“保存偏好”使修改生效。主题支持默认白、海阔天空、夏日海岸、樱雨绵绵和晚风夜色（深色）。聊天字号有小、标准、大三档，对历史消息和新消息都生效。偏好保存到当前账号的 `backend/user_data/<账号目录名>/preferences.json`，刷新、换浏览器和重启后都能恢复。旧偏好文件缺少主题字段时使用默认白，缺少字号字段时使用标准字号。“设置 → 用户画像”支持维护手动个人资料、开关“小晚印象记录”（关闭后不再记录新印象且保留已有印象）以及一键“清空印象”。
 
-回复生成与显示沿用原有逻辑：自然分条，显示间隔按 `min(1000 + 100 × 当前回复长度, 5000)` 毫秒计算，最后一条回复后不等待。
+聊天默认通过 `POST /chat/stream` 以 SSE 逐条流式推送回复气泡（工具执行等待期间定期发送注释保活帧并平滑衔接工具前后的多段气泡），前端实时上屏展示，尚未流式送达的剩余气泡按自适应间隔依次显示，最后一条回复后不等待；`POST /chat` 保留一次性 JSON 响应兼容。
 
-侧边栏中的聊天回顾搜索当前页面已显示的对话，并支持点击定位原消息；不另外保存聊天记录，沿用原有启动清理和摘要压缩规则。
+侧边栏中的聊天回顾搜索当前页面已显示的对话（含图片与文档附件标签），并支持点击定位原消息；不另外保存聊天记录，沿用原有启动清理和记忆归档规则。
 
 `POST /history` 的 `num` 接受 `-10000` 到 `10000` 的整数或 `null`。`front: true` 的基础顺序是最早到最新，`front: false` 则相反。正数按基础顺序读取，负数反向读取 `abs(num)` 条。例如 `{"num": -3, "front": true}` 从最新一轮开始读取三条。`0` 或 `null` 取最新的至多 10000 条，再按 `front` 指定的顺序返回。响应中的 `num` 原样回显请求参数，实际返回条数以 `history_messages` 数组长度为准。
 
-聊天采用三层长期记忆：用户画像保存稳定的个人资料与长期印象；短期对话窗口默认向模型传入最近 `memory.recent_window_rounds`（默认 24）轮原话；滑出短期窗口的对话不会从 `history_messages` 删除，而是在回复返回后由后台按批（默认每 `memory.extract_batch_rounds` = 8 轮）提炼为结构化情景事件卡片（含发生日期、中英双语关键词、状态与重要度），并在后续聊天时按「近期进行中事件 + 本地多语向量/关键词/时间混合相关性」按需召回。
+聊天采用三层长期记忆加按需工具检索：用户画像保存稳定的个人资料与长期印象；短期对话窗口默认向模型传入最近 `memory.recent_window_rounds`（默认 24）轮原话；滑出短期窗口的对话不会从 `history_messages` 删除，而是在回复返回后由后台按批（默认每 `memory.extract_batch_rounds` = 8 轮）提炼为结构化情景事件卡片（含发生日期、中英双语关键词、状态与重要度），并在后续聊天时按「近期进行中事件 + 本地多语向量/关键词/时间混合相关性」按需召回；当用户追问滑出短期窗口的具体店名、数字或原话细节时，聊天代理还会自动调用早期对话检索工具定位数据库原话及相邻上下文，发送公开网页链接时可自动抓取阅读正文（逐跳校验公网 IP 防护 SSRF）。
 
 检查命令为 `python -m unittest discover -s backend/tests -v`、`npm --prefix frontend test`、`npm --prefix frontend run typecheck` 和 `npm --prefix frontend run build`。CI 使用独立的 MySQL 8.4 容器运行数据库集成测试。本地运行数据库用例时，将 `XIAOWAN_TEST_MYSQL_PORT` 和 `XIAOWAN_TEST_MYSQL_PASSWORD` 指向 `127.0.0.1` 上的独立测试实例及其 `root` 密码。未配置端口时本地跳过这组用例。
 
@@ -120,7 +127,7 @@ npm --prefix frontend run build
 
 已认证账号的运行日志写入 `backend/user_data/<账号目录名>/logs/app.log`，以 `[账号 admin]` 这样的用户名标签记录请求结果、每轮聊天的节点执行、回复条数、Token 和耗时。启动、匿名请求、认证审计、全局模型切换和数据库连接池事件写入 `backend/log_config/app.log`。日志使用 UTC 时间，访问记录使用路由模板并省略查询参数。系统级告警和错误也写到标准错误，通过 systemd 启动时可在 `journalctl` 查阅。默认每个文件约 2 MB 时轮转，最多保留三份归档，重启时保留归档。
 
-聊天、历史、人设、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
+聊天、附件、历史、人设、用户画像、模型和设置接口均需要登录。开发环境使用下述 Vite 同源代理，生产使用后端托管前端；跨来源写请求会被拒绝。
 
 开发时先启动后端：
 
@@ -148,7 +155,7 @@ python run_serve.py
 
 然后访问 `http://127.0.0.1:8000`。首次打开后，在页面设置中选择模型。
 
-> 默认启动时清空历史对话、自动记录的用户印象、情景事件记忆和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup`、`chat.clear_learned_portrait_on_startup`、`memory.clear_episodes_on_startup` 和 `logging.clear_on_startup`。
+> 默认启动时清空历史对话（含已上传附件）、自动记录的用户印象、情景事件记忆和当前日志。需要保留时，可在 `backend/system_config.json` 中分别关闭 `chat.clear_history_on_startup`、`chat.clear_learned_portrait_on_startup`、`memory.clear_episodes_on_startup` 和 `logging.clear_on_startup`。
 
 后端使用单个 Uvicorn worker。每个账号首次发消息时创建自己的 LangGraph 和记忆管理器，不同账号可并行，同一账号逐轮处理。`system_config.json` 的 `chat.concurrency`、`chat.queue_size` 和 `chat.queue_timeout` 控制最多同时执行数、等待名额和排队秒数，默认分别为 4、8、2。排队失败时可以从原消息重试。
 

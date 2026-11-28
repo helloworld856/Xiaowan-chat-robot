@@ -2,7 +2,7 @@
 
 `*_spec.py` 中的规格描述模型可以调用什么工具、何时使用它，以及调用时要传哪些参数。工具的实际操作由同目录下的 Python 函数完成。
 
-现有示例见[天气规格](weather_tool/weather_spec.py)和[时间规格](time_tool/time_spec.py)。[注册表](registry.py)把规格和实现绑定成 `CHAT_TOOLS`，供回复代理使用。
+现有规格见[天气规格](weather_tool/weather_spec.py)、[时间规格](time_tool/time_spec.py)、[早期对话检索规格](history_tool/history_spec.py)、[联网搜索规格](search_tool/search_spec.py)和[网页阅读规格](url_tool/url_spec.py)。[注册表](registry.py)通过 `register_tool` 把规格与实现绑定成 `CHAT_TOOLS`，统一执行参数校验、单工具超时保护、每轮调用次数上限、外部网页内容污染隔离（`taints_context`）以及破坏性写操作两阶段确认（`write_destructive`）。
 
 ## 字段说明
 

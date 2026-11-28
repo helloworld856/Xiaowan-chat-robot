@@ -14,7 +14,7 @@ from app.accounts.files import UserDataPaths, protect_file
 from app.accounts.preferences import UserPreferencesStore
 from app.accounts.profile import ProfileStore
 from app.accounts.repository import SQLAccountStore
-from app.api import chat, history, model, persona, portrait, settings, system
+from app.api import attachments, chat, history, model, persona, portrait, settings, system
 from app.api.auth import router as auth_router
 from app.api.auth_middleware import AuthenticationMiddleware
 from app.api.profile import router as profile_router
@@ -125,6 +125,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         if chat_config.clear_history_on_startup:
             try:
                 reset_chat_history(db)
+                directories.attachments.clear_all()
             except Exception as error:
                 log_event('startup_history_clear', level=ERROR, system=True, outcome='failed',
                           error=type(error).__name__)
@@ -180,6 +181,7 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
     application.state.db = db
     application.state.preferences = directories.preferences
     application.state.portraits = directories.portraits
+    application.state.attachments = directories.attachments
     application.state.episodes = episode_store
     application.state.personal_models = directories.models
     application.state.model_configuration = model_configuration
@@ -188,7 +190,9 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         personal_models=directories.models,
         admin_model=admin_model,
         portraits=directories.portraits,
+        attachments=directories.attachments,
         episodes=episode_store,
+        search_config=config.search,
         graph_factory=partial(
             create_graph,
             compression_tokens=chat_config.history_compression_tokens,
@@ -199,6 +203,6 @@ def build_application(db, profile_store, legacy_root, *, chat_config: ChatConfig
         max_waiting=chat_config.queue_size,
         wait_timeout=chat_config.queue_timeout,
     )
-    for module in (persona, portrait, system, settings, chat, model, history):
+    for module in (persona, portrait, attachments, system, settings, chat, model, history):
         application.include_router(module.router)
     return application

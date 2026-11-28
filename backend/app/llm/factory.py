@@ -51,6 +51,7 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
         )
     if adapter == 'dashscope':
         from langchain_community.chat_models import ChatTongyi
+        _patch_tongyi_check_response()
         client_options = {}
         options['base_address'] = base_url
         if validation_timeout is not None:
@@ -59,6 +60,33 @@ def create_model(model_merchant, api_key, model_name, temperature, max_tokens=No
         return ChatTongyi(model=model_name, dashscope_api_key=api_key, model_kwargs=options,
                           **client_options)
     raise ValueError('不支持的模型接口协议')
+
+
+def _patch_tongyi_check_response() -> None:
+    """修复 langchain_community 在 DashScope 返回 404/429/5xx 时因缺少 request 字段抛出 KeyError 的缺陷。"""
+    try:
+        from requests.exceptions import HTTPError
+        from langchain_community.chat_models import tongyi as chat_tongyi_mod
+        from langchain_community.llms import tongyi as llm_tongyi_mod
+    except ImportError:
+        return
+    if getattr(llm_tongyi_mod.check_response, '_xiaowan_safe', False):
+        return
+
+    def safe_check_response(resp):
+        if resp["status_code"] == 200:
+            return resp
+        msg = (
+            f"status_code: {resp['status_code']} "
+            f"code: {resp.get('code', '')} message: {resp.get('message', '')}"
+        )
+        if resp["status_code"] in (400, 401):
+            raise ValueError(msg)
+        raise HTTPError(msg)
+
+    safe_check_response._xiaowan_safe = True  # type: ignore[attr-defined]
+    llm_tongyi_mod.check_response = safe_check_response
+    chat_tongyi_mod.check_response = safe_check_response
 
 
 def create_agents(model_merchant: str, api_key: str, model_name: str, *, base_url: str, adapter: ModelAdapter,

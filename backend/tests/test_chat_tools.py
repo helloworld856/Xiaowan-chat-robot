@@ -15,10 +15,16 @@ class ChatToolTests(unittest.TestCase):
         self.tools = {tool.name: tool for tool in CHAT_TOOLS}
 
     def test_model_receives_explicit_function_and_parameter_descriptions(self):
-        self.assertEqual(set(self.tools), {'get_weather', 'get_current_time'})
-        for name, parameter, required in (
-            ('get_weather', 'city', ['city']),
-            ('get_current_time', 'timezone', []),
+        self.assertEqual(
+            set(self.tools),
+            {'get_weather', 'get_current_time', 'search_chat_history', 'web_search', 'read_url'},
+        )
+        for name, parameter, required, expected_type in (
+            ('get_weather', 'city', ['city'], 'string'),
+            ('get_current_time', 'timezone', [], 'string'),
+            ('search_chat_history', 'keywords', [], 'array'),
+            ('web_search', 'query', ['query'], 'string'),
+            ('read_url', 'url', ['url'], 'string'),
         ):
             with self.subTest(tool=name):
                 tool = convert_to_openai_tool(self.tools[name])
@@ -29,7 +35,7 @@ class ChatToolTests(unittest.TestCase):
                 schema = function['parameters']
                 self.assertEqual(schema['type'], 'object')
                 self.assertEqual(schema['required'], required)
-                self.assertEqual(schema['properties'][parameter]['type'], 'string')
+                self.assertEqual(schema['properties'][parameter]['type'], expected_type)
                 self.assertTrue(schema['properties'][parameter]['description'])
         time_schema = convert_to_openai_tool(self.tools['get_current_time'])['function']['parameters']
         self.assertEqual(time_schema['properties']['timezone']['default'], 'Asia/Shanghai')
@@ -210,3 +216,470 @@ class ChatToolTests(unittest.TestCase):
               self.assertLogs('xiaowan', level='WARNING')):
             self.assertEqual(self.tools['get_weather'].invoke({'city': '杭州', 'days': 3}),
                              '天气服务暂时不可用，请稍后再试。')
+
+
+class SearchHistoryToolTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from test_conversation_storage import SQLitePool
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.pool = SQLitePool(Path(folder.name) / 'history.sqlite')
+        self.tool = {t.name: t for t in CHAT_TOOLS}['search_chat_history']
+
+    def _insert(self, user_id: int, round_no: int, user_text: str, replies: list[str], created_at: int | None):
+        import json
+        with self.pool.connection() as db, db.cursor() as cur:
+            cur.execute(
+                'INSERT INTO history_messages (user_id, conversation_round, user, assistant, created_at) '
+                'VALUES (%s, %s, %s, %s, %s)',
+                (user_id, round_no, user_text, json.dumps(replies, ensure_ascii=False), created_at),
+            )
+            db.commit()
+
+    def test_search_history_isolates_accounts_excludes_active_window_and_expands_neighbor_rounds(self):
+        from app.chat.tool_context import ChatToolContext, chat_tool_context
+
+        # 2026-10-15 12:00 Asia/Shanghai
+        oct_15_ms = int(datetime(2026, 10, 15, 4, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        # 2026-11-20 12:00 Asia/Shanghai
+        nov_20_ms = int(datetime(2026, 11, 20, 4, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+        self._insert(1, 0, '今天去城西吃了一家超棒的日料', ['叫什么名字呀'], oct_15_ms)
+        self._insert(1, 1, '叫山葵屋，他家鳗鱼饭绝了', ['记下了，下次去试试'], oct_15_ms + 60_000)
+        self._insert(1, 2, '最近在看三体', ['好看吗'], nov_20_ms)
+        # 已经在当前短期滑动窗口内（round >= 3）的记录不应重复返回
+        self._insert(1, 3, '今天又想吃日料了', ['去吃呀'], nov_20_ms + 120_000)
+        # 其他账号的私密对话绝不能被搜出
+        self._insert(2, 0, '秘密日料店叫深海亭', ['收到'], oct_15_ms)
+
+        ctx = ChatToolContext(user_id=1, connection=self.pool.connection, window_start_round=3)
+        with chat_tool_context(ctx):
+            res = self.tool.invoke({'keywords': ['日料']})
+            self.assertIn('城西吃了一家超棒的日料', res)
+            # 相邻下一轮（round 1）中的店名「山葵屋」被自动补全带出
+            self.assertIn('山葵屋', res)
+            self.assertNotIn('今天又想吃日料了', res)
+            self.assertNotIn('深海亭', res)
+
+            by_date = self.tool.invoke({'keywords': ['三体'], 'start_date': '2026-11-01', 'end_date': '2026-11-25'})
+            self.assertIn('最近在看三体', by_date)
+
+            miss_date = self.tool.invoke({'keywords': ['三体'], 'start_date': '2026-10-01', 'end_date': '2026-10-31'})
+            self.assertIn('未在早期对话记录中找到', miss_date)
+
+            bad_date = self.tool.invoke({'keywords': ['日料'], 'start_date': '2026/10/01'})
+            self.assertIn('日期格式无效', bad_date)
+
+
+class ReadUrlToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tool = {t.name: t for t in CHAT_TOOLS}['read_url']
+
+    def test_read_url_blocks_private_addresses_and_ssrf_redirects(self):
+        from tools_config.url_tool import url_reader
+
+        for blocked in (
+            'http://localhost:8000/admin',
+            'http://127.0.0.1/secret',
+            'https://192.168.1.10/router',
+            'http://169.254.169.254/latest/meta-data/',
+            'ftp://example.com/file.txt',
+        ):
+            with self.subTest(url=blocked):
+                out = self.tool.invoke({'url': blocked})
+                self.assertIn('无法读取该链接', out)
+
+        # 公网域名 302 跳转到内网 IP 时，第二跳会被拦截
+        def fake_getaddrinfo(host, port, type=0):
+            ip = '93.184.216.34' if host == 'public.example.com' else '10.0.0.8'
+            return [(2, 1, 6, '', (ip, port))]
+
+        def redirect_handler(request: 'httpx.Request'):
+            import httpx
+            return httpx.Response(302, headers={'Location': 'http://internal.corp.local/secret'})
+
+        import httpx
+        mock_client = httpx.Client(transport=httpx.MockTransport(redirect_handler))
+        with (
+            patch.object(url_reader.socket, 'getaddrinfo', side_effect=fake_getaddrinfo),
+            patch.object(url_reader, '_fetch_single_hop', return_value=mock_client),
+        ):
+            out = self.tool.invoke({'url': 'https://public.example.com/short'})
+        self.assertIn('无法读取该链接', out)
+
+    def test_read_url_extracts_clean_article_and_rejects_binary_content(self):
+        import httpx
+        from tools_config.url_tool import url_reader
+
+        html = (
+            '<html><head><title>  苏式汤面指南 </title>'
+            '<meta name="description" content="一碗好面的汤底秘诀">'
+            '<style>.ad{display:none}</style><script>alert(1)</script></head>'
+            '<body><nav>导航栏噪音</nav><main><h1>红汤与白汤</h1><p>焖肉面要趁热吃。</p></main>'
+            '<footer>版权所有</footer></body></html>'
+        ).encode('utf-8')
+
+        def html_handler(request: httpx.Request):
+            return httpx.Response(200, headers={'Content-Type': 'text/html; charset=utf-8'}, content=html)
+
+        def pdf_handler(request: httpx.Request):
+            return httpx.Response(200, headers={'Content-Type': 'application/pdf'}, content=b'%PDF-1.7')
+
+        with (
+            patch.object(url_reader.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))]),
+            patch.object(url_reader, '_fetch_single_hop',
+                         side_effect=lambda *_: httpx.Client(transport=httpx.MockTransport(html_handler))),
+        ):
+            result = self.tool.invoke({'url': 'https://example.com/noodles'})
+        self.assertIn('标题：苏式汤面指南', result)
+        self.assertIn('简介：一碗好面的汤底秘诀', result)
+        self.assertIn('焖肉面要趁热吃。', result)
+        self.assertNotIn('导航栏噪音', result)
+        self.assertNotIn('alert(1)', result)
+
+        with (
+            patch.object(url_reader.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))]),
+            patch.object(url_reader, '_fetch_single_hop',
+                         side_effect=lambda *_: httpx.Client(transport=httpx.MockTransport(pdf_handler))),
+        ):
+            pdf_res = self.tool.invoke({'url': 'https://example.com/doc.pdf'})
+        self.assertIn('application/pdf', pdf_res)
+
+        # 门户网站把新闻正文放在 JS 变量（如 var contentdate = '<p>...</p>'）时也能顺利提取正文
+        portal_html = (
+            '<html><head><title>新闻详情</title></head><body><div id="text_area">正在加载</div>'
+            '<script type="text/javascript">'
+            "var contentdate = '<p>第一段：个人认购起点下调至10万元。</p><p>第二段：进一步便利居民财富管理。</p>';"
+            '</script></body></html>'
+        ).encode('utf-8')
+        with (
+            patch.object(url_reader.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))]),
+            patch.object(
+                url_reader, '_fetch_single_hop',
+                side_effect=lambda *_: httpx.Client(
+                    transport=httpx.MockTransport(
+                        lambda _: httpx.Response(200, headers={'Content-Type': 'text/html; charset=utf-8'}, content=portal_html)
+                    )
+                ),
+            ),
+        ):
+            portal_res = self.tool.invoke({'url': 'https://news.example.com/article.shtml'})
+        self.assertIn('个人认购起点下调至10万元', portal_res)
+        self.assertIn('进一步便利居民财富管理', portal_res)
+        self.assertNotIn('正在加载', portal_res)
+
+
+class ToolSafetyAndSmoothingTests(unittest.TestCase):
+    def test_timeout_call_cap_external_taint_and_two_phase_destructive_confirmation(self):
+        import re
+        import time
+        from app.chat.tool_context import ChatToolContext, PendingWriteConfirmations, chat_tool_context
+        from tools_config.registry import register_tool
+
+        executed = []
+
+        def slow_tool(query: str) -> str:
+            time.sleep(0.25)
+            return query
+
+        slow = register_tool(
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'slow_lookup',
+                    'description': 'slow test tool',
+                    'parameters': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']},
+                },
+            },
+            slow_tool,
+            risk_level='read',
+            timeout_seconds=0.05,
+        )
+        # 1. 单工具硬超时平滑降级，不抛异常中断聊天
+        self.assertIn('超时', slow.invoke({'query': 'hello'}))
+
+        def ext_reader(url: str) -> str:
+            return f'fetched:{url}'
+
+        def add_memo(content: str) -> str:
+            executed.append(('add', content))
+            return f'已添加：{content}'
+
+        def delete_memo(memo_id: int, confirm_token: str = '') -> str:
+            executed.append(('delete', memo_id))
+            return f'已删除：{memo_id}'
+
+        reader_tool = register_tool(
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'mock_read_url',
+                    'description': 'read external url',
+                    'parameters': {'type': 'object', 'properties': {'url': {'type': 'string'}}, 'required': ['url']},
+                },
+            },
+            ext_reader,
+            risk_level='read',
+            taints_context=True,
+            timeout_seconds=1.0,
+        )
+        safe_write_tool = register_tool(
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'add_memo',
+                    'description': 'add memo',
+                    'parameters': {'type': 'object', 'properties': {'content': {'type': 'string'}}, 'required': ['content']},
+                },
+            },
+            add_memo,
+            risk_level='write_safe',
+            timeout_seconds=None,
+        )
+        destructive_tool = register_tool(
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'delete_memo',
+                    'description': 'delete memo',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'memo_id': {'type': 'integer'},
+                            'confirm_token': {'type': 'string', 'default': ''},
+                        },
+                        'required': ['memo_id'],
+                    },
+                },
+            },
+            delete_memo,
+            risk_level='write_destructive',
+            timeout_seconds=None,
+            describe_action=lambda args: f"删除备忘 #{args['memo_id']}",
+        )
+
+        confirmations = PendingWriteConfirmations()
+
+        # 2. 同一轮读取外部网页后（external_tainted=True），拦截一切写操作防提示词注入
+        tainted_ctx = ChatToolContext(user_id=7, max_tool_calls=4, confirmations=confirmations)
+        with chat_tool_context(tainted_ctx):
+            self.assertEqual(reader_tool.invoke({'url': 'https://example.com'}), 'fetched:https://example.com')
+            self.assertTrue(tainted_ctx.external_tainted)
+            blocked_safe = safe_write_tool.invoke({'content': '被网页注入的备忘'})
+            blocked_del = destructive_tool.invoke({'memo_id': 9})
+        self.assertIn('安全拦截', blocked_safe)
+        self.assertIn('安全拦截', blocked_del)
+        self.assertEqual(executed, [])
+
+        # 3. 破坏性写操作两阶段确认：首轮挂起返回 confirm_token，篡改参数或其他账号不可冒用，下一轮匹配确认后才执行一次
+        turn1_ctx = ChatToolContext(user_id=7, confirmations=confirmations)
+        with chat_tool_context(turn1_ctx):
+            prompt_confirm = destructive_tool.invoke({'memo_id': 42})
+        self.assertEqual(executed, [])
+        self.assertIn('待确认操作', prompt_confirm)
+        token_match = re.search(r'confirm_token="(cfm_[0-9a-f]+)"', prompt_confirm)
+        self.assertIsNotNone(token_match)
+        token = token_match.group(1)
+
+        # 其他账号冒用同一 token 无效
+        other_user_ctx = ChatToolContext(user_id=8, confirmations=confirmations)
+        with chat_tool_context(other_user_ctx):
+            wrong_user_res = destructive_tool.invoke({'memo_id': 42, 'confirm_token': token})
+        self.assertIn('待确认操作', wrong_user_res)
+        self.assertEqual(executed, [])
+
+        # 同一账号但篡改了 memo_id 参数也无效
+        tamper_ctx = ChatToolContext(user_id=7, confirmations=confirmations)
+        with chat_tool_context(tamper_ctx):
+            tampered_res = destructive_tool.invoke({'memo_id': 99, 'confirm_token': token})
+        self.assertIn('待确认操作', tampered_res)
+        self.assertEqual(executed, [])
+
+        # 用户下一轮确认后，携带原参数与 token 成功执行，且 token 一次性失效不可重放
+        turn2_ctx = ChatToolContext(user_id=7, confirmations=confirmations)
+        with chat_tool_context(turn2_ctx):
+            ok_res = destructive_tool.invoke({'memo_id': 42, 'confirm_token': token})
+            replay_res = destructive_tool.invoke({'memo_id': 42, 'confirm_token': token})
+        self.assertEqual(ok_res, '已删除：42')
+        self.assertEqual(executed, [('delete', 42)])
+        self.assertIn('待确认操作', replay_res)
+
+        # 4. 单轮工具调用总次数上限防死循环
+        capped_ctx = ChatToolContext(user_id=7, max_tool_calls=2, confirmations=confirmations)
+        with chat_tool_context(capped_ctx):
+            self.assertIn('已添加', safe_write_tool.invoke({'content': '第一条'}))
+            self.assertIn('已添加', safe_write_tool.invoke({'content': '第二条'}))
+            third = safe_write_tool.invoke({'content': '第三条'})
+        self.assertIn('次数已达上限', third)
+        self.assertEqual(len(executed), 3)
+
+    def test_optional_tool_parameters_accept_explicit_null_from_non_deepseek_models(self):
+        tools = {t.name: t for t in CHAT_TOOLS}
+        # 其他厂商模型常对未使用的可选参数传 null，注册表应自动回退为默认参数而不报 ValidationError
+        time_res = tools['get_current_time'].invoke({'operation': None, 'timezone': None})
+        self.assertRegex(time_res, r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+        hist_res = tools['search_chat_history'].invoke({'keywords': None, 'start_date': None, 'end_date': None})
+        self.assertIn('请提供至少一个搜索关键词', hist_res)
+        # 必填参数传 null 仍必须触发 ValidationError
+        with self.assertRaises(ValidationError):
+            tools['get_weather'].invoke({'city': None, 'days': None})
+
+
+class SearxngWebSearchToolTests(unittest.TestCase):
+    def setUp(self):
+        from tools_config.search_tool.searxng import searxng_router
+        self.router = searxng_router
+        self.router.reset_state()
+        self.addCleanup(self.router.reset_state)
+        self.tool = {t.name: t for t in CHAT_TOOLS}['web_search']
+
+    def test_auto_region_switches_engines_caches_results_and_marks_external_taint(self):
+        import httpx
+        from app.chat.tool_context import ChatToolContext, chat_tool_context
+        from app.system_config import SearchConfig
+        from tools_config.search_tool import searxng as searx_mod
+
+        real_client = httpx.Client
+        seen_requests: list[tuple[str, dict]] = []
+
+        def fake_client(*args, **kwargs):
+            def handler(request: httpx.Request):
+                url_str = str(request.url)
+                if 'generate_204' in url_str:
+                    # 模拟国内无代理网络：Google 连通性探测不可达
+                    raise httpx.ConnectTimeout('blocked')
+                seen_requests.append((url_str.split('?', 1)[0], dict(request.url.params)))
+                return httpx.Response(200, json={
+                    'results': [
+                        {
+                            'title': '<b>周末档新片</b>上映排片表',
+                            'url': 'https://movie.example.com/weekend/',
+                            'content': '本周五共有 <em>3 部</em>动画与悬疑新片上映。',
+                            'publishedDate': '2026-11-27',
+                        },
+                        {
+                            # 重复 URL 应自动去重
+                            'title': '重复条目',
+                            'url': 'https://movie.example.com/weekend',
+                            'content': '重复内容',
+                        },
+                    ],
+                    'unresponsive_engines': [],
+                })
+
+            return real_client(transport=httpx.MockTransport(handler))
+
+        cfg = SearchConfig(
+            urls=['http://127.0.0.1:8080'],
+            region='auto',
+            cache_ttl_seconds=600,
+        )
+        ctx = ChatToolContext(user_id=9, search_config=cfg)
+        with patch.object(searx_mod.httpx, 'Client', side_effect=fake_client), chat_tool_context(ctx):
+            first = self.tool.invoke({'query': '周末新上映电影', 'time_range': 'week'})
+            # 第二次相同查询应直接命中内存缓存，不再发 HTTP 请求，同时受单轮搜索次数上限保护
+            second = self.tool.invoke({'query': '周末新上映电影', 'time_range': 'week'})
+            third = self.tool.invoke({'query': '另一部电影', 'time_range': None})
+
+        self.assertTrue(ctx.external_tainted)
+        self.assertEqual(len(seen_requests), 1)
+        endpoint, params = seen_requests[0]
+        self.assertEqual(endpoint, 'http://127.0.0.1:8080/search')
+        self.assertEqual(params['engines'], cfg.cn_engines)
+        self.assertEqual(params['time_range'], 'week')
+        self.assertEqual(params['language'], 'zh-CN')
+        self.assertIn('1. 周末档新片上映排片表（2026-11-27）', first)
+        self.assertIn('3 部', first)
+        self.assertNotIn('<b>', first)
+        self.assertNotIn('重复条目', first)
+        self.assertEqual(first, second)
+        self.assertIn('次数已够用', third)
+
+    def test_multi_server_auto_classification_latency_selection_and_failover(self):
+        import httpx
+        from app.chat.tool_context import ChatToolContext, chat_tool_context
+        from app.system_config import SearchConfig
+        from tools_config.search_tool import searxng as searx_mod
+
+        # 模拟机器处于国内网络，同时配置了国内节点（首轮故障 502）与海外节点（自动探测出支持 Google）
+        real_client = httpx.Client
+        search_calls: list[tuple[str, str]] = []
+        cn_failed_once = {'done': False}
+
+        def fake_client(*args, **kwargs):
+            def handler(request: httpx.Request):
+                host = request.url.host
+                path = request.url.path
+                params = dict(request.url.params)
+                if host == 'www.google.com':
+                    raise httpx.ConnectTimeout('domestic network')
+                if path == '/healthz':
+                    return httpx.Response(200, text='OK')
+                if host == 'searx-hk.example.org' and params.get('q') == 'wikipedia' and params.get('engines') == 'google':
+                    # 远程节点自身在海外，Google 探测正常返回结果
+                    return httpx.Response(200, json={
+                        'results': [{'title': 'Wikipedia', 'url': 'https://www.wikipedia.org', 'content': 'ok'}],
+                        'unresponsive_engines': [],
+                    })
+                if host == 'searx.example.cn':
+                    search_calls.append((host, params.get('engines', '')))
+                    if not cn_failed_once['done']:
+                        cn_failed_once['done'] = True
+                        return httpx.Response(502, text='bad gateway')
+                    return httpx.Response(200, json={'results': [], 'unresponsive_engines': []})
+                if host == 'searx-hk.example.org':
+                    search_calls.append((host, params.get('engines', '')))
+                    return httpx.Response(200, json={
+                        'results': [{'title': 'Python 3.14 Release', 'url': 'https://docs.python.org/3.14/', 'content': 'New features'}],
+                        'unresponsive_engines': [],
+                    })
+                return httpx.Response(404)
+
+            return real_client(transport=httpx.MockTransport(handler))
+
+        cfg = SearchConfig(
+            urls=['https://searx-hk.example.org', 'https://searx.example.cn'],
+            region='auto',
+            cache_ttl_seconds=0,
+        )
+        ctx = ChatToolContext(user_id=3, search_config=cfg)
+        with patch.object(searx_mod.httpx, 'Client', side_effect=fake_client), chat_tool_context(ctx):
+            output = self.tool.invoke({'query': 'Python 3.14'})
+
+        # 国内网络优先选择 .cn 国内节点并传 cn_engines；该节点 502 后自动切换海外节点并自动改用 global_engines
+        self.assertEqual(search_calls, [
+            ('searx.example.cn', cfg.cn_engines),
+            ('searx-hk.example.org', cfg.global_engines),
+        ])
+        self.assertIn('Python 3.14 Release', output)
+
+    def test_disabled_or_unreachable_searxng_degrades_gracefully(self):
+        import httpx
+        from app.chat.tool_context import ChatToolContext, chat_tool_context
+        from app.system_config import SearchConfig, SystemConfig, format_system_config
+        from tools_config.search_tool import searxng as searx_mod
+
+        # 验证 system_config.example.json 与 SystemConfig 默认格式化完全一致
+        example_text = (_imports.BACKEND_ROOT / 'system_config.example.json').read_text(encoding='utf-8').replace('\r\n', '\n')
+        self.assertEqual(format_system_config(SystemConfig()), example_text)
+
+        disabled_ctx = ChatToolContext(user_id=1, search_config=SearchConfig(enabled=False))
+        with chat_tool_context(disabled_ctx):
+            disabled_msg = self.tool.invoke({'query': '今日新闻'})
+        self.assertIn('未开启', disabled_msg)
+
+        real_client = httpx.Client
+
+        def broken_client(*args, **kwargs):
+            def fail_handler(_request: httpx.Request):
+                raise httpx.ConnectError('refused')
+
+            return real_client(transport=httpx.MockTransport(fail_handler))
+
+        offline_ctx = ChatToolContext(user_id=1, search_config=SearchConfig(enabled=True, cache_ttl_seconds=0))
+        with patch.object(searx_mod.httpx, 'Client', side_effect=broken_client), chat_tool_context(offline_ctx):
+            offline_msg = self.tool.invoke({'query': '今日新闻'})
+        self.assertIn('暂不可用', offline_msg)
