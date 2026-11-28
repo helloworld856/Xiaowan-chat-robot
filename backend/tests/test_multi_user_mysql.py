@@ -250,16 +250,12 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
             def response(content):
                 return {'messages': [SimpleNamespace(content=content, response_metadata={})]}
 
-            def analyze(payload):
+            def reply(payload, label):
                 prompt = payload['messages'][0]['content']
                 if 'wait for B' in prompt:
                     started.set()
                     if not release.wait(10):
                         raise TimeoutError('B did not finish independently')
-                return response('{"intent":"test","emotion":"平静","answer":"日常互动"}')
-
-            def reply(payload, label):
-                prompt = payload['messages'][0]['content']
                 if 'message B' in prompt:
                     self.assertNotIn('wait for B', prompt)
                 return response(json.dumps({'reply': [f'{label}|||标记', '第二条回复']}, ensure_ascii=False))
@@ -271,8 +267,10 @@ class MultiUserMySQLTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(base_url, 'https://api.deepseek.com')
                 self.assertIn(key, (admin_key, personal_key))
                 self.assertEqual(adapter, 'openai')
-                return (SimpleNamespace(invoke=analyze), SimpleNamespace(invoke=lambda _: response('summary')),
-                        SimpleNamespace(invoke=lambda payload, *, config: reply(payload, name)))
+                return (
+                    SimpleNamespace(invoke=lambda _: response('summary')),
+                    SimpleNamespace(invoke=lambda payload, *, config=None: reply(payload, name)),
+                )
 
             with patch.object(main, 'settings_store', model_settings), \
                     patch.dict(os.environ, {'DEEPSEEK_API_KEY': admin_key}), \
