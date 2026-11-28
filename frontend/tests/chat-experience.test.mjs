@@ -154,6 +154,7 @@ test('useChat supports image/document uploads, friendly non-vision model guard, 
     let chatCalls = [];
     let uploadedPayloads = [];
     let pendingChatResolve;
+    let reconcileHistoryCalls = 0;
 
     class AuthRequiredError extends Error {}
     class CancelledRequestError extends Error {}
@@ -179,10 +180,17 @@ test('useChat supports image/document uploads, friendly non-vision model guard, 
             chatAPI: (text, options) => {
                 chatCalls.push({text, options});
                 if (pendingChatResolve === 'hang') return new Promise(() => {});
+                if (pendingChatResolve === 'stream_unsaved_error') {
+                    options?.onBubble?.('等我查一下哈');
+                    return Promise.reject(new ChatNotStartedError('AI 处理失败，请稍后重试', true));
+                }
                 return Promise.resolve({response: ['收到啦'], conversation_round: chatCalls.length, saved: true});
             },
             cancelChatAPI: async () => ({ok: true, cancelled: true}),
-            historyAPI: async () => ({history_messages: []}),
+            historyAPI: async () => {
+                reconcileHistoryCalls++;
+                return {history_messages: []};
+            },
         },
         '../ts/global_config.ts': {inputLimits: {max_message_chars: 8000}},
         '../ts/chat_format.ts': chatFormat,
@@ -238,6 +246,16 @@ test('useChat supports image/document uploads, friendly non-vision model guard, 
     state.draft.value = '放大看看胡须';
     await state.sendMessage();
     assert.deepEqual(chatCalls.at(-1).options.quotedAttachmentIds, ['att_0000000000000002']);
+
+    // 3. 流式未落库错误（ChatNotStartedError）直接清理半截气泡并标记可重试，不触发“此消息的发送结果仍需确认”对账弹窗
+    pendingChatResolve = 'stream_unsaved_error';
+    state.draft.value = '帮我查今天天气';
+    await state.sendMessage();
+    const failedTurn = state.entries.value.at(-1);
+    assert.equal(reconcileHistoryCalls, 0);
+    assert.deepEqual(failedTurn.replies, []);
+    assert.equal(failedTurn.failure?.retryable, true);
+    assert.equal(alerts.at(-1), 'AI 处理失败，请稍后重试');
 });
 
 test('ChatComposer switches between send and stop, and displays/clears quote bar', async () => {

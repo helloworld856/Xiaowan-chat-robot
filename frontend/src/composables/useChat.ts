@@ -433,6 +433,7 @@ export function useChat(options: ChatOptions) {
         let responsePending = true;
         let firstDelayDone = false;
         let streamActive = true;
+        let streamFailed = false;
         let streamedCount = 0;
         let lastBubbleShownAt = 0;
         let postBubbleTypingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -448,10 +449,10 @@ export function useChat(options: ChatOptions) {
 
         const schedulePostBubbleTyping = () => {
             clearPostBubbleTyping();
-            if (!streamActive || pendingStreamBubbles.length > 0) return;
+            if (!streamActive || streamFailed || pendingStreamBubbles.length > 0) return;
             postBubbleTypingTimer = setTimeout(() => {
                 postBubbleTypingTimer = undefined;
-                if (!streamActive || pendingStreamBubbles.length > 0 || control.cancelled || !isCurrent()) return;
+                if (!streamActive || streamFailed || pendingStreamBubbles.length > 0 || control.cancelled || !isCurrent()) return;
                 isTyping.value = true;
                 options.scrollAfterRender(false);
             }, 450);
@@ -459,17 +460,17 @@ export function useChat(options: ChatOptions) {
 
         const firstReplyDelay = waitForReplyDelay(firstReplyDelayMs).then(() => {
             firstDelayDone = true;
-            if (!responsePending || control.cancelled || !isCurrent()) return;
+            if (!responsePending || streamFailed || control.cancelled || !isCurrent()) return;
             isTyping.value = true;
             options.scrollAfterRender(false);
         });
 
         async function drainStreamBubbles() {
             while (pendingStreamBubbles.length > 0) {
-                if (!isCurrent() || control.cancelled) return;
+                if (!isCurrent() || control.cancelled || streamFailed) return;
                 if (streamedCount === 0 && !firstDelayDone) {
                     await firstReplyDelay;
-                    if (!isCurrent() || control.cancelled) return;
+                    if (!isCurrent() || control.cancelled || streamFailed) return;
                 }
                 const nextText = pendingStreamBubbles.shift()!;
                 const prevText = turn.replies.length > 0 ? turn.replies[turn.replies.length - 1] : null;
@@ -482,7 +483,7 @@ export function useChat(options: ChatOptions) {
                         isTyping.value = true;
                         options.scrollAfterRender(false);
                         await waitForReplyDelay(remainingGapMs);
-                        if (!isCurrent() || control.cancelled) return;
+                        if (!isCurrent() || control.cancelled || streamFailed) return;
                     }
                 }
                 clearPostBubbleTyping();
@@ -492,17 +493,17 @@ export function useChat(options: ChatOptions) {
                 lastBubbleShownAt = performance.now();
                 options.scrollAfterRender(false);
                 if (streamedCount === 1) recordFirstReplyTiming(startedAt, isCurrent);
-                if (pendingStreamBubbles.length === 0 && streamActive) {
+                if (pendingStreamBubbles.length === 0 && streamActive && !streamFailed) {
                     schedulePostBubbleTyping();
                 }
             }
         }
 
         const ensureDrainRunning = () => {
-            if (!drainPromise && pendingStreamBubbles.length > 0) {
+            if (!drainPromise && pendingStreamBubbles.length > 0 && !streamFailed) {
                 drainPromise = drainStreamBubbles().finally(() => {
                     drainPromise = null;
-                    if (pendingStreamBubbles.length > 0 && isCurrent() && !control.cancelled) {
+                    if (pendingStreamBubbles.length > 0 && isCurrent() && !control.cancelled && !streamFailed) {
                         ensureDrainRunning();
                     }
                 });
@@ -510,7 +511,7 @@ export function useChat(options: ChatOptions) {
         };
 
         const handleStreamedBubble = (text: string) => {
-            if (!isCurrent() || control.cancelled || !text.trim()) return;
+            if (!isCurrent() || control.cancelled || streamFailed || !text.trim()) return;
             responsePending = false;
             pendingStreamBubbles.push(text);
             ensureDrainRunning();
@@ -526,9 +527,12 @@ export function useChat(options: ChatOptions) {
                     if (activeControl === control) cancellable.value = false;
                 });
             } catch (error) {
+                streamFailed = true;
+                pendingStreamBubbles.length = 0;
                 clearPostBubbleTyping();
-                if (!isCurrent() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
                 finishReplyDelay?.();
+                if (drainPromise) await drainPromise;
+                if (!isCurrent() || error instanceof AuthRequiredError || error instanceof CancelledRequestError) return;
                 isTyping.value = false;
                 if (control.cancelled || isUserCancelled(error)) {
                     onAbortRestore();
@@ -580,6 +584,7 @@ export function useChat(options: ChatOptions) {
             },
             async (error, isCurrent) => {
                 if (error instanceof ChatNotStartedError) {
+                    turn.replies.splice(0, turn.replies.length);
                     turn.failure = error;
                     options.showAlert(error.message);
                 } else {

@@ -7,6 +7,7 @@ from app.account_logging import log_event, logger
 
 
 MAX_FORECAST_DAYS = 7
+WEATHER_HTTP_TIMEOUT = (2.5, 3.5)
 
 # Open-Meteo 使用 WMO 天气代码，这里换成日常说法。
 WEATHER_CODES = {
@@ -97,7 +98,7 @@ def get_weather(city: str, days: int = 0) -> str:
         geo = requests.get(
             "https://geocoding-api.open-meteo.com/v1/search",
             params={"name": city, "count": 1, "language": "zh"},
-            timeout=8,
+            timeout=WEATHER_HTTP_TIMEOUT,
         )
         geo.raise_for_status()
         locations = geo.json()
@@ -129,7 +130,7 @@ def get_weather(city: str, days: int = 0) -> str:
         }
         if days:
             params.update(daily=DAILY_FIELDS, forecast_days=days)
-        weather = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=8)
+        weather = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=WEATHER_HTTP_TIMEOUT)
         weather.raise_for_status()
         payload = weather.json()
         parts = [f"地点：{name}{country_suffix}", *_format_current(payload["current"])]

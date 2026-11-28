@@ -171,7 +171,11 @@ async function requestChatStream(payload: ChatRequestPayload,
         } else if (eventName === 'cancelled') {
             throw new UserCancelledChatError();
         } else if (eventName === 'error') {
-            throw new Error(typeof parsed?.message === 'string' ? parsed.message : '聊天请求失败');
+            const message = typeof parsed?.message === 'string' ? parsed.message : 'AI 处理失败，请稍后重试';
+            if (parsed?.saved === false) {
+                throw new ChatNotStartedError(message, true);
+            }
+            throw new Error(message);
         }
     };
 

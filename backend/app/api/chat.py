@@ -134,6 +134,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         raise HTTPException(500, 'AI 处理失败，请稍后重试') from None
 
     async def events():
+        # 立即刷出首帧注释以触发 Uvicorn 与反向代理立刻下发 200 响应头，避免长工具链期间缓冲挂起。
+        yield ': open\n\n'
         while True:
             try:
                 kind, payload = await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT_SECONDS)
@@ -155,7 +157,11 @@ async def chat_stream(req: ChatRequest, request: Request):
                 return
             elif kind == 'error':
                 logger.error('chat stream execution failed: %s', type(payload).__name__)
-                yield _sse_event('error', {'message': _friendly_stream_error(payload, had_images=has_media)})
+                yield _sse_event('error', {
+                    'code': 'CHAT_STREAM_FAILED',
+                    'saved': False,
+                    'message': _friendly_stream_error(payload, had_images=has_media),
+                })
                 return
 
     return StreamingResponse(

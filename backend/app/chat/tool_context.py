@@ -94,7 +94,7 @@ class ChatToolContext:
     connection: Callable[[], Any] | None = None
     window_start_round: int | None = None
     search_config: Any = None
-    max_tool_calls: int = 4
+    max_tool_calls: int = 6
     max_web_searches: int = 2
     max_safe_writes: int = 2
     tool_calls: int = 0

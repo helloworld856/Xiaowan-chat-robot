@@ -241,3 +241,23 @@ test('chatAPI stream resolves immediately upon event: done even if reverse proxy
     assert.equal(res.conversation_round, 0);
     assert.equal(res.saved, true);
 });
+
+test('chatAPI stream maps event: error with saved:false to retryable ChatNotStartedError instead of uncertain network error', async t => {
+    const encoder = new TextEncoder();
+    t.mock.method(globalThis, 'fetch', async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode(
+                    ': open\n\n'
+                    + 'event: error\ndata: {"code":"CHAT_STREAM_FAILED","saved":false,"message":"AI 处理失败，请稍后重试"}\n\n'
+                ));
+                controller.close();
+            },
+        });
+        return new Response(stream, {status: 200, headers: {'content-type': 'text/event-stream'}});
+    });
+    await assert.rejects(
+        api.chatAPI('查天气', {onBubble() {}}),
+        error => error instanceof api.ChatNotStartedError && error.retryable === true && error.message === 'AI 处理失败，请稍后重试',
+    );
+});

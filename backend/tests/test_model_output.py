@@ -288,3 +288,57 @@ class ModelOutputTests(unittest.TestCase):
         self.assertEqual(streamed, ['这个圆环把塔正好框在中间，构图太绝了'])
         self.assertEqual(result['ai_response'], streamed)
         self.assertEqual(result['total_tokens'], 3224 + 3480)
+
+    def test_generate_recovers_from_graph_recursion_error_and_strips_dangling_tool_calls(self):
+        from app.chat.state import create_initial_state
+
+        class GraphRecursionError(RuntimeError):
+            pass
+
+        state = create_initial_state()
+        state['user_input'] = '帮我查下今天杭州天气和新闻'
+        memory = SimpleNamespace(history_cache=[], abstract_cache='', has_older_history=False, next_round=0,
+                                 refresh_if_needed=lambda: None)
+
+        class MultiToolRecursionAgent:
+            def __init__(self):
+                self.calls = []
+
+            def stream(self, payload, config=None, stream_mode=None):
+                self.calls.append((payload, config))
+                if len(self.calls) == 1:
+                    self.first_limit = config['recursion_limit']
+                    yield ('messages', (SimpleNamespace(type='ToolMessage', content='1. 杭州今日多云 16~22°C'), {}))
+                    yield ('values', {'messages': payload['messages'] + [
+                        SimpleNamespace(type='ai', content='', tool_calls=[{'id': 'call_ok', 'name': 'web_search'}]),
+                        SimpleNamespace(type='tool', tool_call_id='call_ok', content='1. 杭州今日多云 16~22°C'),
+                        # 模拟步数耗尽时残留未配对 ToolMessage 的尾随 tool_calls，补救前应自动剥离避免 400
+                        SimpleNamespace(type='ai', content='', tool_calls=[{'id': 'call_dangling', 'name': 'read_url'}]),
+                    ]})
+                    raise GraphRecursionError('Recursion limit reached')
+                yield ('messages', (SimpleNamespace(
+                    type='AIMessageChunk', content='{"reply":["杭州今天多云，16到22度挺舒服的"]}',
+                    usage_metadata={'total_tokens': 512},
+                    response_metadata={'finish_reason': 'stop'},
+                ), {}))
+
+        streamed = []
+        agent = MultiToolRecursionAgent()
+        result = nodes.generate(
+            nodes.start_node(state, memory, ()),
+            memory,
+            (None, agent),
+            on_bubble=streamed.append,
+        )
+        self.assertGreaterEqual(agent.first_limit, 20)
+        self.assertEqual(len(agent.calls), 2)
+        recovery_msgs = agent.calls[1][0]['messages']
+        # 确认已完成的工具结果保留，而未配对的悬空 tool_calls 已被剥离
+        self.assertTrue(any(getattr(m, 'tool_call_id', None) == 'call_ok' for m in recovery_msgs))
+        self.assertFalse(any(
+            getattr(m, 'type', None) == 'ai'
+            and any(tc.get('id') == 'call_dangling' for tc in (getattr(m, 'tool_calls', None) or ()))
+            for m in recovery_msgs
+        ))
+        self.assertEqual(streamed, ['杭州今天多云，16到22度挺舒服的'])
+        self.assertEqual(result['ai_response'], streamed)

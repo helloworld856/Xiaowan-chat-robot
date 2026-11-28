@@ -362,6 +362,7 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                 res = await client.post('/chat/stream', json={'user_input': '你好呀', 'turn_id': 'turn_stream_1'})
                 self.assertEqual(res.status_code, 200)
                 self.assertIn('text/event-stream', res.headers['content-type'])
+                self.assertTrue(res.text.startswith(': open\n\n'))
                 self.assertIn(': ping', res.text)
                 events = []
                 for block in res.text.strip().split('\n\n'):
@@ -384,3 +385,13 @@ class ChatRequestTests(unittest.IsolatedAsyncioTestCase):
                         'created_at': 1764150000900,
                     }),
                 ])
+
+                def fail_run(self_, entry, user, text, *, on_bubble=None):
+                    raise RuntimeError('upstream failure')
+
+                with patch.object(ChatSessions, '_run', fail_run):
+                    err_res = await client.post('/chat/stream', json={'user_input': '会失败的消息', 'turn_id': 'turn_stream_err'})
+                self.assertEqual(err_res.status_code, 200)
+                self.assertTrue(err_res.text.startswith(': open\n\n'))
+                self.assertIn('event: error', err_res.text)
+                self.assertIn('"saved": false', err_res.text)
